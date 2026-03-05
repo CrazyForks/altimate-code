@@ -56,6 +56,7 @@ export const McpCommand = cmd({
   builder: (yargs) =>
     yargs
       .command(McpAddCommand)
+      .command(McpRemoveCommand)
       .command(McpListCommand)
       .command(McpAuthCommand)
       .command(McpLogoutCommand)
@@ -398,6 +399,25 @@ async function resolveConfigPath(baseDir: string, global = false) {
   return candidates[0]
 }
 
+async function removeMcpFromConfig(name: string, configPath: string) {
+  if (!(await Filesystem.exists(configPath))) {
+    return false
+  }
+
+  const text = await Filesystem.readText(configPath)
+  const edits = modify(text, ["mcp", name], undefined, {
+    formattingOptions: { tabSize: 2, insertSpaces: true },
+  })
+
+  if (edits.length === 0) {
+    return false
+  }
+
+  const result = applyEdits(text, edits)
+  await Filesystem.write(configPath, result)
+  return true
+}
+
 async function addMcpToConfig(name: string, mcpConfig: Config.Mcp, configPath: string) {
   let text = "{}"
   if (await Filesystem.exists(configPath)) {
@@ -633,6 +653,49 @@ export const McpAddCommand = cmd({
         }
 
         prompts.outro("MCP server added successfully")
+      },
+    })
+  },
+})
+
+export const McpRemoveCommand = cmd({
+  command: "remove <name>",
+  aliases: ["rm"],
+  describe: "remove an MCP server",
+  builder: (yargs) =>
+    yargs
+      .positional("name", {
+        describe: "name of the MCP server to remove",
+        type: "string",
+        demandOption: true,
+      })
+      .option("global", { type: "boolean", describe: "Remove from global config", default: false }),
+  async handler(args) {
+    await Instance.provide({
+      directory: process.cwd(),
+      async fn() {
+        const configPath = await resolveConfigPath(
+          args.global ? Global.Path.config : Instance.worktree,
+          args.global,
+        )
+
+        const removed = await removeMcpFromConfig(args.name, configPath)
+        if (removed) {
+          console.log(`MCP server "${args.name}" removed from ${configPath}`)
+        } else {
+          // Try the other scope
+          const otherPath = await resolveConfigPath(
+            args.global ? Instance.worktree : Global.Path.config,
+            !args.global,
+          )
+          const removedOther = await removeMcpFromConfig(args.name, otherPath)
+          if (removedOther) {
+            console.log(`MCP server "${args.name}" removed from ${otherPath}`)
+          } else {
+            console.error(`MCP server "${args.name}" not found in any config`)
+            process.exit(1)
+          }
+        }
       },
     })
   },
