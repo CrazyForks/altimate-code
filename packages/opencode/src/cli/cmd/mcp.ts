@@ -418,10 +418,69 @@ async function addMcpToConfig(name: string, mcpConfig: Config.Mcp, configPath: s
 export const McpAddCommand = cmd({
   command: "add",
   describe: "add an MCP server",
-  async handler() {
+  builder: (yargs) =>
+    yargs
+      .option("name", { type: "string", describe: "MCP server name" })
+      .option("type", { type: "string", describe: "Server type", choices: ["local", "remote"] })
+      .option("url", { type: "string", describe: "Server URL (for remote type)" })
+      .option("command", { type: "string", describe: "Command to run (for local type)" })
+      .option("header", { type: "array", string: true, describe: "HTTP headers as key=value (repeatable)" })
+      .option("no-oauth", { type: "boolean", describe: "Disable OAuth" })
+      .option("global", { type: "boolean", describe: "Add to global config", default: false }),
+  async handler(args) {
     await Instance.provide({
       directory: process.cwd(),
       async fn() {
+        // Non-interactive mode: all required args provided via flags
+        if (args.name && args.type) {
+          const configPath = await resolveConfigPath(
+            args.global ? Global.Path.config : Instance.worktree,
+            args.global,
+          )
+
+          let mcpConfig: Config.Mcp
+
+          if (args.type === "local") {
+            if (!args.command) {
+              console.error("--command is required for local type")
+              process.exit(1)
+            }
+            mcpConfig = {
+              type: "local",
+              command: args.command.split(" "),
+            }
+          } else {
+            if (!args.url) {
+              console.error("--url is required for remote type")
+              process.exit(1)
+            }
+
+            const headers: Record<string, string> = {}
+            if (args.header) {
+              for (const h of args.header) {
+                const eq = h.indexOf("=")
+                if (eq === -1) {
+                  console.error(`Invalid header format: ${h} (expected key=value)`)
+                  process.exit(1)
+                }
+                headers[h.substring(0, eq)] = h.substring(eq + 1)
+              }
+            }
+
+            mcpConfig = {
+              type: "remote",
+              url: args.url,
+              ...(args["no-oauth"] ? { oauth: false as const } : {}),
+              ...(Object.keys(headers).length > 0 ? { headers } : {}),
+            }
+          }
+
+          await addMcpToConfig(args.name, mcpConfig, configPath)
+          console.log(`MCP server "${args.name}" added to ${configPath}`)
+          return
+        }
+
+        // Interactive mode: existing behavior
         UI.empty()
         prompts.intro("Add MCP server")
 
