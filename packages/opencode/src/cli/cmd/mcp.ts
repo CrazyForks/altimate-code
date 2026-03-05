@@ -425,7 +425,7 @@ export const McpAddCommand = cmd({
       .option("url", { type: "string", describe: "Server URL (for remote type)" })
       .option("command", { type: "string", describe: "Command to run (for local type)" })
       .option("header", { type: "array", string: true, describe: "HTTP headers as key=value (repeatable)" })
-      .option("no-oauth", { type: "boolean", describe: "Disable OAuth" })
+      .option("oauth", { type: "boolean", describe: "Enable OAuth", default: true })
       .option("global", { type: "boolean", describe: "Add to global config", default: false }),
   async handler(args) {
     await Instance.provide({
@@ -470,7 +470,7 @@ export const McpAddCommand = cmd({
             mcpConfig = {
               type: "remote",
               url: args.url,
-              ...(args["no-oauth"] ? { oauth: false as const } : {}),
+              ...(!args.oauth ? { oauth: false as const } : {}),
               ...(Object.keys(headers).length > 0 ? { headers } : {}),
             }
           }
