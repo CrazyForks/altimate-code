@@ -453,9 +453,10 @@ export const McpAddCommand = cmd({
       async fn() {
         // Non-interactive mode: all required args provided via flags
         if (args.name && args.type) {
+          const useGlobal = args.global || Instance.project.vcs !== "git"
           const configPath = await resolveConfigPath(
-            args.global ? Global.Path.config : Instance.worktree,
-            args.global,
+            useGlobal ? Global.Path.config : Instance.worktree,
+            useGlobal,
           )
 
           let mcpConfig: Config.Mcp
@@ -674,9 +675,10 @@ export const McpRemoveCommand = cmd({
     await Instance.provide({
       directory: process.cwd(),
       async fn() {
+        const useGlobal = args.global || Instance.project.vcs !== "git"
         const configPath = await resolveConfigPath(
-          args.global ? Global.Path.config : Instance.worktree,
-          args.global,
+          useGlobal ? Global.Path.config : Instance.worktree,
+          useGlobal,
         )
 
         const removed = await removeMcpFromConfig(args.name, configPath)
@@ -685,8 +687,8 @@ export const McpRemoveCommand = cmd({
         } else {
           // Try the other scope
           const otherPath = await resolveConfigPath(
-            args.global ? Instance.worktree : Global.Path.config,
-            !args.global,
+            useGlobal ? Instance.worktree : Global.Path.config,
+            !useGlobal,
           )
           const removedOther = await removeMcpFromConfig(args.name, otherPath)
           if (removedOther) {
