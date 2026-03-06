@@ -453,6 +453,11 @@ export const McpAddCommand = cmd({
       async fn() {
         // Non-interactive mode: all required args provided via flags
         if (args.name && args.type) {
+          if (!args.name.trim()) {
+            console.error("MCP server name cannot be empty")
+            process.exit(1)
+          }
+
           const useGlobal = args.global || Instance.project.vcs !== "git"
           const configPath = await resolveConfigPath(
             useGlobal ? Global.Path.config : Instance.worktree,
@@ -462,17 +467,21 @@ export const McpAddCommand = cmd({
           let mcpConfig: Config.Mcp
 
           if (args.type === "local") {
-            if (!args.command) {
+            if (!args.command?.trim()) {
               console.error("--command is required for local type")
               process.exit(1)
             }
             mcpConfig = {
               type: "local",
-              command: args.command.split(" "),
+              command: args.command.trim().split(/\s+/).filter(Boolean),
             }
           } else {
             if (!args.url) {
               console.error("--url is required for remote type")
+              process.exit(1)
+            }
+            if (!URL.canParse(args.url)) {
+              console.error(`Invalid URL: ${args.url}`)
               process.exit(1)
             }
 
