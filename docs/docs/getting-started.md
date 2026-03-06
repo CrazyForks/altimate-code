@@ -1,10 +1,10 @@
 # Getting Started
 
-## Why altimate-code?
+## Why altimate?
 
-Unlike general-purpose coding agents, altimate-code is built for data teams:
+Unlike general-purpose coding agents, altimate is built for data teams:
 
-| Capability | General coding agents | altimate-code |
+| Capability | General coding agents | altimate |
 |---|---|---|
 | SQL anti-pattern detection | None | 19 rules with confidence scoring |
 | Column-level lineage | None | Automatic from SQL |
@@ -20,11 +20,15 @@ Unlike general-purpose coding agents, altimate-code is built for data teams:
 npm install -g @altimateai/altimate-code
 ```
 
+After install, you'll see a welcome banner with quick-start commands. On upgrades, the banner also shows what changed since your previous version.
+
 ## First run
 
 ```bash
-altimate-code
+altimate
 ```
+
+> **Note:** `altimate-code` still works as a backward-compatible alias.
 
 The TUI launches with an interactive terminal. On first run, use the `/discover` command to auto-detect your data stack:
 
@@ -46,7 +50,7 @@ To set up your LLM provider, use the `/connect` command.
 
 ## Configuration
 
-altimate-code uses a JSON config file. Create `altimate-code.json` in your project root or `~/.config/altimate-code/altimate-code.json` globally.
+altimate uses a JSON config file. Create `altimate-code.json` in your project root or `~/.config/altimate-code/altimate-code.json` globally.
 
 ### Warehouse connections
 
@@ -164,10 +168,10 @@ my-dbt-project/
 
 ## Using with Claude Code
 
-altimate-code works as a standalone agent, but you can also invoke it from within Claude Code sessions. Claude Code can call altimate-code's tools when working on data projects:
+altimate works as a standalone agent, but you can also invoke it from within Claude Code sessions. Claude Code can call altimate's tools when working on data projects:
 
 ```bash
-# In Claude Code, use the /data skill to route to altimate-code
+# In Claude Code, use the /data skill to route to altimate
 /data "analyze the cost of our top 10 most expensive queries"
 ```
 

@@ -10,6 +10,7 @@ import { GlobalBus } from "@/bus/global"
 import { createOpencodeClient, type Event } from "@opencode-ai/sdk/v2"
 import type { BunWebSocketData } from "hono/bun"
 import { Flag } from "@/flag/flag"
+import { Telemetry } from "@/telemetry"
 
 await Log.init({
   print: process.argv.includes("--print-logs"),
@@ -31,6 +32,9 @@ process.on("uncaughtException", (e) => {
     e: e instanceof Error ? e.message : e,
   })
 })
+
+// Initialize telemetry early so MCP/engine events are captured before session starts
+Telemetry.init().catch(() => {})
 
 // Subscribe to global events and forward them via RPC
 GlobalBus.on("event", (event) => {
@@ -57,7 +61,7 @@ const startEventStream = (directory: string) => {
   }) as typeof globalThis.fetch
 
   const sdk = createOpencodeClient({
-    baseUrl: "http://opencode.internal",
+    baseUrl: "http://altimate-code.internal",
     directory,
     fetch: fetchFn,
     signal,
@@ -137,8 +141,14 @@ export const rpc = {
   async shutdown() {
     Log.Default.info("worker shutting down")
     if (eventStream.abort) eventStream.abort.abort()
-    await Instance.disposeAll()
+    await Promise.race([
+      Instance.disposeAll(),
+      new Promise((resolve) => {
+        setTimeout(resolve, 5000)
+      }),
+    ])
     if (server) server.stop(true)
+    await Telemetry.shutdown()
   },
 }
 
@@ -147,6 +157,6 @@ Rpc.listen(rpc)
 function getAuthorizationHeader(): string | undefined {
   const password = Flag.OPENCODE_SERVER_PASSWORD
   if (!password) return undefined
-  const username = Flag.OPENCODE_SERVER_USERNAME ?? "opencode"
+  const username = Flag.OPENCODE_SERVER_USERNAME ?? "altimate"
   return `Basic ${btoa(`${username}:${password}`)}`
 }

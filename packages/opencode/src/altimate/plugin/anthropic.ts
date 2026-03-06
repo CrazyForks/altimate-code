@@ -52,7 +52,7 @@ async function exchange(code: string, verifier: string) {
 
 export async function AnthropicAuthPlugin(input: PluginInput): Promise<Hooks> {
   return {
-    "experimental.chat.system.transform": (hookInput, output) => {
+    "experimental.chat.system.transform": async (hookInput, output) => {
       const prefix = "You are Claude Code, Anthropic's official CLI for Claude."
       if (hookInput.model?.providerID === "anthropic") {
         output.system.unshift(prefix)

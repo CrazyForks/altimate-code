@@ -1,6 +1,6 @@
 # Configuration
 
-altimate-code uses JSON (or JSONC) configuration files. The config file is named `altimate-code.json` or `altimate-code.jsonc`.
+altimate uses JSON (or JSONC) configuration files. The config file is named `altimate-code.json` or `altimate-code.jsonc`.
 
 ## Config File Locations
 
@@ -57,6 +57,7 @@ Configuration is loaded from multiple sources, with later sources overriding ear
 | `skills` | `object` | Skill paths and URLs |
 | `plugin` | `string[]` | Plugin specifiers |
 | `instructions` | `string[]` | Glob patterns for instruction files |
+| `telemetry` | `object` | Telemetry settings (see [Telemetry](telemetry.md)) |
 | `compaction` | `object` | Context compaction settings (see [Context Management](context-management.md)) |
 | `experimental` | `object` | Experimental feature flags |
 

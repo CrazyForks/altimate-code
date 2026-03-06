@@ -3,6 +3,10 @@ import { Tool } from "../../tool/tool"
 import { Bridge } from "../bridge/client"
 import { existsSync, readFileSync } from "fs"
 import path from "path"
+import { Telemetry } from "@/telemetry"
+import { Config } from "@/config/config"
+import { Flag } from "@/flag/flag"
+import { Skill } from "../../skill"
 
 // --- Types ---
 
@@ -548,6 +552,46 @@ export const ProjectScanTool = Tool.define("project_scan", {
     lines.push(configFiles.altimateConfig ? "✓ .opencode/altimate-code.json" : "✗ .opencode/altimate-code.json (not found)")
     lines.push(configFiles.sqlfluff ? "✓ .sqlfluff" : "✗ .sqlfluff (not found)")
     lines.push(configFiles.preCommit ? "✓ .pre-commit-config.yaml" : "✗ .pre-commit-config.yaml (not found)")
+
+    // Emit environment census telemetry
+    const warehouseTypes = [...new Set(existingConnections.map(c => c.type))]
+    const connectionSources: string[] = []
+    if (connections.alreadyConfigured.length > 0) connectionSources.push("configured")
+    if (connections.newFromDbt.length > 0) connectionSources.push("dbt-profile")
+    if (connections.newFromDocker.length > 0) connectionSources.push("docker")
+    if (connections.newFromEnv.length > 0) connectionSources.push("env-var")
+
+    const mcpConfig = (await Config.get()).mcp ?? {}
+    const mcpServerCount = Object.keys(mcpConfig).length
+
+    const enabledFlags: string[] = []
+    if (Flag.OPENCODE_EXPERIMENTAL) enabledFlags.push("experimental")
+    if (Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE) enabledFlags.push("plan_mode")
+    if (Flag.OPENCODE_EXPERIMENTAL_FILEWATCHER) enabledFlags.push("filewatcher")
+    if (Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL) enabledFlags.push("lsp_tool")
+    if (Flag.OPENCODE_EXPERIMENTAL_OXFMT) enabledFlags.push("oxfmt")
+    if (Flag.OPENCODE_ENABLE_EXA) enabledFlags.push("exa")
+    if (Flag.OPENCODE_ENABLE_QUESTION_TOOL) enabledFlags.push("question_tool")
+
+    const skillCount = await Skill.all().then(s => s.length).catch(() => 0)
+
+    Telemetry.track({
+      type: "environment_census",
+      timestamp: Date.now(),
+      session_id: Telemetry.getContext().sessionId,
+      warehouse_types: warehouseTypes,
+      warehouse_count: existingConnections.length,
+      dbt_detected: dbtProject.found,
+      dbt_adapter: dbtProject.profile ?? null,
+      dbt_model_count_bucket: dbtManifest ? Telemetry.bucketCount(dbtManifest.model_count) : "0",
+      dbt_source_count_bucket: dbtManifest ? Telemetry.bucketCount(dbtManifest.source_count) : "0",
+      dbt_test_count_bucket: dbtManifest ? Telemetry.bucketCount(dbtManifest.test_count) : "0",
+      connection_sources: connectionSources,
+      mcp_server_count: mcpServerCount,
+      skill_count: skillCount,
+      os: process.platform,
+      feature_flags: enabledFlags,
+    })
 
     // Build metadata
     const toolsFound = dataTools.filter((t) => t.installed).map((t) => t.name)

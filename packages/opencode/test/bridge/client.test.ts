@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { describe, expect, test, mock, afterEach } from "bun:test"
 import path from "path"
 import fsp from "fs/promises"

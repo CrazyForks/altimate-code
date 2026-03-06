@@ -11,7 +11,7 @@ Logs are stored at:
 Enable verbose logging:
 
 ```bash
-altimate-code --print-logs --log-level DEBUG
+altimate --print-logs --log-level DEBUG
 ```
 
 ## Common Issues
@@ -56,11 +56,28 @@ altimate-code --print-logs --log-level DEBUG
 
 **Solutions:**
 
-1. Test your warehouse credentials outside altimate-code
+1. Test your warehouse credentials outside altimate
 2. Check that the warehouse hostname and port are reachable
 3. Verify the role/user has the required permissions
 4. For Snowflake: ensure the warehouse is not suspended
 5. For BigQuery: check that the service account has the required IAM roles
+
+### MCP Server Initialization Failures
+
+**Symptoms:** MCP tools missing or MCP server not available after startup.
+
+**Solutions:**
+
+1. Check the log files — MCP initialization errors are now logged with the server name and error message:
+   ```
+   WARN failed to initialize MCP server { key: "my-tools", error: "..." }
+   ```
+2. Verify the MCP server command is correct in your config
+3. Test the server manually:
+   ```bash
+   altimate mcp test my-tools
+   ```
+4. Check that required environment variables are set (e.g., API keys referenced in the MCP config)
 
 ### LSP Server Won't Start
 
@@ -114,7 +131,7 @@ Or manually compact in the TUI: leader + `Shift+C`.
 Run with full debug output:
 
 ```bash
-altimate-code --print-logs --log-level DEBUG 2>debug.log
+altimate --print-logs --log-level DEBUG 2>debug.log
 ```
 
 Then share `debug.log` when reporting issues.

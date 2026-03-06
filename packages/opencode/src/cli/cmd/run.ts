@@ -212,6 +212,33 @@ function todo(info: ToolProps<typeof TodoWriteTool>) {
   )
 }
 
+function splitSqlStatements(sql: string): string[] {
+  const stmts: string[] = []
+  const current: string[] = []
+  let inStr = false
+  let strChar = ""
+  for (let i = 0; i < sql.length; i++) {
+    const ch = sql[i]
+    if (!inStr && (ch === "'" || ch === '"' || ch === "`")) {
+      inStr = true
+      strChar = ch
+      current.push(ch)
+    } else if (inStr && ch === strChar) {
+      inStr = false
+      current.push(ch)
+    } else if (!inStr && ch === ";" ) {
+      const s = current.join("").trim()
+      if (s) stmts.push(s)
+      current.length = 0
+    } else {
+      current.push(ch)
+    }
+  }
+  const last = current.join("").trim()
+  if (last) stmts.push(last)
+  return stmts.length ? stmts : [sql]
+}
+
 function normalizePath(input?: string) {
   if (!input) return ""
   if (path.isAbsolute(input)) return path.relative(process.cwd(), input) || "."
@@ -220,7 +247,7 @@ function normalizePath(input?: string) {
 
 export const RunCommand = cmd({
   command: "run [message..]",
-  describe: "run opencode with a message",
+  describe: "run altimate with a message",
   builder: (yargs: Argv) => {
     return yargs
       .positional("message", {
@@ -278,7 +305,7 @@ export const RunCommand = cmd({
       })
       .option("attach", {
         type: "string",
-        describe: "attach to a running opencode server (e.g., http://localhost:4096)",
+        describe: "attach to a running altimate server (e.g., http://localhost:4096)",
       })
       .option("dir", {
         type: "string",
@@ -296,6 +323,21 @@ export const RunCommand = cmd({
         type: "boolean",
         describe: "show thinking blocks",
         default: false,
+      })
+      .option("output", {
+        alias: ["o"],
+        type: "string",
+        describe: "write final assistant response to file (.md or .txt)",
+      })
+      .option("audience", {
+        type: "string",
+        choices: ["executive", "technical"] as const,
+        describe: "output calibration: executive (no SQL/jargon, business framing) or technical (default)",
+      })
+      .option("query", {
+        alias: ["q"],
+        type: "number",
+        describe: "when using --file with a SQL file, analyze only the Nth statement (1-indexed)",
       })
   },
   handler: async (args) => {
@@ -335,6 +377,28 @@ export const RunCommand = cmd({
           mime,
         })
       }
+    }
+
+    // --query N: extract the Nth SQL statement from attached file(s) as a text part
+    if (args.query !== undefined && args.file) {
+      const fileList = Array.isArray(args.file) ? args.file : [args.file]
+      const extractedParts: string[] = []
+      for (const filePath of fileList) {
+        const resolvedPath = path.resolve(process.cwd(), filePath)
+        const content = await Bun.file(resolvedPath).text()
+        const stmts = splitSqlStatements(content)
+        const n = args.query
+        if (n < 1 || n > stmts.length) {
+          UI.error(`--query ${n} is out of range (${path.basename(filePath)} has ${stmts.length} statement${stmts.length === 1 ? "" : "s"})`)
+          process.exit(1)
+        }
+        extractedParts.push(
+          `[${path.basename(filePath)}, statement ${n} of ${stmts.length}]\n\`\`\`sql\n${stmts[n - 1].trim()}\n\`\`\``
+        )
+      }
+      // Replace file attachments with extracted statement as inline text
+      files.length = 0
+      message = [extractedParts.join("\n\n"), message].filter(Boolean).join("\n\n")
     }
 
     if (!process.stdin.isTTY) message += "\n" + (await Bun.stdin.text())
@@ -403,7 +467,18 @@ export const RunCommand = cmd({
       }
     }
 
+    const EXECUTIVE_DIRECTIVE = `## Output Calibration — Executive Mode
+You are speaking to a non-technical business executive. Follow these rules strictly:
+- NEVER show SQL queries, column names in backticks, or code blocks
+- NEVER use engineering jargon (Cartesian product, referential integrity, column pruning, NULL, schema, index, CTE, predicate)
+- Translate ALL technical findings to business impact: revenue, cost, risk, time, compliance exposure
+- Lead with the business implication, then briefly explain the cause in plain English if needed
+- Format output for a slide deck or email: short paragraphs, simple tables with business-friendly headers
+- "Query Duration" not "total_elapsed_time" — "Data Processed" not "bytes_scanned" — "Monthly Cost" not "credits_used * 3.00"`
+
     async function execute(sdk: OpencodeClient) {
+      const outputParts: string[] = []
+
       function tool(part: ToolPart) {
         try {
           if (part.tool === "bash") return bash(props<typeof BashTool>(part))
@@ -492,6 +567,7 @@ export const RunCommand = cmd({
               if (emit("text", { part })) continue
               const text = part.text.trim()
               if (!text) continue
+              if (args.output) outputParts.push(text)
               if (!process.stdout.isTTY) {
                 process.stdout.write(text + EOL)
                 continue
@@ -552,48 +628,9 @@ export const RunCommand = cmd({
         }
       }
 
-      // Validate agent if specified
-      const agent = await (async () => {
-        if (!args.agent) return undefined
-
-        // When attaching, validate against the running server instead of local Instance state.
-        if (args.attach) {
-          const modes = await sdk.app
-            .agents(undefined, { throwOnError: true })
-            .then((x) => x.data ?? [])
-            .catch(() => undefined)
-
-          if (!modes) {
-            UI.println(
-              UI.Style.TEXT_WARNING_BOLD + "!",
-              UI.Style.TEXT_NORMAL,
-              `failed to list agents from ${args.attach}. Falling back to default agent`,
-            )
-            return undefined
-          }
-
-          const agent = modes.find((a) => a.name === args.agent)
-          if (!agent) {
-            UI.println(
-              UI.Style.TEXT_WARNING_BOLD + "!",
-              UI.Style.TEXT_NORMAL,
-              `agent "${args.agent}" not found. Falling back to default agent`,
-            )
-            return undefined
-          }
-
-          if (agent.mode === "subagent") {
-            UI.println(
-              UI.Style.TEXT_WARNING_BOLD + "!",
-              UI.Style.TEXT_NORMAL,
-              `agent "${args.agent}" is a subagent, not a primary agent. Falling back to default agent`,
-            )
-            return undefined
-          }
-
-          return args.agent
-        }
-
+      // Validate agent if specified; capture audience option from agent definition
+      const { agent, agentAudience } = await (async () => {
+        if (!args.agent) return { agent: undefined, agentAudience: undefined }
         const entry = await Agent.get(args.agent)
         if (!entry) {
           UI.println(
@@ -601,7 +638,7 @@ export const RunCommand = cmd({
             UI.Style.TEXT_NORMAL,
             `agent "${args.agent}" not found. Falling back to default agent`,
           )
-          return undefined
+          return { agent: undefined, agentAudience: undefined }
         }
         if (entry.mode === "subagent") {
           UI.println(
@@ -609,10 +646,15 @@ export const RunCommand = cmd({
             UI.Style.TEXT_NORMAL,
             `agent "${args.agent}" is a subagent, not a primary agent. Falling back to default agent`,
           )
-          return undefined
+          return { agent: undefined, agentAudience: undefined }
         }
-        return args.agent
+        const aud = entry.options?.audience as string | undefined
+        return { agent: args.agent, agentAudience: aud }
       })()
+
+      // Build audience system directive (--audience flag overrides agent-level setting)
+      const audienceMode = args.audience ?? agentAudience
+      const audienceSystem = audienceMode === "executive" ? EXECUTIVE_DIRECTIVE : undefined
 
       const sessionID = await session(sdk)
       if (!sessionID) {
@@ -621,7 +663,8 @@ export const RunCommand = cmd({
       }
       await share(sdk, sessionID)
 
-      loop().catch((e) => {
+      // Start event listener before sending the prompt so no events are missed
+      const loopPromise = loop().catch((e) => {
         console.error(e)
         process.exit(1)
       })
@@ -643,7 +686,19 @@ export const RunCommand = cmd({
           model,
           variant: args.variant,
           parts: [...files, { type: "text", text: message }],
+          ...(audienceSystem ? { system: audienceSystem } : {}),
         })
+      }
+
+      // Wait for the event loop to drain (breaks when session reaches idle)
+      await loopPromise
+
+      // Write accumulated text output to file if --output was specified
+      if (args.output) {
+        const outputPath = path.resolve(args.output)
+        const content = outputParts.join("\n\n") || "(no text output — tool-only response)"
+        await Bun.write(outputPath, content)
+        process.stderr.write(`\n✓ Output saved to: ${outputPath}\n`)
       }
     }
 
@@ -657,7 +712,7 @@ export const RunCommand = cmd({
         const request = new Request(input, init)
         return Server.App().fetch(request)
       }) as typeof globalThis.fetch
-      const sdk = createOpencodeClient({ baseUrl: "http://opencode.internal", fetch: fetchFn })
+      const sdk = createOpencodeClient({ baseUrl: "http://altimate-code.internal", fetch: fetchFn })
       await execute(sdk)
     })
   },

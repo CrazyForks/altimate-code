@@ -49,8 +49,8 @@ function detectPlatformAndArch() {
 
 function findBinary() {
   const { platform, arch } = detectPlatformAndArch()
-  const packageName = `opencode-${platform}-${arch}`
-  const binaryName = platform === "windows" ? "opencode.exe" : "opencode"
+  const packageName = `@altimateai/altimate-code-${platform}-${arch}`
+  const binaryName = platform === "windows" ? "altimate-code.exe" : "altimate-code"
 
   try {
     // Use require.resolve to find the package
@@ -85,31 +85,55 @@ function prepareBinDirectory(binaryName) {
   return { binDir, targetPath }
 }
 
-function symlinkBinary(sourcePath, binaryName) {
-  const { targetPath } = prepareBinDirectory(binaryName)
+function printWelcome(version) {
+  const v = `altimate-code v${version} installed`
+  const lines = [
+    "",
+    "  Get started:",
+    "    altimate              Open the TUI",
+    '    altimate run "hello"  Run a quick task',
+    "    altimate --help       See all commands",
+    "",
+    "  Docs: https://altimate-code.dev",
+    "",
+  ]
+  // Box width: pad all lines to the same length
+  const contentWidth = Math.max(v.length, ...lines.map((l) => l.length)) + 2
+  const pad = (s) => s + " ".repeat(contentWidth - s.length)
+  const top = `  ╭${"─".repeat(contentWidth + 2)}╮`
+  const bot = `  ╰${"─".repeat(contentWidth + 2)}╯`
+  const empty = `  │ ${" ".repeat(contentWidth)} │`
+  const row = (s) => `  │ ${pad(s)} │`
 
-  fs.symlinkSync(sourcePath, targetPath)
-  console.log(`opencode binary symlinked: ${targetPath} -> ${sourcePath}`)
-
-  // Verify the file exists after operation
-  if (!fs.existsSync(targetPath)) {
-    throw new Error(`Failed to symlink binary to ${targetPath}`)
-  }
+  console.log(top)
+  console.log(empty)
+  console.log(row(` ${v}`))
+  for (const line of lines) console.log(row(line))
+  console.log(bot)
 }
 
 async function main() {
+  let version
+  try {
+    const pkgPath = path.join(__dirname, "package.json")
+    if (fs.existsSync(pkgPath)) {
+      version = JSON.parse(fs.readFileSync(pkgPath, "utf-8")).version
+    }
+  } catch {}
+
   try {
     if (os.platform() === "win32") {
       // On Windows, the .exe is already included in the package and bin field points to it
       // No postinstall setup needed
       console.log("Windows detected: binary setup not needed (using packaged .exe)")
+      if (version) printWelcome(version)
       return
     }
 
     // On non-Windows platforms, just verify the binary package exists
     // Don't replace the wrapper script - it handles binary execution
     const { binaryPath } = findBinary()
-    const target = path.join(__dirname, "bin", ".opencode")
+    const target = path.join(__dirname, "bin", ".altimate-code")
     if (fs.existsSync(target)) fs.unlinkSync(target)
     try {
       fs.linkSync(binaryPath, target)
@@ -117,8 +141,9 @@ async function main() {
       fs.copyFileSync(binaryPath, target)
     }
     fs.chmodSync(target, 0o755)
+    if (version) printWelcome(version)
   } catch (error) {
-    console.error("Failed to setup opencode binary:", error.message)
+    console.error("Failed to setup altimate-code binary:", error.message)
     process.exit(1)
   }
 }

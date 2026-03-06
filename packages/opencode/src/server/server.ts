@@ -21,8 +21,6 @@ import { Auth } from "../auth"
 import { Flag } from "../flag/flag"
 import { Command } from "../command"
 import { Global } from "../global"
-import { WorkspaceContext } from "../control-plane/workspace-context"
-import { WorkspaceRouterMiddleware } from "../control-plane/workspace-router-middleware"
 import { ProjectRoutes } from "./routes/project"
 import { SessionRoutes } from "./routes/session"
 import { PtyRoutes } from "./routes/pty"
@@ -85,7 +83,7 @@ export namespace Server {
           if (c.req.method === "OPTIONS") return next()
           const password = Flag.OPENCODE_SERVER_PASSWORD
           if (!password) return next()
-          const username = Flag.OPENCODE_SERVER_USERNAME ?? "opencode"
+          const username = Flag.OPENCODE_SERVER_USERNAME ?? "altimate"
           return basicAuth({ username, password })(c, next)
         })
         .use(async (c, next) => {
@@ -119,8 +117,8 @@ export namespace Server {
               )
                 return input
 
-              // *.opencode.ai (https only, adjust if needed)
-              if (/^https:\/\/([a-z0-9-]+\.)*opencode\.ai$/.test(input)) {
+              // *.opencode.dev (https only, adjust if needed)
+              if (/^https:\/\/([a-z0-9-]+\.)*altimate-code\.dev$/.test(input)) {
                 return input
               }
               if (_corsWhitelist.includes(input)) {
@@ -196,8 +194,7 @@ export namespace Server {
         )
         .use(async (c, next) => {
           if (c.req.path === "/log") return next()
-          const workspaceID = c.req.query("workspace") || c.req.header("x-opencode-workspace")
-          const raw = c.req.query("directory") || c.req.header("x-opencode-directory") || process.cwd()
+          const raw = c.req.query("directory") || c.req.header("x-altimate-code-directory") || process.cwd()
           const directory = (() => {
             try {
               return decodeURIComponent(raw)
@@ -205,43 +202,28 @@ export namespace Server {
               return raw
             }
           })()
-
-          return WorkspaceContext.provide({
-            workspaceID,
+          return Instance.provide({
+            directory,
+            init: InstanceBootstrap,
             async fn() {
-              return Instance.provide({
-                directory,
-                init: InstanceBootstrap,
-                async fn() {
-                  return next()
-                },
-              })
+              return next()
             },
           })
         })
-        .use(WorkspaceRouterMiddleware)
         .get(
           "/doc",
           openAPIRouteHandler(app, {
             documentation: {
               info: {
-                title: "opencode",
+                title: "altimate",
                 version: "0.0.3",
-                description: "opencode api",
+                description: "altimate api",
               },
               openapi: "3.1.1",
             },
           }),
         )
-        .use(
-          validator(
-            "query",
-            z.object({
-              directory: z.string().optional(),
-              workspace: z.string().optional(),
-            }),
-          ),
-        )
+        .use(validator("query", z.object({ directory: z.string().optional() })))
         .route("/project", ProjectRoutes())
         .route("/pty", PtyRoutes())
         .route("/config", ConfigRoutes())
@@ -257,7 +239,7 @@ export namespace Server {
           "/instance/dispose",
           describeRoute({
             summary: "Dispose instance",
-            description: "Clean up and dispose the current OpenCode instance, releasing all resources.",
+            description: "Clean up and dispose the current Altimate CLI instance, releasing all resources.",
             operationId: "instance.dispose",
             responses: {
               200: {
@@ -280,7 +262,7 @@ export namespace Server {
           describeRoute({
             summary: "Get paths",
             description:
-              "Retrieve the current working directory and related path information for the OpenCode instance.",
+              "Retrieve the current working directory and related path information for the Altimate CLI instance.",
             operationId: "path.get",
             responses: {
               200: {
@@ -344,7 +326,7 @@ export namespace Server {
           "/command",
           describeRoute({
             summary: "List commands",
-            description: "Get a list of all available commands in the OpenCode system.",
+            description: "Get a list of all available commands in the Altimate CLI system.",
             operationId: "command.list",
             responses: {
               200: {
@@ -418,7 +400,7 @@ export namespace Server {
           "/agent",
           describeRoute({
             summary: "List agents",
-            description: "Get a list of all available AI agents in the OpenCode system.",
+            description: "Get a list of all available AI agents in the Altimate CLI system.",
             operationId: "app.agents",
             responses: {
               200: {
@@ -440,7 +422,7 @@ export namespace Server {
           "/skill",
           describeRoute({
             summary: "List skills",
-            description: "Get a list of all available skills in the OpenCode system.",
+            description: "Get a list of all available skills in the Altimate CLI system.",
             operationId: "app.skills",
             responses: {
               200: {
@@ -561,11 +543,11 @@ export namespace Server {
         .all("/*", async (c) => {
           const path = c.req.path
 
-          const response = await proxy(`https://app.opencode.ai${path}`, {
+          const response = await proxy(`https://app.opencode.dev${path}`, {
             ...c.req,
             headers: {
               ...c.req.raw.headers,
-              host: "app.opencode.ai",
+              host: "app.opencode.dev",
             },
           })
           response.headers.set(
@@ -581,9 +563,9 @@ export namespace Server {
     const result = await generateSpecs(App() as Hono, {
       documentation: {
         info: {
-          title: "opencode",
+          title: "altimate",
           version: "1.0.0",
-          description: "opencode api",
+          description: "altimate api",
         },
         openapi: "3.1.1",
       },

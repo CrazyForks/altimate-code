@@ -17,6 +17,7 @@ import fs from "fs/promises"
 import path from "path"
 import { Global } from "../../global"
 import { UI } from "../../cli/ui"
+import { Telemetry } from "@/telemetry"
 
 declare const ALTIMATE_ENGINE_VERSION: string
 declare const OPENCODE_VERSION: string
@@ -94,7 +95,17 @@ export async function ensureUv(): Promise<void> {
   await fs.mkdir(path.join(dir, "bin"), { recursive: true })
 
   const response = await fetch(url)
-  if (!response.ok) throw new Error(`Failed to download uv: ${response.statusText}`)
+  if (!response.ok) {
+    const errMsg = `Failed to download uv: ${response.statusText}`
+    Telemetry.track({
+      type: "engine_error",
+      timestamp: Date.now(),
+      session_id: Telemetry.getContext().sessionId,
+      phase: "uv_download",
+      error_message: errMsg.slice(0, 500),
+    })
+    throw new Error(errMsg)
+  }
   const buffer = Buffer.from(await response.arrayBuffer())
 
   const tmpFile = path.join(dir, "bin", asset)
@@ -103,7 +114,7 @@ export async function ensureUv(): Promise<void> {
   // Extract: tar.gz on unix, zip on windows
   if (asset.endsWith(".tar.gz")) {
     // Use tar to extract, the binary is inside a directory named like "uv-aarch64-apple-darwin"
-    execFileSync("tar", ["-xzf", tmpFile, "-C", path.join(dir, "bin")])
+    execFileSync("tar", ["-xzf", tmpFile, "-C", path.join(dir, "bin")], { stdio: "pipe" })
     // The extracted dir has the same name as the asset minus .tar.gz
     const extractedDir = path.join(dir, "bin", asset.replace(".tar.gz", ""))
     // Move uv binary from extracted dir to engine/bin/uv
@@ -115,7 +126,7 @@ export async function ensureUv(): Promise<void> {
     execFileSync("powershell", [
       "-Command",
       `Expand-Archive -Path '${tmpFile}' -DestinationPath '${path.join(dir, "bin")}' -Force`,
-    ])
+    ], { stdio: "pipe" })
     const extractedDir = path.join(dir, "bin", asset.replace(".zip", ""))
     await fs.rename(path.join(extractedDir, "uv.exe"), uv)
     await fs.rm(extractedDir, { recursive: true, force: true })
@@ -146,7 +157,10 @@ export async function ensureEngine(): Promise<void> {
 
 async function ensureEngineImpl(): Promise<void> {
   const manifest = await readManifest()
+  const isUpgrade = manifest !== null
   if (manifest && manifest.engine_version === ALTIMATE_ENGINE_VERSION) return
+
+  const startTime = Date.now()
 
   await ensureUv()
 
@@ -157,18 +171,40 @@ async function ensureEngineImpl(): Promise<void> {
   // Create venv if it doesn't exist
   if (!existsSync(venvDir)) {
     UI.println(`${UI.Style.TEXT_DIM}Creating Python environment...${UI.Style.TEXT_NORMAL}`)
-    execFileSync(uv, ["venv", "--python", "3.12", venvDir])
+    try {
+      execFileSync(uv, ["venv", "--python", "3.12", venvDir], { stdio: "pipe" })
+    } catch (e: any) {
+      Telemetry.track({
+        type: "engine_error",
+        timestamp: Date.now(),
+        session_id: Telemetry.getContext().sessionId,
+        phase: "venv_create",
+        error_message: (e?.stderr?.toString() || (e?.message ? e.message : String(e))).slice(0, 500),
+      })
+      throw e
+    }
   }
 
   // Install/upgrade engine
   const pythonPath = enginePythonPath()
   UI.println(`${UI.Style.TEXT_DIM}Installing altimate-engine ${ALTIMATE_ENGINE_VERSION}...${UI.Style.TEXT_NORMAL}`)
-  execFileSync(uv, ["pip", "install", "--python", pythonPath, `altimate-engine==${ALTIMATE_ENGINE_VERSION}`])
+  try {
+    execFileSync(uv, ["pip", "install", "--python", pythonPath, `altimate-engine==${ALTIMATE_ENGINE_VERSION}`], { stdio: "pipe" })
+  } catch (e: any) {
+    Telemetry.track({
+      type: "engine_error",
+      timestamp: Date.now(),
+      session_id: Telemetry.getContext().sessionId,
+      phase: "pip_install",
+      error_message: (e?.stderr?.toString() || (e?.message ? e.message : String(e))).slice(0, 500),
+    })
+    throw e
+  }
 
   // Get python version
-  const pyVersion = execFileSync(pythonPath, ["--version"]).toString().trim()
+  const pyVersion = execFileSync(pythonPath, ["--version"], { stdio: "pipe" }).toString().trim()
   // Get uv version
-  const uvVersion = execFileSync(uv, ["--version"]).toString().trim()
+  const uvVersion = execFileSync(uv, ["--version"], { stdio: "pipe" }).toString().trim()
 
   await writeManifest({
     engine_version: ALTIMATE_ENGINE_VERSION,
@@ -176,6 +212,16 @@ async function ensureEngineImpl(): Promise<void> {
     uv_version: uvVersion,
     cli_version: typeof OPENCODE_VERSION === "string" ? OPENCODE_VERSION : "local",
     installed_at: new Date().toISOString(),
+  })
+
+  Telemetry.track({
+    type: "engine_started",
+    timestamp: Date.now(),
+    session_id: Telemetry.getContext().sessionId,
+    engine_version: ALTIMATE_ENGINE_VERSION,
+    python_version: pyVersion,
+    status: isUpgrade ? "upgraded" : "started",
+    duration_ms: Date.now() - startTime,
   })
 
   UI.println(`${UI.Style.TEXT_SUCCESS}Engine ready${UI.Style.TEXT_NORMAL}`)

@@ -1,140 +1,181 @@
-<p align="center">
-  <a href="https://opencode.ai">
-    <picture>
-      <source srcset="packages/console/app/src/asset/logo-ornate-dark.svg" media="(prefers-color-scheme: dark)">
-      <source srcset="packages/console/app/src/asset/logo-ornate-light.svg" media="(prefers-color-scheme: light)">
-      <img src="packages/console/app/src/asset/logo-ornate-light.svg" alt="OpenCode logo">
-    </picture>
-  </a>
-</p>
-<p align="center">The open source AI coding agent.</p>
-<p align="center">
-  <a href="https://opencode.ai/discord"><img alt="Discord" src="https://img.shields.io/discord/1391832426048651334?style=flat-square&label=discord" /></a>
-  <a href="https://www.npmjs.com/package/opencode-ai"><img alt="npm" src="https://img.shields.io/npm/v/opencode-ai?style=flat-square" /></a>
-  <a href="https://github.com/anomalyco/opencode/actions/workflows/publish.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/anomalyco/opencode/publish.yml?style=flat-square&branch=dev" /></a>
-</p>
+<div align="center">
 
-<p align="center">
-  <a href="README.md">English</a> |
-  <a href="README.zh.md">简体中文</a> |
-  <a href="README.zht.md">繁體中文</a> |
-  <a href="README.ko.md">한국어</a> |
-  <a href="README.de.md">Deutsch</a> |
-  <a href="README.es.md">Español</a> |
-  <a href="README.fr.md">Français</a> |
-  <a href="README.it.md">Italiano</a> |
-  <a href="README.da.md">Dansk</a> |
-  <a href="README.ja.md">日本語</a> |
-  <a href="README.pl.md">Polski</a> |
-  <a href="README.ru.md">Русский</a> |
-  <a href="README.bs.md">Bosanski</a> |
-  <a href="README.ar.md">العربية</a> |
-  <a href="README.no.md">Norsk</a> |
-  <a href="README.br.md">Português (Brasil)</a> |
-  <a href="README.th.md">ไทย</a> |
-  <a href="README.tr.md">Türkçe</a> |
-  <a href="README.uk.md">Українська</a> |
-  <a href="README.bn.md">বাংলা</a> |
-  <a href="README.gr.md">Ελληνικά</a>
-</p>
+<img src="docs/docs/assets/images/altimate-code-banner.png" alt="altimate-code" width="600" />
 
-[![OpenCode Terminal UI](packages/web/src/assets/lander/screenshot.png)](https://opencode.ai)
+# altimate
+
+**The data engineering agent for dbt, SQL, and cloud warehouses.**
+
+An AI-powered CLI with 55+ specialized tools — SQL analysis, schema inspection,
+column-level lineage, FinOps, and PII detection. Connects to your warehouse,
+understands your data, and helps you ship faster.
+
+[![npm](https://img.shields.io/npm/v/@altimateai/altimate-code)](https://www.npmjs.com/package/@altimateai/altimate-code)
+[![PyPI](https://img.shields.io/pypi/v/altimate-engine)](https://pypi.org/project/altimate-engine/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+[![CI](https://github.com/AltimateAI/altimate-code/actions/workflows/ci.yml/badge.svg)](https://github.com/AltimateAI/altimate-code/actions/workflows/ci.yml)
+[![Docs](https://img.shields.io/badge/docs-altimate--code.sh-blue)](https://altimate-code.sh)
+
+</div>
 
 ---
 
-### Installation
+## Why altimate?
+
+General-purpose coding agents can write SQL, but they don't *understand* it. They can't trace lineage, detect anti-patterns, check PII exposure, or optimize warehouse costs — because they don't have the tools.
+
+altimate is a fork of [OpenCode](https://github.com/anomalyco/opencode) rebuilt for data teams. It gives any LLM access to 55+ specialized data engineering tools, 11 purpose-built skills, and direct warehouse connectivity — so the AI works with your actual schemas, not guesses.
+
+## General agents vs altimate
+
+| Capability | General coding agents | altimate |
+|---|---|---|
+| SQL anti-pattern detection | None | 19 rules with confidence scoring |
+| Column-level lineage | None | Automatic from SQL |
+| Schema-aware autocomplete | None | Indexes your warehouse metadata |
+| Cross-dialect translation | None | Snowflake, BigQuery, Databricks, Redshift |
+| FinOps analysis | None | Credit analysis, expensive queries, warehouse sizing |
+| PII detection | None | Automatic column scanning |
+| dbt integration | Basic file editing | Manifest parsing, test generation, model scaffolding |
+
+## Quick demo
 
 ```bash
-# YOLO
-curl -fsSL https://opencode.ai/install | bash
+# Auto-detect your data stack (dbt projects, warehouse connections, installed tools)
+> /discover
 
-# Package managers
-npm i -g opencode-ai@latest        # or bun/pnpm/yarn
-scoop install opencode             # Windows
-choco install opencode             # Windows
-brew install anomalyco/tap/opencode # macOS and Linux (recommended, always up to date)
-brew install opencode              # macOS and Linux (official brew formula, updated less)
-sudo pacman -S opencode            # Arch Linux (Stable)
-paru -S opencode-bin               # Arch Linux (Latest from AUR)
-mise use -g opencode               # Any OS
-nix run nixpkgs#opencode           # or github:anomalyco/opencode for latest dev branch
+# Analyze a query for anti-patterns and optimization opportunities
+> Analyze this query for issues: SELECT * FROM orders JOIN customers ON orders.id = customers.order_id
+
+# Translate SQL across dialects
+> /sql-translate this Snowflake query to BigQuery: SELECT DATEADD(day, 7, current_date())
+
+# Generate dbt tests for a model
+> /generate-tests for models/staging/stg_orders.sql
+
+# Get a cost report for your Snowflake account
+> /cost-report
 ```
 
-> [!TIP]
-> Remove versions older than 0.1.x before installing.
+## Key Features
 
-### Desktop App (BETA)
+### SQL Anti-Pattern Detection
+19 rules with confidence scoring — catches SELECT *, cartesian joins, non-sargable predicates, correlated subqueries, and more. **100% accuracy** on 1,077 benchmark queries.
 
-OpenCode is also available as a desktop application. Download directly from the [releases page](https://github.com/anomalyco/opencode/releases) or [opencode.ai/download](https://opencode.ai/download).
+### Column-Level Lineage
+Automatic lineage extraction from SQL. Trace any column back through joins, CTEs, and subqueries to its source. Works standalone or with dbt manifests for project-wide lineage. **100% edge match** on 500 benchmark queries.
 
-| Platform              | Download                              |
-| --------------------- | ------------------------------------- |
-| macOS (Apple Silicon) | `opencode-desktop-darwin-aarch64.dmg` |
-| macOS (Intel)         | `opencode-desktop-darwin-x64.dmg`     |
-| Windows               | `opencode-desktop-windows-x64.exe`    |
-| Linux                 | `.deb`, `.rpm`, or AppImage           |
+### FinOps & Cost Analysis
+Credit analysis, expensive query detection, warehouse right-sizing, unused resource cleanup, and RBAC auditing.
+
+### Cross-Dialect Translation
+Transpile SQL between Snowflake, BigQuery, Databricks, Redshift, PostgreSQL, MySQL, SQL Server, and DuckDB.
+
+### PII Detection & Safety
+Automatic column scanning for PII across 15 categories with 30+ regex patterns. Safety checks and policy enforcement before query execution.
+
+### dbt Native
+Manifest parsing, test generation, model scaffolding, incremental model detection, and lineage-aware refactoring. 11 purpose-built skills including medallion patterns, yaml config generation, and dbt docs.
+
+## Install
 
 ```bash
-# macOS (Homebrew)
-brew install --cask opencode-desktop
-# Windows (Scoop)
-scoop bucket add extras; scoop install extras/opencode-desktop
+# npm (recommended)
+npm install -g @altimateai/altimate-code
+
+# Homebrew
+brew install AltimateAI/tap/altimate-code
 ```
 
-#### Installation Directory
-
-The install script respects the following priority order for the installation path:
-
-1. `$OPENCODE_INSTALL_DIR` - Custom installation directory
-2. `$XDG_BIN_DIR` - XDG Base Directory Specification compliant path
-3. `$HOME/bin` - Standard user binary directory (if it exists or can be created)
-4. `$HOME/.opencode/bin` - Default fallback
+Then:
 
 ```bash
-# Examples
-OPENCODE_INSTALL_DIR=/usr/local/bin curl -fsSL https://opencode.ai/install | bash
-XDG_BIN_DIR=$HOME/.local/bin curl -fsSL https://opencode.ai/install | bash
+altimate              # Launch the interactive TUI
+altimate /discover    # Auto-detect your data stack and go
 ```
 
-### Agents
+> **Note:** `altimate-code` still works as a backward-compatible alias.
 
-OpenCode includes two built-in agents you can switch between with the `Tab` key.
+`/discover` auto-detects dbt projects, warehouse connections (from `~/.dbt/profiles.yml`, Docker, environment variables), and installed tools (dbt, sqlfluff, airflow, dagster, and more).
 
-- **build** - Default, full-access agent for development work
-- **plan** - Read-only agent for analysis and code exploration
-  - Denies file edits by default
-  - Asks permission before running bash commands
-  - Ideal for exploring unfamiliar codebases or planning changes
+## Agent Modes
 
-Also included is a **general** subagent for complex searches and multistep tasks.
-This is used internally and can be invoked using `@general` in messages.
+Each agent has scoped permissions and purpose-built tools for its role.
 
-Learn more about [agents](https://opencode.ai/docs/agents).
+| Agent | Role | Access |
+|---|---|---|
+| **Builder** | Create dbt models, SQL pipelines, and data transformations | Full read/write |
+| **Analyst** | Explore data, run SELECT queries, and generate insights | Read-only enforced |
+| **Validator** | Data quality checks, schema validation, test coverage analysis | Read + validate |
+| **Migrator** | Cross-warehouse SQL translation, schema migration, dialect conversion | Read/write for migrations |
+| **Executive** | Business-audience summaries — translates findings into revenue, cost, and compliance impact | Read-only |
 
-### Documentation
+## Supported Warehouses
 
-For more info on how to configure OpenCode, [**head over to our docs**](https://opencode.ai/docs).
+Snowflake · BigQuery · Databricks · PostgreSQL · Redshift · DuckDB · MySQL · SQL Server
 
-### Contributing
+First-class support with schema indexing, query execution, and metadata introspection. SSH tunneling available for secure connections.
 
-If you're interested in contributing to OpenCode, please read our [contributing docs](./CONTRIBUTING.md) before submitting a pull request.
+## Works with Any LLM
 
-### Building on OpenCode
+Model-agnostic — bring your own provider or run locally.
 
-If you are working on a project that's related to OpenCode and is using "opencode" as part of its name, for example "opencode-dashboard" or "opencode-mobile", please add a note to your README to clarify that it is not built by the OpenCode team and is not affiliated with us in any way.
+Anthropic · OpenAI · Google Gemini · Google Vertex AI · Amazon Bedrock · Azure OpenAI · Mistral · Groq · DeepInfra · Cerebras · Cohere · Together AI · Perplexity · xAI · OpenRouter · Ollama · GitHub Copilot
 
-### FAQ
+## Architecture
 
-#### How is this different from Claude Code?
+```
+altimate (TypeScript CLI)
+        |
+   JSON-RPC 2.0 (stdio)
+        |
+altimate-engine (Python)
+   SQL analysis, lineage, dbt, warehouse connections
+```
 
-It's very similar to Claude Code in terms of capability. Here are the key differences:
+The CLI handles AI interactions, TUI, and tool orchestration. The Python engine handles SQL parsing, analysis, lineage computation, and warehouse interactions via a JSON-RPC bridge.
 
-- 100% open source
-- Not coupled to any provider. Although we recommend the models we provide through [OpenCode Zen](https://opencode.ai/zen), OpenCode can be used with Claude, OpenAI, Google, or even local models. As models evolve, the gaps between them will close and pricing will drop, so being provider-agnostic is important.
-- Out-of-the-box LSP support
-- A focus on TUI. OpenCode is built by neovim users and the creators of [terminal.shop](https://terminal.shop); we are going to push the limits of what's possible in the terminal.
-- A client/server architecture. This, for example, can allow OpenCode to run on your computer while you drive it remotely from a mobile app, meaning that the TUI frontend is just one of the possible clients.
+**Zero-dependency bootstrap**: On first run the CLI downloads [`uv`](https://github.com/astral-sh/uv), creates an isolated Python environment, and installs the engine automatically. No system Python required.
 
----
+### Monorepo structure
 
-**Join our community** [Discord](https://discord.gg/opencode) | [X.com](https://x.com/opencode)
+```
+packages/
+  altimate-code/       TypeScript CLI
+  altimate-engine/     Python engine (SQL, lineage, warehouses)
+  plugin/              Plugin system
+  sdk/js/              JavaScript SDK
+  util/                Shared utilities
+```
+
+## Documentation
+
+Full docs at **[altimate-code.sh](https://altimate-code.sh)**.
+
+- [Getting Started](https://altimate-code.sh/getting-started/)
+- [SQL Tools](https://altimate-code.sh/data-engineering/tools/sql-tools/)
+- [Agent Modes](https://altimate-code.sh/data-engineering/agent-modes/)
+- [Configuration](https://altimate-code.sh/configure/model-providers/)
+
+## Community & Contributing
+
+- **Issues**: [GitHub Issues](https://github.com/AltimateAI/altimate-code/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/AltimateAI/altimate-code/discussions)
+- **Security**: See [SECURITY.md](./SECURITY.md)
+
+Contributions welcome! Please read the [Contributing Guide](./CONTRIBUTING.md) before opening a PR.
+
+```bash
+git clone https://github.com/AltimateAI/altimate-code.git
+cd altimate-code
+bun install
+cd packages/altimate-engine && python -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]"
+```
+
+## Acknowledgements
+
+altimate is a fork of [OpenCode](https://github.com/anomalyco/opencode), the open-source AI coding agent. We build on top of their excellent foundation to add data-team-specific capabilities.
+
+## License
+
+MIT — see [LICENSE](./LICENSE).

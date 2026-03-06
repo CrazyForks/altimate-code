@@ -10,9 +10,8 @@ import { Config } from "../../config/config"
 import { Global } from "../../global"
 import { Plugin } from "../../plugin"
 import { Instance } from "../../project/instance"
+import { Telemetry } from "../../telemetry"
 import type { Hooks } from "@opencode-ai/plugin"
-import { Process } from "../../util/process"
-import { text } from "node:stream/consumers"
 
 type PluginAuth = NonNullable<Hooks["auth"]>
 
@@ -20,19 +19,10 @@ type PluginAuth = NonNullable<Hooks["auth"]>
  * Handle plugin-based authentication flow.
  * Returns true if auth was handled, false if it should fall through to default handling.
  */
-async function handlePluginAuth(plugin: { auth: PluginAuth }, provider: string, methodName?: string): Promise<boolean> {
+async function handlePluginAuth(plugin: { auth: PluginAuth }, provider: string): Promise<boolean> {
   let index = 0
-  if (methodName) {
-    const match = plugin.auth.methods.findIndex((x) => x.label.toLowerCase() === methodName.toLowerCase())
-    if (match === -1) {
-      prompts.log.error(
-        `Unknown method "${methodName}" for ${provider}. Available: ${plugin.auth.methods.map((x) => x.label).join(", ")}`,
-      )
-      process.exit(1)
-    }
-    index = match
-  } else if (plugin.auth.methods.length > 1) {
-    const selected = await prompts.select({
+  if (plugin.auth.methods.length > 1) {
+    const method = await prompts.select({
       message: "Login method",
       options: [
         ...plugin.auth.methods.map((x, index) => ({
@@ -41,8 +31,8 @@ async function handlePluginAuth(plugin: { auth: PluginAuth }, provider: string, 
         })),
       ],
     })
-    if (prompts.isCancel(selected)) throw new UI.CancelledError()
-    index = parseInt(selected)
+    if (prompts.isCancel(method)) throw new UI.CancelledError()
+    index = parseInt(method)
   }
   const method = plugin.auth.methods[index]
 
@@ -89,6 +79,15 @@ async function handlePluginAuth(plugin: { auth: PluginAuth }, provider: string, 
       const result = await authorize.callback()
       if (result.type === "failed") {
         spinner.stop("Failed to authorize", 1)
+        Telemetry.track({
+          type: "auth_login",
+          timestamp: Date.now(),
+          session_id: Telemetry.getContext().sessionId || "cli",
+          provider_id: provider,
+          method: "oauth",
+          status: "error",
+          error: "OAuth auto authorization failed",
+        })
       }
       if (result.type === "success") {
         const saveProvider = result.provider ?? provider
@@ -109,6 +108,14 @@ async function handlePluginAuth(plugin: { auth: PluginAuth }, provider: string, 
           })
         }
         spinner.stop("Login successful")
+        Telemetry.track({
+          type: "auth_login",
+          timestamp: Date.now(),
+          session_id: Telemetry.getContext().sessionId || "cli",
+          provider_id: saveProvider,
+          method: "oauth",
+          status: "success",
+        })
       }
     }
 
@@ -121,6 +128,15 @@ async function handlePluginAuth(plugin: { auth: PluginAuth }, provider: string, 
       const result = await authorize.callback(code)
       if (result.type === "failed") {
         prompts.log.error("Failed to authorize")
+        Telemetry.track({
+          type: "auth_login",
+          timestamp: Date.now(),
+          session_id: Telemetry.getContext().sessionId || "cli",
+          provider_id: provider,
+          method: "oauth",
+          status: "error",
+          error: "OAuth code authorization failed",
+        })
       }
       if (result.type === "success") {
         const saveProvider = result.provider ?? provider
@@ -141,6 +157,14 @@ async function handlePluginAuth(plugin: { auth: PluginAuth }, provider: string, 
           })
         }
         prompts.log.success("Login successful")
+        Telemetry.track({
+          type: "auth_login",
+          timestamp: Date.now(),
+          session_id: Telemetry.getContext().sessionId || "cli",
+          provider_id: saveProvider,
+          method: "oauth",
+          status: "success",
+        })
       }
     }
 
@@ -153,6 +177,15 @@ async function handlePluginAuth(plugin: { auth: PluginAuth }, provider: string, 
       const result = await method.authorize(inputs)
       if (result.type === "failed") {
         prompts.log.error("Failed to authorize")
+        Telemetry.track({
+          type: "auth_login",
+          timestamp: Date.now(),
+          session_id: Telemetry.getContext().sessionId || "cli",
+          provider_id: provider,
+          method: "api_key",
+          status: "error",
+          error: "API key authorization failed",
+        })
       }
       if (result.type === "success") {
         const saveProvider = result.provider ?? provider
@@ -161,6 +194,14 @@ async function handlePluginAuth(plugin: { auth: PluginAuth }, provider: string, 
           key: result.key,
         })
         prompts.log.success("Login successful")
+        Telemetry.track({
+          type: "auth_login",
+          timestamp: Date.now(),
+          session_id: Telemetry.getContext().sessionId || "cli",
+          provider_id: saveProvider,
+          method: "api_key",
+          status: "success",
+        })
       }
       prompts.outro("Done")
       return true
@@ -261,21 +302,10 @@ export const AuthLoginCommand = cmd({
   command: "login [url]",
   describe: "log in to a provider",
   builder: (yargs) =>
-    yargs
-      .positional("url", {
-        describe: "opencode auth provider",
-        type: "string",
-      })
-      .option("provider", {
-        alias: ["p"],
-        describe: "provider id or name to log in to (skips provider selection)",
-        type: "string",
-      })
-      .option("method", {
-        alias: ["m"],
-        describe: "login method label (skips method selection)",
-        type: "string",
-      }),
+    yargs.positional("url", {
+      describe: "altimate auth provider",
+      type: "string",
+    }),
   async handler(args) {
     await Instance.provide({
       directory: process.cwd(),
@@ -283,29 +313,56 @@ export const AuthLoginCommand = cmd({
         UI.empty()
         prompts.intro("Add credential")
         if (args.url) {
-          const url = args.url.replace(/\/+$/, "")
-          const wellknown = await fetch(`${url}/.well-known/opencode`).then((x) => x.json() as any)
-          prompts.log.info(`Running \`${wellknown.auth.command.join(" ")}\``)
-          const proc = Process.spawn(wellknown.auth.command, {
+          const wellknown = await fetch(`${args.url}/.well-known/altimate-code`).then((x) => x.json() as any)
+          const raw = wellknown?.auth?.command
+          if (!Array.isArray(raw) || !raw.every((c: unknown) => typeof c === 'string')) {
+            prompts.log.warn('Invalid auth command from server')
+            prompts.outro('Done')
+            return
+          }
+          const cmd = raw as string[]
+          const confirm = await prompts.confirm({
+            message: `The server requests to run: ${cmd.join(" ")}. Allow?`,
+          })
+          if (prompts.isCancel(confirm) || !confirm) {
+            prompts.log.warn("Aborted.")
+            prompts.outro("Done")
+            return
+          }
+          const proc = Bun.spawn({
+            cmd,
             stdout: "pipe",
           })
-          if (!proc.stdout) {
-            prompts.log.error("Failed")
-            prompts.outro("Done")
-            return
-          }
-          const [exit, token] = await Promise.all([proc.exited, text(proc.stdout)])
+          const exit = await proc.exited
           if (exit !== 0) {
             prompts.log.error("Failed")
+            Telemetry.track({
+              type: "auth_login",
+              timestamp: Date.now(),
+              session_id: Telemetry.getContext().sessionId || "cli",
+              provider_id: args.url!,
+              method: "api_key",
+              status: "error",
+              error: "Well-known auth command failed",
+            })
             prompts.outro("Done")
             return
           }
-          await Auth.set(url, {
+          const token = await new Response(proc.stdout).text()
+          await Auth.set(args.url, {
             type: "wellknown",
             key: wellknown.auth.env,
             token: token.trim(),
           })
-          prompts.log.success("Logged into " + url)
+          prompts.log.success("Logged into " + args.url)
+          Telemetry.track({
+            type: "auth_login",
+            timestamp: Date.now(),
+            session_id: Telemetry.getContext().sessionId || "cli",
+            provider_id: args.url!,
+            method: "api_key",
+            status: "success",
+          })
           prompts.outro("Done")
           return
         }
@@ -327,7 +384,7 @@ export const AuthLoginCommand = cmd({
         })
 
         const priority: Record<string, number> = {
-          opencode: 0,
+          "altimate-code": 0,
           anthropic: 1,
           "github-copilot": 2,
           openai: 3,
@@ -342,81 +399,65 @@ export const AuthLoginCommand = cmd({
           enabled,
           providerNames: Object.fromEntries(Object.entries(config.provider ?? {}).map(([id, p]) => [id, p.name])),
         })
-        const options = [
-          ...pipe(
-            providers,
-            values(),
-            sortBy(
-              (x) => priority[x.id] ?? 99,
-              (x) => x.name ?? x.id,
+        let provider = await prompts.autocomplete({
+          message: "Select provider",
+          maxItems: 8,
+          options: [
+            ...pipe(
+              providers,
+              values(),
+              sortBy(
+                (x) => priority[x.id] ?? 99,
+                (x) => x.name ?? x.id,
+              ),
+              map((x) => ({
+                label: x.name,
+                value: x.id,
+                hint: {
+                  "altimate-code": "recommended",
+                  anthropic: "Claude Max or API key",
+                  openai: "ChatGPT Plus/Pro or API key",
+                }[x.id],
+              })),
             ),
-            map((x) => ({
+            ...pluginProviders.map((x) => ({
               label: x.name,
               value: x.id,
-              hint: {
-                opencode: "recommended",
-                anthropic: "Claude Max or API key",
-                openai: "ChatGPT Plus/Pro or API key",
-              }[x.id],
+              hint: "plugin",
             })),
-          ),
-          ...pluginProviders.map((x) => ({
-            label: x.name,
-            value: x.id,
-            hint: "plugin",
-          })),
-        ]
+            {
+              value: "other",
+              label: "Other",
+            },
+          ],
+        })
 
-        let provider: string
-        if (args.provider) {
-          const input = args.provider
-          const byID = options.find((x) => x.value === input)
-          const byName = options.find((x) => x.label.toLowerCase() === input.toLowerCase())
-          const match = byID ?? byName
-          if (!match) {
-            prompts.log.error(`Unknown provider "${input}"`)
-            process.exit(1)
-          }
-          provider = match.value
-        } else {
-          const selected = await prompts.autocomplete({
-            message: "Select provider",
-            maxItems: 8,
-            options: [
-              ...options,
-              {
-                value: "other",
-                label: "Other",
-              },
-            ],
-          })
-          if (prompts.isCancel(selected)) throw new UI.CancelledError()
-          provider = selected as string
-        }
+        if (prompts.isCancel(provider)) throw new UI.CancelledError()
 
         const plugin = await Plugin.list().then((x) => x.findLast((x) => x.auth?.provider === provider))
         if (plugin && plugin.auth) {
-          const handled = await handlePluginAuth({ auth: plugin.auth }, provider, args.method)
+          const handled = await handlePluginAuth({ auth: plugin.auth }, provider)
           if (handled) return
         }
 
         if (provider === "other") {
-          const custom = await prompts.text({
+          provider = await prompts.text({
             message: "Enter provider id",
             validate: (x) => (x && x.match(/^[0-9a-z-]+$/) ? undefined : "a-z, 0-9 and hyphens only"),
           })
-          if (prompts.isCancel(custom)) throw new UI.CancelledError()
-          provider = custom.replace(/^@ai-sdk\//, "")
+          if (prompts.isCancel(provider)) throw new UI.CancelledError()
+          provider = provider.replace(/^@ai-sdk\//, "")
+          if (prompts.isCancel(provider)) throw new UI.CancelledError()
 
           // Check if a plugin provides auth for this custom provider
           const customPlugin = await Plugin.list().then((x) => x.findLast((x) => x.auth?.provider === provider))
           if (customPlugin && customPlugin.auth) {
-            const handled = await handlePluginAuth({ auth: customPlugin.auth }, provider, args.method)
+            const handled = await handlePluginAuth({ auth: customPlugin.auth }, provider)
             if (handled) return
           }
 
           prompts.log.warn(
-            `This only stores a credential for ${provider} - you will need configure it in opencode.json, check the docs for examples.`,
+            `This only stores a credential for ${provider} - you will need configure it in altimate-code.json, check the docs for examples.`,
           )
         }
 
@@ -425,13 +466,13 @@ export const AuthLoginCommand = cmd({
             "Amazon Bedrock authentication priority:\n" +
               "  1. Bearer token (AWS_BEARER_TOKEN_BEDROCK or /connect)\n" +
               "  2. AWS credential chain (profile, access keys, IAM roles, EKS IRSA)\n\n" +
-              "Configure via opencode.json options (profile, region, endpoint) or\n" +
+              "Configure via altimate-code.json options (profile, region, endpoint) or\n" +
               "AWS environment variables (AWS_PROFILE, AWS_REGION, AWS_ACCESS_KEY_ID, AWS_WEB_IDENTITY_TOKEN_FILE).",
           )
         }
 
-        if (provider === "opencode") {
-          prompts.log.info("Create an api key at https://opencode.ai/auth")
+        if (provider === "altimate-code") {
+          prompts.log.info("Create an api key at https://altimate-code.dev/auth")
         }
 
         if (provider === "vercel") {
@@ -440,7 +481,7 @@ export const AuthLoginCommand = cmd({
 
         if (["cloudflare", "cloudflare-ai-gateway"].includes(provider)) {
           prompts.log.info(
-            "Cloudflare AI Gateway can be configured with CLOUDFLARE_GATEWAY_ID, CLOUDFLARE_ACCOUNT_ID, and CLOUDFLARE_API_TOKEN environment variables. Read more: https://opencode.ai/docs/providers/#cloudflare-ai-gateway",
+            "Cloudflare AI Gateway can be configured with CLOUDFLARE_GATEWAY_ID, CLOUDFLARE_ACCOUNT_ID, and CLOUDFLARE_API_TOKEN environment variables. Read more: https://altimate-code.dev/docs/providers/#cloudflare-ai-gateway",
           )
         }
 
@@ -452,6 +493,14 @@ export const AuthLoginCommand = cmd({
         await Auth.set(provider, {
           type: "api",
           key,
+        })
+        Telemetry.track({
+          type: "auth_login",
+          timestamp: Date.now(),
+          session_id: Telemetry.getContext().sessionId || "cli",
+          provider_id: provider,
+          method: "api_key",
+          status: "success",
         })
 
         prompts.outro("Done")
@@ -481,6 +530,12 @@ export const AuthLogoutCommand = cmd({
     })
     if (prompts.isCancel(providerID)) throw new UI.CancelledError()
     await Auth.remove(providerID)
+    Telemetry.track({
+      type: "auth_logout",
+      timestamp: Date.now(),
+      session_id: Telemetry.getContext().sessionId || "cli",
+      provider_id: providerID,
+    })
     prompts.outro("Logout successful")
   },
 })

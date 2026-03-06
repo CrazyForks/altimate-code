@@ -22,13 +22,13 @@ import { SessionPrompt } from "./prompt"
 import { fn } from "@/util/fn"
 import { Command } from "../command"
 import { Snapshot } from "@/snapshot"
-import { WorkspaceContext } from "../control-plane/workspace-context"
 
 import type { Provider } from "@/provider/provider"
 import { PermissionNext } from "@/permission/next"
 import { Global } from "@/global"
 import type { LanguageModelV2Usage } from "@ai-sdk/provider"
 import { iife } from "@/util/iife"
+import { Telemetry } from "@/telemetry"
 
 export namespace Session {
   const log = Log.create({ service: "session" })
@@ -64,7 +64,6 @@ export namespace Session {
       id: row.id,
       slug: row.slug,
       projectID: row.project_id,
-      workspaceID: row.workspace_id ?? undefined,
       directory: row.directory,
       parentID: row.parent_id ?? undefined,
       title: row.title,
@@ -86,7 +85,6 @@ export namespace Session {
     return {
       id: info.id,
       project_id: info.projectID,
-      workspace_id: info.workspaceID,
       parent_id: info.parentID,
       slug: info.slug,
       directory: info.directory,
@@ -121,7 +119,6 @@ export namespace Session {
       id: Identifier.schema("session"),
       slug: z.string(),
       projectID: z.string(),
-      workspaceID: z.string().optional(),
       directory: z.string(),
       parentID: Identifier.schema("session").optional(),
       summary: z
@@ -247,8 +244,10 @@ export namespace Session {
       const msgs = await messages({ sessionID: input.sessionID })
       const idMap = new Map<string, string>()
 
+      let messageCount = 0
       for (const msg of msgs) {
         if (input.messageID && msg.info.id >= input.messageID) break
+        messageCount++
         const newID = Identifier.ascending("message")
         idMap.set(msg.info.id, newID)
 
@@ -269,6 +268,13 @@ export namespace Session {
           })
         }
       }
+      Telemetry.track({
+        type: "session_forked",
+        timestamp: Date.now(),
+        session_id: session.id,
+        parent_session_id: input.sessionID,
+        message_count: messageCount,
+      })
       return session
     },
   )
@@ -301,7 +307,6 @@ export namespace Session {
       version: Installation.VERSION,
       projectID: Instance.project.id,
       directory: input.directory,
-      workspaceID: WorkspaceContext.workspaceID,
       parentID: input.parentID,
       title: input.title ?? createDefaultTitle(!!input.parentID),
       permission: input.permission,
@@ -532,7 +537,6 @@ export namespace Session {
 
   export function* list(input?: {
     directory?: string
-    workspaceID?: string
     roots?: boolean
     start?: number
     search?: string
@@ -541,9 +545,6 @@ export namespace Session {
     const project = Instance.project
     const conditions = [eq(SessionTable.project_id, project.id)]
 
-    if (WorkspaceContext.workspaceID) {
-      conditions.push(eq(SessionTable.workspace_id, WorkspaceContext.workspaceID))
-    }
     if (input?.directory) {
       conditions.push(eq(SessionTable.directory, input.directory))
     }
@@ -706,9 +707,7 @@ export namespace Session {
     async (input) => {
       // CASCADE delete handles parts automatically
       Database.use((db) => {
-        db.delete(MessageTable)
-          .where(and(eq(MessageTable.id, input.messageID), eq(MessageTable.session_id, input.sessionID)))
-          .run()
+        db.delete(MessageTable).where(eq(MessageTable.id, input.messageID)).run()
         Database.effect(() =>
           Bus.publish(MessageV2.Event.Removed, {
             sessionID: input.sessionID,
@@ -728,9 +727,7 @@ export namespace Session {
     }),
     async (input) => {
       Database.use((db) => {
-        db.delete(PartTable)
-          .where(and(eq(PartTable.id, input.partID), eq(PartTable.session_id, input.sessionID)))
-          .run()
+        db.delete(PartTable).where(eq(PartTable.id, input.partID)).run()
         Database.effect(() =>
           Bus.publish(MessageV2.Event.PartRemoved, {
             sessionID: input.sessionID,
@@ -761,7 +758,7 @@ export namespace Session {
         .run()
       Database.effect(() =>
         Bus.publish(MessageV2.Event.PartUpdated, {
-          part: structuredClone(part),
+          part,
         }),
       )
     })
@@ -809,7 +806,7 @@ export namespace Session {
       // OpenRouter provides inputTokens as the total count of input tokens (including cached).
       // AFAIK other providers (OpenRouter/OpenAI/Gemini etc.) do it the same way e.g. vercel/ai#8794 (comment)
       // Anthropic does it differently though - inputTokens doesn't include cached tokens.
-      // It looks like OpenCode's cost calculation assumes all providers return inputTokens the same way Anthropic does (I'm guessing getUsage logic was originally implemented with anthropic), so it's causing incorrect cost calculation for OpenRouter and others.
+      // It looks like Altimate CLI's cost calculation assumes all providers return inputTokens the same way Anthropic does (I'm guessing getUsage logic was originally implemented with anthropic), so it's causing incorrect cost calculation for OpenRouter and others.
       const excludesCachedTokens = !!(input.metadata?.["anthropic"] || input.metadata?.["bedrock"])
       const adjustedInputTokens = safe(
         excludesCachedTokens ? inputTokens : inputTokens - cacheReadInputTokens - cacheWriteInputTokens,

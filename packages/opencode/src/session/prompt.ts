@@ -45,6 +45,7 @@ import { LLM } from "./llm"
 import { iife } from "@/util/iife"
 import { Shell } from "@/shell/shell"
 import { Truncate } from "@/tool/truncation"
+import { Telemetry } from "@/telemetry"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -290,7 +291,40 @@ export namespace SessionPrompt {
     let structuredOutput: unknown | undefined
 
     let step = 0
+    const sessionStartTime = Date.now()
+    let sessionTotalCost = 0
+    let sessionTotalTokens = 0
+    let toolCallCount = 0
+    let compactionAttempts = 0
+    let totalCompactions = 0
+    let sessionAgentName = ""
+    let sessionHadError = false
+    const MAX_COMPACTION_ATTEMPTS = 3
     const session = await Session.get(sessionID)
+    await Telemetry.init()
+    Telemetry.setContext({ sessionId: sessionID, projectId: Instance.project?.id ?? "" })
+    let emergencySessionEndFired = false
+    const emergencySessionEnd = () => {
+      if (emergencySessionEndFired) return
+      emergencySessionEndFired = true
+      Telemetry.track({
+        type: "session_end",
+        timestamp: Date.now(),
+        session_id: sessionID,
+        total_cost: sessionTotalCost,
+        total_tokens: sessionTotalTokens,
+        tool_call_count: toolCallCount,
+        duration_ms: Date.now() - sessionStartTime,
+      })
+    }
+    // beforeExit covers event-loop drain without entering the session loop.
+    // exit covers process.exit() calls (sync only — track() buffers, flush is best-effort).
+    // SIGINT/SIGTERM are NOT handled here: the abort controller already triggers
+    // loop exit → finally block → normal session_end. Adding signal handlers
+    // would interfere with the default termination behavior.
+    process.once("beforeExit", emergencySessionEnd)
+    process.once("exit", emergencySessionEnd)
+    try {
     while (true) {
       SessionStatus.set(sessionID, { type: "busy" })
       log.info("loop", { step, sessionID })
@@ -315,6 +349,7 @@ export namespace SessionPrompt {
       }
 
       if (!lastUser) throw new Error("No user message found in stream. This should never happen.")
+      if (!sessionAgentName) sessionAgentName = lastUser.agent
       if (
         lastAssistant?.finish &&
         !["tool-calls", "unknown"].includes(lastAssistant.finish) &&
@@ -533,7 +568,6 @@ export namespace SessionPrompt {
           abort,
           sessionID,
           auto: task.auto,
-          overflow: task.overflow,
         })
         if (result === "stop") break
         continue
@@ -545,6 +579,26 @@ export namespace SessionPrompt {
         lastFinished.summary !== true &&
         (await SessionCompaction.isOverflow({ tokens: lastFinished.tokens, model }))
       ) {
+        compactionAttempts++
+        totalCompactions++
+        if (compactionAttempts > MAX_COMPACTION_ATTEMPTS) {
+          log.warn("compaction loop detected, stopping", { compactionAttempts, sessionID })
+          Bus.publish(Session.Event.Error, {
+            sessionID,
+            error: new NamedError.Unknown({
+              message: `Context still too large after ${MAX_COMPACTION_ATTEMPTS} compaction attempts. Try starting a new conversation.`,
+            }).toObject(),
+          })
+          sessionHadError = true
+          break
+        }
+        Telemetry.track({
+          type: "compaction_triggered",
+          timestamp: Date.now(),
+          session_id: sessionID,
+          trigger: "overflow_detection",
+          attempt: compactionAttempts,
+        })
         await SessionCompaction.create({
           sessionID,
           agent: lastUser.agent,
@@ -625,6 +679,15 @@ export namespace SessionPrompt {
           sessionID: sessionID,
           messageID: lastUser.id,
         })
+        Telemetry.track({
+          type: "session_start",
+          timestamp: Date.now(),
+          session_id: sessionID,
+          model_id: model.id,
+          provider_id: model.providerID,
+          agent: lastUser.agent,
+          project_id: Instance.project?.id ?? "",
+        })
       }
 
       // Ephemerally wrap queued user messages with a reminder to stay on track
@@ -649,7 +712,11 @@ export namespace SessionPrompt {
       await Plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 
       // Build system prompt, adding structured output instruction if needed
-      const system = [...(await SystemPrompt.environment(model)), ...(await InstructionPrompt.system())]
+      const system = [
+        ...(await SystemPrompt.environment(model)),
+        ...(await InstructionPrompt.system()),
+        ...(lastUser.system ? [lastUser.system] : []),
+      ]
       const format = lastUser.format ?? { type: "text" }
       if (format.type === "json_schema") {
         system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
@@ -677,6 +744,13 @@ export namespace SessionPrompt {
         toolChoice: format.type === "json_schema" ? "required" : undefined,
       })
 
+      sessionTotalCost += processor.message.cost
+      sessionTotalTokens +=
+        (processor.message.tokens?.input ?? 0) +
+        (processor.message.tokens?.output ?? 0) +
+        (processor.message.tokens?.reasoning ?? 0)
+      toolCallCount += processor.toolCallCount
+
       // If structured output was captured, save it and exit immediately
       // This takes priority because the StructuredOutput tool was called successfully
       if (structuredOutput !== undefined) {
@@ -701,19 +775,82 @@ export namespace SessionPrompt {
         }
       }
 
-      if (result === "stop") break
+      if (result === "stop") {
+        if (processor.message.error) sessionHadError = true
+        break
+      }
+      if (result === "continue") {
+        // Reset compaction counter after a successful non-compaction step.
+        // The counter protects against tight compact→overflow loops within
+        // a single turn, but should not accumulate across unrelated turns.
+        compactionAttempts = 0
+      }
       if (result === "compact") {
+        compactionAttempts++
+        totalCompactions++
+        if (compactionAttempts > MAX_COMPACTION_ATTEMPTS) {
+          log.warn("compaction loop detected, stopping", { compactionAttempts, sessionID })
+          Bus.publish(Session.Event.Error, {
+            sessionID,
+            error: new NamedError.Unknown({
+              message: `Context still too large after ${MAX_COMPACTION_ATTEMPTS} compaction attempts. Try starting a new conversation.`,
+            }).toObject(),
+          })
+          sessionHadError = true
+          break
+        }
+        Telemetry.track({
+          type: "compaction_triggered",
+          timestamp: Date.now(),
+          session_id: sessionID,
+          trigger: "error_recovery",
+          attempt: compactionAttempts,
+        })
         await SessionCompaction.create({
           sessionID,
           agent: lastUser.agent,
           model: lastUser.model,
           auto: true,
-          overflow: !processor.message.finish,
         })
       }
       continue
     }
     SessionCompaction.prune({ sessionID })
+    } finally {
+      process.removeListener("beforeExit", emergencySessionEnd)
+      process.removeListener("exit", emergencySessionEnd)
+      const outcome: "completed" | "abandoned" | "error" = abort.aborted
+        ? "abandoned"
+        : sessionHadError
+          ? "error"
+          : sessionTotalCost === 0 && toolCallCount === 0
+            ? "abandoned"
+            : "completed"
+      Telemetry.track({
+        type: "agent_outcome",
+        timestamp: Date.now(),
+        session_id: sessionID,
+        agent: sessionAgentName,
+        tool_calls: toolCallCount,
+        generations: step,
+        duration_ms: Date.now() - sessionStartTime,
+        cost: sessionTotalCost,
+        compactions: totalCompactions,
+        outcome,
+      })
+      if (!emergencySessionEndFired) {
+        Telemetry.track({
+          type: "session_end",
+          timestamp: Date.now(),
+          session_id: sessionID,
+          total_cost: sessionTotalCost,
+          total_tokens: sessionTotalTokens,
+          tool_call_count: toolCallCount,
+          duration_ms: Date.now() - sessionStartTime,
+        })
+      }
+      await Telemetry.shutdown()
+    }
     for await (const item of MessageV2.stream(sessionID)) {
       if (item.info.role === "user") continue
       const queued = state()[sessionID]?.callbacks ?? []
@@ -1337,7 +1474,7 @@ export namespace SessionPrompt {
         })
       }
       const wasPlan = input.messages.some((msg) => msg.info.role === "assistant" && msg.info.agent === "plan")
-      if (wasPlan && input.agent.name === "build") {
+      if (wasPlan && input.agent.name === "builder") {
         userMessage.parts.push({
           id: Identifier.ascending("part"),
           messageID: userMessage.info.id,
@@ -1882,6 +2019,15 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       sessionID: input.sessionID,
       arguments: input.arguments,
       messageID: result.info.id,
+    })
+
+    Telemetry.track({
+      type: "command",
+      timestamp: Date.now(),
+      session_id: input.sessionID,
+      command_name: input.command,
+      command_source: command.source ?? "unknown",
+      message_id: result.info.id,
     })
 
     return result

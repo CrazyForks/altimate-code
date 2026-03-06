@@ -6,7 +6,7 @@ const StatusCommand = cmd({
   command: "status",
   describe: "show engine status (uv, Python, engine versions)",
   handler: async () => {
-    const { engineStatus } = await import("../../bridge/engine")
+    const { engineStatus } = await import("../bridge/engine")
     const status = await engineStatus()
     UI.println(`${UI.Style.TEXT_NORMAL_BOLD}Engine Status${UI.Style.TEXT_NORMAL}`)
     UI.println(`  Path:           ${status.path}`)
@@ -22,7 +22,7 @@ const ResetCommand = cmd({
   command: "reset",
   describe: "remove engine directory and reinstall from scratch",
   handler: async () => {
-    const { resetEngine } = await import("../../bridge/engine")
+    const { resetEngine } = await import("../bridge/engine")
     UI.println("Resetting engine...")
     await resetEngine()
     UI.println(`${UI.Style.TEXT_SUCCESS}Engine reset complete${UI.Style.TEXT_NORMAL}`)
@@ -33,7 +33,7 @@ const PathCommand = cmd({
   command: "path",
   describe: "print engine directory path",
   handler: async () => {
-    const { engineDir } = await import("../../bridge/engine")
+    const { engineDir } = await import("../bridge/engine")
     console.log(engineDir())
   },
 })

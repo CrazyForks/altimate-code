@@ -6,6 +6,9 @@ import { NamedError } from "@opencode-ai/util/error"
 import { Log } from "../util/log"
 import { iife } from "@/util/iife"
 import { Flag } from "../flag/flag"
+// altimate_change start - telemetry import
+import { Telemetry } from "../telemetry"
+// altimate_change end
 
 declare global {
   const OPENCODE_VERSION: string
@@ -81,15 +84,15 @@ export namespace Installation {
       },
       {
         name: "brew" as const,
-        command: () => $`brew list --formula opencode`.throws(false).quiet().text(),
+        command: () => $`brew list --formula altimate`.throws(false).quiet().text(),
       },
       {
         name: "scoop" as const,
-        command: () => $`scoop list opencode`.throws(false).quiet().text(),
+        command: () => $`scoop list altimate`.throws(false).quiet().text(),
       },
       {
         name: "choco" as const,
-        command: () => $`choco list --limit-output opencode`.throws(false).quiet().text(),
+        command: () => $`choco list --limit-output altimate`.throws(false).quiet().text(),
       },
     ]
 
@@ -104,7 +107,7 @@ export namespace Installation {
     for (const check of checks) {
       const output = await check.command()
       const installedName =
-        check.name === "brew" || check.name === "choco" || check.name === "scoop" ? "opencode" : "opencode-ai"
+        check.name === "brew" || check.name === "choco" || check.name === "scoop" ? "altimate" : "@opencode-ai/opencode"
       if (output.includes(installedName)) {
         return check.name
       }
@@ -121,36 +124,36 @@ export namespace Installation {
   )
 
   async function getBrewFormula() {
-    const tapFormula = await $`brew list --formula anomalyco/tap/opencode`.throws(false).quiet().text()
-    if (tapFormula.includes("opencode")) return "anomalyco/tap/opencode"
-    const coreFormula = await $`brew list --formula opencode`.throws(false).quiet().text()
-    if (coreFormula.includes("opencode")) return "opencode"
-    return "opencode"
+    const tapFormula = await $`brew list --formula AltimateAI/tap/altimate`.throws(false).quiet().text()
+    if (tapFormula.includes("altimate")) return "AltimateAI/tap/altimate"
+    const coreFormula = await $`brew list --formula altimate`.throws(false).quiet().text()
+    if (coreFormula.includes("altimate")) return "altimate"
+    return "altimate"
   }
 
   export async function upgrade(method: Method, target: string) {
     let cmd
     switch (method) {
       case "curl":
-        cmd = $`curl -fsSL https://opencode.ai/install | bash`.env({
+        cmd = $`curl -fsSL https://altimate-code.dev/install | bash`.env({
           ...process.env,
           VERSION: target,
         })
         break
       case "npm":
-        cmd = $`npm install -g opencode-ai@${target}`
+        cmd = $`npm install -g @opencode-ai/opencode@${target}`
         break
       case "pnpm":
-        cmd = $`pnpm install -g opencode-ai@${target}`
+        cmd = $`pnpm install -g @opencode-ai/opencode@${target}`
         break
       case "bun":
-        cmd = $`bun install -g opencode-ai@${target}`
+        cmd = $`bun install -g @opencode-ai/opencode@${target}`
         break
       case "brew": {
         const formula = await getBrewFormula()
         if (formula.includes("/")) {
           cmd =
-            $`brew tap anomalyco/tap && cd "$(brew --repo anomalyco/tap)" && git pull --ff-only && brew upgrade ${formula}`.env(
+            $`brew tap AltimateAI/tap && cd "$(brew --repo AltimateAI/tap)" && git pull --ff-only && brew upgrade ${formula}`.env(
               {
                 HOMEBREW_NO_AUTO_UPDATE: "1",
                 ...process.env,
@@ -165,10 +168,10 @@ export namespace Installation {
         break
       }
       case "choco":
-        cmd = $`echo Y | choco upgrade opencode --version=${target}`
+        cmd = $`echo Y | choco upgrade altimate --version=${target}`
         break
       case "scoop":
-        cmd = $`scoop install opencode@${target}`
+        cmd = $`scoop install altimate@${target}`
         break
       default:
         throw new Error(`Unknown method: ${method}`)
@@ -176,6 +179,17 @@ export namespace Installation {
     const result = await cmd.quiet().throws(false)
     if (result.exitCode !== 0) {
       const stderr = method === "choco" ? "not running from an elevated command shell" : result.stderr.toString("utf8")
+      const telemetryMethod = (["npm", "bun", "brew"].includes(method) ? method : "other") as "npm" | "bun" | "brew" | "other"
+      Telemetry.track({
+        type: "upgrade_attempted",
+        timestamp: Date.now(),
+        session_id: Telemetry.getContext().sessionId || "cli",
+        from_version: VERSION,
+        to_version: target,
+        method: telemetryMethod,
+        status: "error",
+        error: stderr.slice(0, 500),
+      })
       throw new UpgradeFailedError({
         stderr: stderr,
       })
@@ -185,6 +199,16 @@ export namespace Installation {
       target,
       stdout: result.stdout.toString(),
       stderr: result.stderr.toString(),
+    })
+    const telemetryMethod = (["npm", "bun", "brew"].includes(method) ? method : "other") as "npm" | "bun" | "brew" | "other"
+    Telemetry.track({
+      type: "upgrade_attempted",
+      timestamp: Date.now(),
+      session_id: Telemetry.getContext().sessionId || "cli",
+      from_version: VERSION,
+      to_version: target,
+      method: telemetryMethod,
+      status: "success",
     })
     await $`${process.execPath} --version`.nothrow().quiet().text()
   }
@@ -207,7 +231,7 @@ export namespace Installation {
         if (!version) throw new Error(`Could not detect version for tap formula: ${formula}`)
         return version
       }
-      return fetch("https://formulae.brew.sh/api/formula/opencode.json")
+      return fetch("https://formulae.brew.sh/api/formula/altimate.json")
         .then((res) => {
           if (!res.ok) throw new Error(res.statusText)
           return res.json()
@@ -222,7 +246,7 @@ export namespace Installation {
         return reg.endsWith("/") ? reg.slice(0, -1) : reg
       })
       const channel = CHANNEL
-      return fetch(`${registry}/opencode-ai/${channel}`)
+      return fetch(`${registry}/@opencode-ai/opencode/${channel}`)
         .then((res) => {
           if (!res.ok) throw new Error(res.statusText)
           return res.json()
@@ -232,7 +256,7 @@ export namespace Installation {
 
     if (detectedMethod === "choco") {
       return fetch(
-        "https://community.chocolatey.org/api/v2/Packages?$filter=Id%20eq%20%27opencode%27%20and%20IsLatestVersion&$select=Version",
+        "https://community.chocolatey.org/api/v2/Packages?$filter=Id%20eq%20%27altimate%27%20and%20IsLatestVersion&$select=Version",
         { headers: { Accept: "application/json;odata=verbose" } },
       )
         .then((res) => {
@@ -243,7 +267,7 @@ export namespace Installation {
     }
 
     if (detectedMethod === "scoop") {
-      return fetch("https://raw.githubusercontent.com/ScoopInstaller/Main/master/bucket/opencode.json", {
+      return fetch("https://raw.githubusercontent.com/ScoopInstaller/Main/master/bucket/altimate.json", {
         headers: { Accept: "application/json" },
       })
         .then((res) => {
@@ -253,7 +277,7 @@ export namespace Installation {
         .then((data: any) => data.version)
     }
 
-    return fetch("https://api.github.com/repos/anomalyco/opencode/releases/latest")
+    return fetch("https://api.github.com/repos/AltimateAI/altimate-code/releases/latest")
       .then((res) => {
         if (!res.ok) throw new Error(res.statusText)
         return res.json()

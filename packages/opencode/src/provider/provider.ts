@@ -128,13 +128,13 @@ export namespace Provider {
         },
       }
     },
-    async opencode(input) {
+    async "altimate-code"(input) {
       const hasKey = await (async () => {
         const env = Env.all()
         if (input.env.some((item) => env[item])) return true
         if (await Auth.get(input.id)) return true
         const config = await Config.get()
-        if (config.provider?.["opencode"]?.options?.apiKey) return true
+        if (config.provider?.["altimate-code"]?.options?.apiKey) return true
         return false
       })()
 
@@ -278,7 +278,7 @@ export namespace Provider {
           }
 
           // Region resolution precedence (highest to lowest):
-          // 1. options.region from opencode.json provider config
+          // 1. options.region from altimate-code.json provider config
           // 2. defaultRegion from AWS_REGION environment variable
           // 3. Default "us-east-1" (baked into defaultRegion)
           const region = options?.region ?? defaultRegion
@@ -361,8 +361,8 @@ export namespace Provider {
         autoload: false,
         options: {
           headers: {
-            "HTTP-Referer": "https://opencode.ai/",
-            "X-Title": "opencode",
+            "HTTP-Referer": "https://altimate-code.dev/",
+            "X-Title": "altimate-code",
           },
         },
       }
@@ -372,8 +372,8 @@ export namespace Provider {
         autoload: false,
         options: {
           headers: {
-            "http-referer": "https://opencode.ai/",
-            "x-title": "opencode",
+            "http-referer": "https://altimate-code.dev/",
+            "x-title": "altimate-code",
           },
         },
       }
@@ -458,8 +458,8 @@ export namespace Provider {
         autoload: false,
         options: {
           headers: {
-            "HTTP-Referer": "https://opencode.ai/",
-            "X-Title": "opencode",
+            "HTTP-Referer": "https://altimate-code.dev/",
+            "X-Title": "altimate-code",
           },
         },
       }
@@ -478,7 +478,7 @@ export namespace Provider {
       const providerConfig = config.provider?.["gitlab"]
 
       const aiGatewayHeaders = {
-        "User-Agent": `opencode/${Installation.VERSION} gitlab-ai-provider/${GITLAB_PROVIDER_VERSION} (${os.platform()} ${os.release()}; ${os.arch()})`,
+        "User-Agent": `altimate-code/${Installation.VERSION} gitlab-ai-provider/${GITLAB_PROVIDER_VERSION} (${os.platform()} ${os.release()}; ${os.arch()})`,
         ...(providerConfig?.options?.aiGatewayHeaders || {}),
       }
 
@@ -547,7 +547,7 @@ export namespace Provider {
       if (!apiToken) {
         throw new Error(
           "CLOUDFLARE_API_TOKEN (or CF_AIG_TOKEN) is required for Cloudflare AI Gateway. " +
-            "Set it via environment variable or run `opencode auth cloudflare-ai-gateway`.",
+            "Set it via environment variable or run `altimate auth cloudflare-ai-gateway`.",
         )
       }
 
@@ -555,28 +555,7 @@ export namespace Provider {
       const { createAiGateway } = await import("ai-gateway-provider")
       const { createUnified } = await import("ai-gateway-provider/providers/unified")
 
-      const metadata = iife(() => {
-        if (input.options?.metadata) return input.options.metadata
-        try {
-          return JSON.parse(input.options?.headers?.["cf-aig-metadata"])
-        } catch {
-          return undefined
-        }
-      })
-      const opts = {
-        metadata,
-        cacheTtl: input.options?.cacheTtl,
-        cacheKey: input.options?.cacheKey,
-        skipCache: input.options?.skipCache,
-        collectLog: input.options?.collectLog,
-      }
-
-      const aigateway = createAiGateway({
-        accountId,
-        gateway,
-        apiKey: apiToken,
-        ...(Object.values(opts).some((v) => v !== undefined) ? { options: opts } : {}),
-      })
+      const aigateway = createAiGateway({ accountId, gateway, apiKey: apiToken })
       const unified = createUnified()
 
       return {
@@ -593,7 +572,7 @@ export namespace Provider {
         autoload: false,
         options: {
           headers: {
-            "X-Cerebras-3rd-Party-Integration": "opencode",
+            "X-Cerebras-3rd-Party-Integration": "altimate-code",
           },
         },
       }
@@ -603,8 +582,8 @@ export namespace Provider {
         autoload: false,
         options: {
           headers: {
-            "HTTP-Referer": "https://opencode.ai/",
-            "X-Title": "opencode",
+            "HTTP-Referer": "https://altimate-code.dev/",
+            "X-Title": "altimate-code",
           },
         },
       }
@@ -1249,7 +1228,7 @@ export namespace Provider {
         "gemini-2.5-flash",
         "gpt-5-nano",
       ]
-      if (providerID.startsWith("opencode")) {
+      if (providerID.startsWith("altimate-code")) {
         priority = ["gpt-5-nano"]
       }
       if (providerID.startsWith("github-copilot")) {
@@ -1287,10 +1266,10 @@ export namespace Provider {
       }
     }
 
-    // Check if opencode provider is available before using it
-    const opencodeProvider = await state().then((state) => state.providers["opencode"])
-    if (opencodeProvider && opencodeProvider.models["gpt-5-nano"]) {
-      return getModel("opencode", "gpt-5-nano")
+    // Check if altimate-code provider is available before using it
+    const altimateCodeProvider = await state().then((state) => state.providers["altimate-code"])
+    if (altimateCodeProvider && altimateCodeProvider.models["gpt-5-nano"]) {
+      return getModel("altimate-code", "gpt-5-nano")
     }
 
     return undefined

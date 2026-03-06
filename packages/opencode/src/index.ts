@@ -33,6 +33,9 @@ import path from "path"
 import { Global } from "./global"
 import { JsonMigration } from "./storage/json-migration"
 import { Database } from "./storage/db"
+// altimate_change start - telemetry import
+import { Telemetry } from "./telemetry"
+// altimate_change end
 
 process.on("unhandledRejection", (e) => {
   Log.Default.error("rejection", {
@@ -84,6 +87,15 @@ let cli = yargs(hideBin(process.argv))
     process.env.AGENT = "1"
     process.env.OPENCODE = "1"
     process.env.OPENCODE_PID = String(process.pid)
+    // altimate_change start - datapilot env var
+    process.env.DATAPILOT = "1"
+    // altimate_change end
+
+    // altimate_change start - telemetry init
+    // Initialize telemetry early so events from MCP, engine, auth are captured.
+    // init() is idempotent — safe to call again later in session prompt.
+    Telemetry.init().catch(() => {})
+    // altimate_change end
 
     // altimate_change start - app name in logs
     Log.Default.info("altimate-code", {
@@ -214,6 +226,17 @@ try {
   }
   process.exitCode = 1
 } finally {
+  // altimate_change start - telemetry flush
+  // Flush any buffered telemetry events before exiting.
+  // This is critical for non-session commands (auth, upgrade, mcp, etc.)
+  // that track events but don't go through the session prompt shutdown path.
+  // shutdown() is idempotent — safe even if session prompt already called it.
+  try {
+    await Telemetry.shutdown()
+  } catch {
+    // Telemetry failure must never prevent shutdown
+  }
+  // altimate_change end
   // Some subprocesses don't react properly to SIGTERM and similar signals.
   // Most notably, some docker-container-based MCP servers don't handle such signals unless
   // run using `docker run --init`.

@@ -2,6 +2,7 @@ import { Control } from "@/control"
 import { Config } from "@/config/config"
 import { Installation } from "@/installation"
 import { Log } from "@/util/log"
+import { createHash } from "crypto"
 
 const log = Log.create({ service: "telemetry" })
 
@@ -57,8 +58,11 @@ export namespace Telemetry {
         message_id: string
         tool_name: string
         tool_type: "standard" | "mcp"
+        tool_category: string
         status: "success" | "error"
         duration_ms: number
+        sequence_index: number
+        previous_tool: string | null
         error?: string
       }
     | {
@@ -108,6 +112,179 @@ export namespace Telemetry {
         count: number
         tokens_pruned: number
       }
+    | {
+        type: "auth_login"
+        timestamp: number
+        session_id: string
+        provider_id: string
+        method: "oauth" | "api_key"
+        status: "success" | "error"
+        error?: string
+      }
+    | {
+        type: "auth_logout"
+        timestamp: number
+        session_id: string
+        provider_id: string
+      }
+    | {
+        type: "mcp_server_status"
+        timestamp: number
+        session_id: string
+        server_name: string
+        transport: "stdio" | "sse" | "streamable-http"
+        status: "connected" | "disconnected" | "error"
+        error?: string
+        duration_ms?: number
+      }
+    | {
+        type: "provider_error"
+        timestamp: number
+        session_id: string
+        provider_id: string
+        model_id: string
+        error_type: string
+        error_message: string
+        http_status?: number
+      }
+    | {
+        type: "engine_started"
+        timestamp: number
+        session_id: string
+        engine_version: string
+        python_version: string
+        status: "started" | "restarted" | "upgraded"
+        duration_ms: number
+      }
+    | {
+        type: "engine_error"
+        timestamp: number
+        session_id: string
+        phase: "uv_download" | "venv_create" | "pip_install" | "startup" | "runtime"
+        error_message: string
+      }
+    | {
+        type: "upgrade_attempted"
+        timestamp: number
+        session_id: string
+        from_version: string
+        to_version: string
+        method: "npm" | "bun" | "brew" | "other"
+        status: "success" | "error"
+        error?: string
+      }
+    | {
+        type: "session_forked"
+        timestamp: number
+        session_id: string
+        parent_session_id: string
+        message_count: number
+      }
+    | {
+        type: "permission_denied"
+        timestamp: number
+        session_id: string
+        tool_name: string
+        tool_category: string
+        source: "user" | "config_rule"
+      }
+    | {
+        type: "doom_loop_detected"
+        timestamp: number
+        session_id: string
+        tool_name: string
+        repeat_count: number
+      }
+    | {
+        type: "environment_census"
+        timestamp: number
+        session_id: string
+        warehouse_types: string[]
+        warehouse_count: number
+        dbt_detected: boolean
+        dbt_adapter: string | null
+        dbt_model_count_bucket: string
+        dbt_source_count_bucket: string
+        dbt_test_count_bucket: string
+        connection_sources: string[]
+        mcp_server_count: number
+        skill_count: number
+        os: string
+        feature_flags: string[]
+      }
+    | {
+        type: "context_utilization"
+        timestamp: number
+        session_id: string
+        model_id: string
+        tokens_used: number
+        context_limit: number
+        utilization_pct: number
+        generation_number: number
+        cache_hit_ratio: number
+      }
+    | {
+        type: "agent_outcome"
+        timestamp: number
+        session_id: string
+        agent: string
+        tool_calls: number
+        generations: number
+        duration_ms: number
+        cost: number
+        compactions: number
+        outcome: "completed" | "abandoned" | "error"
+      }
+    | {
+        type: "error_recovered"
+        timestamp: number
+        session_id: string
+        error_type: string
+        recovery_strategy: string
+        attempts: number
+        recovered: boolean
+        duration_ms: number
+      }
+    | {
+        type: "mcp_server_census"
+        timestamp: number
+        session_id: string
+        server_name: string
+        transport: "stdio" | "sse" | "streamable-http"
+        tool_count: number
+        resource_count: number
+      }
+
+  const FILE_TOOLS = new Set(["read", "write", "edit", "glob", "grep", "bash"])
+
+  // Order matters: more specific patterns (e.g. "warehouse_usage") are checked
+  // before broader ones (e.g. "warehouse") to avoid miscategorization.
+  const CATEGORY_PATTERNS: Array<{ category: string; keywords: string[] }> = [
+    { category: "finops", keywords: ["cost", "finops", "warehouse_usage"] },
+    { category: "sql", keywords: ["sql", "query"] },
+    { category: "schema", keywords: ["schema", "column", "table"] },
+    { category: "dbt", keywords: ["dbt"] },
+    { category: "warehouse", keywords: ["warehouse", "connection"] },
+    { category: "lineage", keywords: ["lineage", "dag"] },
+  ]
+
+  export function categorizeToolName(name: string, type: "standard" | "mcp"): string {
+    if (type === "mcp") return "mcp"
+    const n = name.toLowerCase()
+    if (FILE_TOOLS.has(n)) return "file"
+    for (const { category, keywords } of CATEGORY_PATTERNS) {
+      if (keywords.some((kw) => n.includes(kw))) return category
+    }
+    return "standard"
+  }
+
+  export function bucketCount(n: number): string {
+    if (n <= 0) return "0"
+    if (n <= 10) return "1-10"
+    if (n <= 50) return "10-50"
+    if (n <= 200) return "50-200"
+    return "200+"
+  }
 
   type AppInsightsConfig = {
     iKey: string
@@ -121,6 +298,9 @@ export namespace Telemetry {
   let sessionId = ""
   let projectId = ""
   let appInsights: AppInsightsConfig | undefined
+  let droppedEvents = 0
+  let initPromise: Promise<void> | undefined
+  let initDone = false
 
   function parseConnectionString(cs: string): AppInsightsConfig | undefined {
     const parts: Record<string, string> = {}
@@ -166,9 +346,9 @@ export namespace Telemetry {
         time: new Date(timestamp).toISOString(),
         iKey: cfg.iKey,
         tags: {
-          "ai.session.id": sid,
+          "ai.session.id": sid || "startup",
           "ai.user.id": userEmail,
-          "ai.cloud.role": "altimate-code",
+          "ai.cloud.role": "altimate",
           "ai.application.ver": Installation.VERSION,
         },
         data: {
@@ -189,28 +369,58 @@ export namespace Telemetry {
   const DEFAULT_CONNECTION_STRING =
     "InstrumentationKey=5095f5e6-477e-4262-b7ae-2118de18550d;IngestionEndpoint=https://eastus-8.in.applicationinsights.azure.com/;LiveEndpoint=https://eastus.livediagnostics.monitor.azure.com/;ApplicationId=6564474f-329b-4b7d-849e-e70cb4181294"
 
-  export async function init() {
-    if (enabled || flushTimer) return
-    const userConfig = await Config.get()
-    if (userConfig.telemetry?.disabled) return
+  // Deduplicates concurrent calls: non-awaited init() in middleware/worker
+  // won't race with await init() in session prompt.
+  export function init(): Promise<void> {
+    if (!initPromise) {
+      initPromise = doInit()
+    }
+    return initPromise
+  }
+
+  async function doInit() {
     try {
+      if (process.env.ALTIMATE_TELEMETRY_DISABLED === "true") {
+        buffer = []
+        return
+      }
+      // Config.get() may throw outside Instance context (e.g. CLI middleware
+      // before Instance.provide()). Treat config failures as "not disabled" —
+      // the env var check above is the early-init escape hatch.
+      try {
+        const userConfig = await Config.get() as any
+        if (userConfig.telemetry?.disabled) {
+          buffer = []
+          return
+        }
+      } catch {
+        // Config unavailable — proceed with telemetry enabled
+      }
       // App Insights: env var overrides default (for dev/testing), otherwise use the baked-in key
       const connectionString = process.env.APPLICATIONINSIGHTS_CONNECTION_STRING ?? DEFAULT_CONNECTION_STRING
       const cfg = parseConnectionString(connectionString)
       if (!cfg) {
-        enabled = false
+        buffer = []
         return
       }
       appInsights = cfg
-      const account = Control.account()
-      if (account) userEmail = account.email
+      try {
+        const account = Control.account()
+        if (account) {
+          userEmail = createHash("sha256").update(account.email.toLowerCase().trim()).digest("hex")
+        }
+      } catch {
+        // Account unavailable — proceed without user ID
+      }
       enabled = true
       log.info("telemetry initialized", { mode: "appinsights" })
       const timer = setInterval(flush, FLUSH_INTERVAL_MS)
       if (typeof timer === "object" && timer && "unref" in timer) (timer as any).unref()
       flushTimer = timer
     } catch {
-      enabled = false
+      buffer = []
+    } finally {
+      initDone = true
     }
   }
 
@@ -224,10 +434,13 @@ export namespace Telemetry {
   }
 
   export function track(event: Event) {
-    if (!enabled) return
+    // Before init completes: buffer (flushed once init enables, or cleared if disabled).
+    // After init completed and disabled telemetry: drop silently.
+    if (initDone && !enabled) return
     buffer.push(event)
     if (buffer.length > MAX_BUFFER_SIZE) {
       buffer.shift()
+      droppedEvents++
     }
   }
 
@@ -235,6 +448,18 @@ export namespace Telemetry {
     if (!enabled || buffer.length === 0 || !appInsights) return
 
     const events = buffer.splice(0, buffer.length)
+
+    if (droppedEvents > 0) {
+      events.push({
+        type: "error",
+        timestamp: Date.now(),
+        session_id: sessionId,
+        error_name: "TelemetryBufferOverflow",
+        error_message: `${droppedEvents} events dropped due to buffer overflow`,
+        context: "telemetry",
+      } as Event)
+      droppedEvents = 0
+    }
 
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
@@ -249,13 +474,29 @@ export namespace Telemetry {
         log.debug("telemetry flush failed", { status: response.status })
       }
     } catch {
-      // Silently drop on failure — telemetry must never break the CLI
+      // Re-add events that haven't been retried yet to avoid data loss
+      const retriable = events.filter((e) => !(e as any)._retried)
+      for (const e of retriable) {
+        ;(e as any)._retried = true
+      }
+      const space = Math.max(0, MAX_BUFFER_SIZE - buffer.length)
+      buffer.unshift(...retriable.slice(0, space))
     } finally {
       clearTimeout(timeout)
     }
   }
 
   export async function shutdown() {
+    // Wait for init to complete so we know whether telemetry is enabled
+    // and have a valid endpoint to flush to.  init() is fire-and-forget
+    // in CLI middleware, so it may still be in-flight when shutdown runs.
+    if (initPromise) {
+      try {
+        await initPromise
+      } catch {
+        // init failed — nothing to flush
+      }
+    }
     if (flushTimer) {
       clearInterval(flushTimer)
       flushTimer = undefined
@@ -264,7 +505,10 @@ export namespace Telemetry {
     enabled = false
     appInsights = undefined
     buffer = []
+    droppedEvents = 0
     sessionId = ""
     projectId = ""
+    initPromise = undefined
+    initDone = false
   }
 }

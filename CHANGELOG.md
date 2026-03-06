@@ -5,6 +5,75 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] - 2026-03-04
+
+### Added
+
+- E2E tests for npm install pipeline: postinstall script, bin wrapper, and publish output (#50)
+
+## [0.2.3] - 2026-03-04
+
+### Added
+
+- Postinstall welcome banner and changelog display after upgrade (#48)
+
+### Fixed
+
+- Security: validate well-known auth command type before execution, add confirmation prompt (#45)
+- CI/CD: SHA-pin all GitHub Actions, per-job least-privilege permissions (#45)
+- MCP: fix copy-paste log messages, log init errors, prefix floating promises (#45)
+- Session compaction: clean up compactionAttempts on abort to prevent memory leak (#45)
+- Telemetry: retry failed flush events once with buffer-size cap (#45, #46)
+- Telemetry: flush events before process exit (#46)
+- TUI: resolve worker startup crash from circular dependency (#47)
+- CLI: define ALTIMATE_CLI build-time constants for correct version reporting (#41)
+- Address 4 issues found in post-v0.2.2 commits (#49)
+- Address remaining code review issues from PR #39 (#43)
+
+### Changed
+
+- CI/CD: optimize pipeline with caching and parallel builds (#42)
+
+### Docs
+
+- Add security FAQ (#44)
+
+## [0.2.2] - 2026-03-05
+
+### Fixed
+
+- Telemetry init: `Config.get()` failure outside Instance context no longer silently disables telemetry
+- Telemetry init: called early in CLI middleware and worker thread so MCP/engine/auth events are captured
+- Telemetry init: promise deduplication prevents concurrent init race conditions
+- Telemetry: pre-init events are now buffered and flushed (previously silently dropped)
+- Telemetry: user email is SHA-256 hashed before sending (privacy)
+- Telemetry: error message truncation standardized to 500 chars across all event types
+- Telemetry: `ALTIMATE_TELEMETRY_DISABLED` env var now actually checked in init
+- Telemetry: MCP disconnect reports correct transport type instead of hardcoded `stdio`
+- Telemetry: `agent_outcome` now correctly reports `"error"` outcome for failed sessions
+
+### Changed
+
+- Auth telemetry events use session context when available instead of hardcoded `"cli"`
+
+## [0.2.1] - 2026-03-05
+
+### Added
+
+- Comprehensive telemetry instrumentation: 25 event types across auth, MCP servers, Python engine, provider errors, permissions, upgrades, context utilization, agent outcomes, workflow sequencing, and environment census
+- Telemetry docs page with event table, privacy policy, opt-out instructions, and contributor guide
+- AppInsights endpoint added to network firewall documentation
+- `categorizeToolName()` helper for tool classification (sql, schema, dbt, finops, warehouse, lineage, file, mcp)
+- `bucketCount()` helper for privacy-safe count bucketing
+
+### Fixed
+
+- Command loading made resilient to MCP/Skill initialization failures
+
+### Changed
+
+- CLI binary renamed from `altimate-code` to `altimate`
+
 ## [0.2.0] - 2026-03-04
 
 ### Added
