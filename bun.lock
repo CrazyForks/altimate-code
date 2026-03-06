@@ -296,6 +296,8 @@
       "version": "1.2.20",
       "bin": {
         "opencode": "./bin/opencode",
+        "altimate": "./bin/altimate",
+        "altimate-code": "./bin/altimate",
       },
       "dependencies": {
         "@actions/core": "1.11.1",
