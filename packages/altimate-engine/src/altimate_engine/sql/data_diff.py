@@ -56,9 +56,11 @@ def _execute_task(task: dict, warehouse: str) -> dict:
     )
 
     # Convert SqlExecuteResult rows to the format expected by ReladiffSession.step()
+    # Guard: executor returns a synthetic status row when row_count is 0 — skip it.
     rows: list[list[str | None]] = []
-    for row in result.rows:
-        rows.append([str(v) if v is not None else None for v in row])
+    if result.row_count > 0:
+        for row in result.rows:
+            rows.append([str(v) if v is not None else None for v in row])
 
     return {"id": task["id"], "rows": rows}
 
