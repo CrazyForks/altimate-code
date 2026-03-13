@@ -176,11 +176,14 @@ def _run_single_attempt(
 
     # Check if dbt run succeeded (search events for successful bash output)
     dbt_success = False
+    langfuse_trace_url = None
     for event in events:
         if event.get("type") == "tool_use":
             output = json.dumps(event.get("output", ""))
             if "Completed successfully" in output or "Done." in output:
                 dbt_success = True
+        if event.get("type") == "langfuse_trace":
+            langfuse_trace_url = event.get("url")
 
     return {
         "instance_id": instance_id,
@@ -193,6 +196,7 @@ def _run_single_attempt(
         "agent_output": agent_output[:5000],  # Truncate for storage
         "event_count": len(events),
         "stderr_tail": stderr[-2000:] if stderr else "",
+        "langfuse_trace_url": langfuse_trace_url,
     }
 
 

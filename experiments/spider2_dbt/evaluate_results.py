@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from datetime import datetime, timezone
@@ -182,6 +183,56 @@ def evaluate_task(
     return result
 
 
+def update_langfuse_traces(
+    evaluations: list[dict[str, Any]],
+    task_results: list[dict[str, Any]],
+) -> int:
+    """Update Langfuse traces with pass/fail scores after evaluation.
+
+    Returns the number of traces updated.
+    """
+    try:
+        from langfuse import Langfuse
+    except ImportError:
+        print("  (langfuse not installed — skipping trace updates)")
+        return 0
+
+    # Only proceed if Langfuse env vars are configured
+    if not os.environ.get("LANGFUSE_SECRET_KEY") or not os.environ.get("LANGFUSE_PUBLIC_KEY"):
+        return 0
+
+    client = Langfuse()
+    results_by_id = {r["instance_id"]: r for r in task_results}
+    updated = 0
+
+    for eval_result in evaluations:
+        instance_id = eval_result["instance_id"]
+        task_result = results_by_id.get(instance_id)
+        if not task_result:
+            continue
+
+        trace_url = task_result.get("langfuse_trace_url")
+        if not trace_url:
+            continue
+
+        # Extract trace ID from URL (last path segment)
+        trace_id = trace_url.rsplit("/", 1)[-1]
+
+        try:
+            client.score(
+                trace_id=trace_id,
+                name="benchmark_pass",
+                value=1.0 if eval_result["passed"] else 0.0,
+                comment=eval_result.get("error") or ("PASS" if eval_result["passed"] else "FAIL"),
+            )
+            updated += 1
+        except Exception as e:
+            print(f"  Warning: failed to update trace for {instance_id}: {e}")
+
+    client.flush()
+    return updated
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate Spider 2.0-DBT benchmark results")
     parser.add_argument("--results", type=str, default=None, help="Path to benchmark results JSON")
@@ -303,6 +354,11 @@ def main() -> None:
     if latest.is_symlink() or latest.exists():
         latest.unlink()
     latest.symlink_to(eval_path.name)
+
+    # Update Langfuse traces with pass/fail scores
+    lf_updated = update_langfuse_traces(evaluations, task_results)
+    if lf_updated > 0:
+        print(f"  Langfuse: updated {lf_updated} traces with benchmark_pass scores")
 
     # Print summary
     print()
