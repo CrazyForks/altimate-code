@@ -6,6 +6,14 @@ import { Skill } from "../skill"
 import { PermissionNext } from "../permission/next"
 import { Ripgrep } from "../file/ripgrep"
 import { iife } from "@/util/iife"
+// altimate_change start - import for LLM-based dynamic skill selection
+import { Fingerprint } from "../altimate/fingerprint"
+import { MessageContext } from "../altimate/context/message-context"
+import { Config } from "../config/config"
+import { selectSkillsWithLLM } from "../altimate/skill-selector"
+
+const MAX_DISPLAY_SKILLS = 50
+// altimate_change end
 
 export const SkillTool = Tool.define("skill", async (ctx) => {
   const skills = await Skill.all()
@@ -19,8 +27,24 @@ export const SkillTool = Tool.define("skill", async (ctx) => {
       })
     : skills
 
+  // altimate_change start - LLM-based dynamic skill selection
+  const cfg = await Config.get()
+  let allAllowed: Skill.Info[]
+  if (cfg.experimental?.dynamic_skills) {
+    allAllowed = await selectSkillsWithLLM(
+      accessibleSkills,
+      MessageContext.get(),
+      Fingerprint.get(),
+    )
+  } else {
+    allAllowed = accessibleSkills
+  }
+  const displaySkills = allAllowed.slice(0, MAX_DISPLAY_SKILLS)
+  const hasMore = allAllowed.length > displaySkills.length
+  // altimate_change end
+
   const description =
-    accessibleSkills.length === 0
+    displaySkills.length === 0
       ? "Load a specialized skill that provides domain-specific instructions and workflows. No skills are currently available."
       : [
           "Load a specialized skill that provides domain-specific instructions and workflows.",
@@ -35,7 +59,7 @@ export const SkillTool = Tool.define("skill", async (ctx) => {
           "Invoke this tool to load a skill when a task matches one of the available skills listed below:",
           "",
           "<available_skills>",
-          ...accessibleSkills.flatMap((skill) => [
+          ...displaySkills.flatMap((skill) => [
             `  <skill>`,
             `    <name>${skill.name}</name>`,
             `    <description>${skill.description}</description>`,
@@ -43,9 +67,17 @@ export const SkillTool = Tool.define("skill", async (ctx) => {
             `  </skill>`,
           ]),
           "</available_skills>",
+          // altimate_change start - add hint when skills are truncated
+          ...(hasMore
+            ? [
+                "",
+                `Note: Showing ${displaySkills.length} of ${allAllowed.length} available skills.`,
+              ]
+            : []),
+          // altimate_change end
         ].join("\n")
 
-  const examples = accessibleSkills
+  const examples = displaySkills
     .map((skill) => `'${skill.name}'`)
     .slice(0, 3)
     .join(", ")
@@ -59,12 +91,14 @@ export const SkillTool = Tool.define("skill", async (ctx) => {
     description,
     parameters,
     async execute(params: z.infer<typeof parameters>, ctx) {
+      // altimate_change start - use upstream Skill.get() for exact name lookup
       const skill = await Skill.get(params.name)
 
       if (!skill) {
-        const available = await Skill.all().then((x) => Object.keys(x).join(", "))
+        const available = await Skill.all().then((s) => s.map((x) => x.name).join(", "))
         throw new Error(`Skill "${params.name}" not found. Available skills: ${available || "none"}`)
       }
+      // altimate_change end
 
       await ctx.ask({
         permission: "skill",
@@ -121,3 +155,5 @@ export const SkillTool = Tool.define("skill", async (ctx) => {
     },
   }
 })
+
+// altimate_change end - old partitionByFingerprint + rescueByMessage removed, replaced by selectSkillsWithLLM

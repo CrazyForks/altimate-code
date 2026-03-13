@@ -1,6 +1,11 @@
 ---
 name: cost-report
 description: Analyze Snowflake query costs and identify optimization opportunities
+  - snowflake
+  - sql
+  - finops
+  - cost
+  - optimization
 ---
 
 # Cost Report

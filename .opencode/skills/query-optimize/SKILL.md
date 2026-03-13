@@ -1,6 +1,12 @@
 ---
 name: query-optimize
 description: Analyze and optimize SQL queries for better performance
+  - sql
+  - snowflake
+  - bigquery
+  - postgres
+  - optimization
+  - performance
 ---
 
 # Query Optimize

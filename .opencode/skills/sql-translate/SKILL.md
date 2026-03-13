@@ -1,6 +1,13 @@
 ---
 name: sql-translate
 description: Translate SQL queries between database dialects (Snowflake, BigQuery, PostgreSQL, MySQL, etc.)
+  - sql
+  - snowflake
+  - bigquery
+  - postgres
+  - mysql
+  - migration
+  - translation
 ---
 
 # SQL Translate

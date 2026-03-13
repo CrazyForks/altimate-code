@@ -1,6 +1,10 @@
 ---
 name: impact-analysis
 description: Analyze the downstream impact of changes to a dbt model by combining column-level lineage with the dbt dependency graph.
+  - dbt
+  - lineage
+  - sql
+  - analytics
 ---
 
 # Impact Analysis

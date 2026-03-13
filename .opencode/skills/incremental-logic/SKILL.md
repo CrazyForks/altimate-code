@@ -1,6 +1,10 @@
 ---
 name: incremental-logic
 description: Add or fix incremental materialization logic in dbt models — is_incremental(), unique keys, merge strategies.
+  - dbt
+  - sql
+  - analytics
+  - materialization
 ---
 
 # Incremental Logic Assistant

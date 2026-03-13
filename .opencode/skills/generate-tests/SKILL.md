@@ -1,6 +1,11 @@
 ---
 name: generate-tests
 description: Generate dbt tests for a model by inspecting its schema and SQL, producing schema.yml test definitions.
+  - dbt
+  - testing
+  - sql
+  - analytics
+  - data-quality
 ---
 
 # Generate dbt Tests
