@@ -55,6 +55,11 @@ def _execute_task(task: dict, warehouse: str) -> dict:
         SqlExecuteParams(sql=task["sql"], warehouse=warehouse, limit=100_000)
     )
 
+    # Detect error results: execute_sql returns columns=['error'] on failure
+    if result.columns and result.columns[0] == "error":
+        error_msg = result.rows[0][0] if result.rows else "Unknown SQL execution error"
+        raise RuntimeError(f"SQL execution failed for task {task['id']}: {error_msg}")
+
     # Convert SqlExecuteResult rows to the format expected by ReladiffSession.step()
     # Guard: executor returns a synthetic status row when row_count is 0 — skip it.
     rows: list[list[str | None]] = []
