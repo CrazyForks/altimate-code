@@ -83,6 +83,14 @@ def prepare_workspace(instance_id: str) -> Path:
         shutil.rmtree(dst)
     shutil.copytree(src, dst)
 
+    # Fix deprecated dbt config keys to suppress warnings
+    dbt_yml = dst / "dbt_project.yml"
+    if dbt_yml.exists():
+        content = dbt_yml.read_text()
+        content = content.replace("source-paths:", "model-paths:")
+        content = content.replace("data-paths:", "seed-paths:")
+        dbt_yml.write_text(content)
+
     return dst
 
 
