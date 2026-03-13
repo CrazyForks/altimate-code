@@ -24,8 +24,18 @@ try:
 except ImportError:
     RELADIFF_AVAILABLE = False
 
-# Map TableSide enum values to warehouse names
-_SIDE_MAP = {"Table1": "source", "Table2": "target"}
+
+def _validate_where_clause(clause: str | None) -> str | None:
+    """Validate a WHERE clause for safety. Rejects injection patterns."""
+    if clause is None:
+        return None
+    if ";" in clause:
+        raise ValueError("WHERE clause must not contain semicolons")
+    if "--" in clause:
+        raise ValueError("WHERE clause must not contain SQL comments (--)")
+    if "/*" in clause:
+        raise ValueError("WHERE clause must not contain block comments (/*)")
+    return clause
 
 
 def _resolve_dialect(warehouse_name: str) -> str:
@@ -100,6 +110,11 @@ def run_data_diff(
         }
 
     target_warehouse = target_warehouse or source_warehouse
+
+    # Validate WHERE clauses
+    where_clause = _validate_where_clause(where_clause)
+    source_where_clause = _validate_where_clause(source_where_clause)
+    target_where_clause = _validate_where_clause(target_where_clause)
 
     # Resolve dialects from connection types
     dialect1 = _resolve_dialect(source_warehouse)

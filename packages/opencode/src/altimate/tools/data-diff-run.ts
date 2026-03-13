@@ -123,7 +123,8 @@ function formatOutcome(outcome: Record<string, unknown>, args: Record<string, un
       lines.push(`Exclusive to table1: ${stats.exclusive_table1 ?? 0}`)
       lines.push(`Exclusive to table2: ${stats.exclusive_table2 ?? 0}`)
       lines.push(`Updated: ${stats.updated ?? 0}`)
-      lines.push(`Diff %: ${((stats.diff_percent as number) * 100).toFixed(2)}%`)
+      const diffPct = stats.diff_percent != null ? ((stats.diff_percent as number) * 100).toFixed(2) : "N/A"
+      lines.push(`Diff %: ${diffPct}%`)
 
       // Per-column match rates
       const matchRates = (stats.column_match_rates ?? []) as Record<string, unknown>[]
@@ -131,8 +132,8 @@ function formatOutcome(outcome: Record<string, unknown>, args: Record<string, un
         lines.push("")
         lines.push("Column Match Rates:")
         for (const col of matchRates) {
-          const pct = (col.match_percent as number).toFixed(1)
-          lines.push(`  ${col.column}: ${pct}% (${col.matched}/${col.total})`)
+          const pct = col.match_percent != null ? (col.match_percent as number).toFixed(1) : "N/A"
+          lines.push(`  ${col.column}: ${pct}% (${col.matched ?? "?"}/${col.total ?? "?"})`)
         }
       }
 
