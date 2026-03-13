@@ -31,3 +31,6 @@ tsconfig.tsbuildinfo
 .claude/
 simulation/
 .github/meta/
+__pycache__/
+autoimprove/
+data/scratch/
