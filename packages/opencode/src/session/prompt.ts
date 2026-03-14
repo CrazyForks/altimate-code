@@ -19,9 +19,6 @@ import { SystemPrompt } from "./system"
 import { InstructionPrompt } from "./instruction"
 import { Plugin } from "../plugin"
 import PROMPT_PLAN from "../session/prompt/plan.txt"
-// altimate_change start - builder auto-verification prompt
-import PROMPT_BUILDER_VERIFY from "../altimate/prompts/builder-verify.txt"
-// altimate_change end
 import BUILD_SWITCH from "../session/prompt/build-switch.txt"
 import MAX_STEPS from "../session/prompt/max-steps.txt"
 import { defer } from "../util/defer"
@@ -298,9 +295,6 @@ export namespace SessionPrompt {
     // on the user message and will be retrieved from lastUser below
     let structuredOutput: unknown | undefined
 
-    // altimate_change start - builder auto-verification
-    let verificationDone = false
-    // altimate_change end
     let step = 0
     const sessionStartTime = Date.now()
     let sessionTotalCost = 0
@@ -379,33 +373,6 @@ export namespace SessionPrompt {
         !["tool-calls", "unknown"].includes(lastAssistant.finish) &&
         lastUser.id < lastAssistant.id
       ) {
-        // altimate_change start - auto-verification for builder agent
-        if (!verificationDone && sessionAgentName === "builder") {
-          verificationDone = true
-          log.info("injecting builder verification", { sessionID })
-          const verifyMsg: MessageV2.User = {
-            id: Identifier.ascending("message"),
-            sessionID,
-            role: "user",
-            time: { created: Date.now() },
-            agent: lastUser.agent,
-            model: lastUser.model,
-            variant: lastUser.variant,
-            tools: lastUser.tools,
-            system: lastUser.system,
-            format: lastUser.format,
-          }
-          await Session.updateMessage(verifyMsg)
-          await Session.updatePart({
-            id: Identifier.ascending("part"),
-            messageID: verifyMsg.id,
-            sessionID,
-            type: "text",
-            text: PROMPT_BUILDER_VERIFY,
-          })
-          continue
-        }
-        // altimate_change end
         log.info("exiting loop", { sessionID })
         break
       }
