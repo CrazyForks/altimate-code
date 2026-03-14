@@ -954,7 +954,42 @@ def dispatch(request: JsonRpcRequest) -> JsonRpcResponse:
             )
             result = LocalTestResult(**raw)
         elif method == "data_diff.run":
-            from altimate_engine.sql.data_diff import run_data_diff
+            try:
+                from altimate_core.data_diff import run_data_diff
+            except ImportError:
+                return JsonRpcResponse(
+                    result={
+                        "success": False,
+                        "error": "altimate-core not installed. Install with: pip install altimate-core",
+                    },
+                    id=request.id,
+                )
+
+            _DIALECT_MAP = {
+                "snowflake": "snowflake", "duckdb": "duckdb",
+                "postgres": "postgres", "postgresql": "postgres",
+                "bigquery": "bigquery", "mysql": "mysql",
+                "clickhouse": "clickhouse", "databricks": "databricks",
+                "redshift": "redshift",
+            }
+
+            def _resolve_dialect(wh_name: str) -> str:
+                try:
+                    conn = ConnectionRegistry.get(wh_name)
+                    return _DIALECT_MAP.get(getattr(conn, "type", "").lower(), "generic")
+                except Exception:
+                    return "generic"
+
+            def _executor(sql: str, warehouse: str):
+                result = execute_sql(SqlExecuteParams(sql=sql, warehouse=warehouse, limit=100_000))
+                if result.columns and result.columns[0] == "error":
+                    error_msg = result.rows[0][0] if result.rows else "Unknown SQL error"
+                    raise RuntimeError(error_msg)
+                rows = []
+                if result.row_count > 0:
+                    for row in result.rows:
+                        rows.append([str(v) if v is not None else None for v in row])
+                return rows
 
             raw = run_data_diff(
                 source_table=params.get("source_table", ""),
@@ -973,6 +1008,8 @@ def dispatch(request: JsonRpcRequest) -> JsonRpcResponse:
                 source_schema=params.get("source_schema"),
                 target_database=params.get("target_database"),
                 target_schema=params.get("target_schema"),
+                executor=_executor,
+                dialect_resolver=_resolve_dialect,
             )
             return JsonRpcResponse(result=raw, id=request.id)
         elif method == "ping":
