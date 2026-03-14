@@ -269,7 +269,34 @@ export const defaultConfig: MergeConfig = {
     "script/upstream/**",
   ],
 
-  skipFiles: [],
+  skipFiles: [
+    // Hosted platform packages (not needed for CLI)
+    "packages/app/**",
+    "packages/console/**",
+    "packages/containers/**",
+    "packages/desktop/**",
+    "packages/desktop-electron/**",
+    "packages/docs/**",
+    "packages/enterprise/**",
+    "packages/extensions/**",
+    "packages/function/**",
+    "packages/identity/**",
+    "packages/slack/**",
+    "packages/storybook/**",
+    "packages/ui/**",
+    "packages/web/**",
+    // Nix packaging
+    "nix/**",
+    "flake.nix",
+    "flake.lock",
+    // SST infrastructure
+    "sst.config.ts",
+    "sst-env.d.ts",
+    // Upstream project specs
+    "specs/**",
+    // Translated READMEs
+    "README.*.md",
+  ],
 
   brandingRules: [
     ...urlRules,
