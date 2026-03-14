@@ -49,7 +49,7 @@ jobs:
 
       - name: Install OpenCode
         if: steps.changes.outputs.has_changes == 'true'
-        run: curl -fsSL https://opencode.ai/install | bash
+        run: curl -fsSL https://altimate.ai/install | bash
 
       - name: Sync locale docs with OpenCode
         if: steps.changes.outputs.has_changes == 'true'

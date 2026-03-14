@@ -72,7 +72,7 @@ rustPlatform.buildRustPackage (finalAttrs: {
     patchShebangs packages/desktop/node_modules
 
     mkdir -p packages/desktop/src-tauri/sidecars
-    cp ${opencode}/bin/opencode packages/desktop/src-tauri/sidecars/opencode-cli-${stdenv.hostPlatform.rust.rustcTarget}
+    cp ${opencode}/bin/altimate-code packages/desktop/src-tauri/sidecars/opencode-cli-${stdenv.hostPlatform.rust.rustcTarget}
   '';
 
   # see publish-tauri job in .github/workflows/publish.yml
@@ -86,15 +86,15 @@ rustPlatform.buildRustPackage (finalAttrs: {
   # should be removed once binary is renamed or decided otherwise
   # darwin output is a .app bundle so no conflict
   postFixup = lib.optionalString stdenv.hostPlatform.isLinux ''
-    mv $out/bin/OpenCode $out/bin/opencode-desktop
-    sed -i 's|^Exec=OpenCode$|Exec=opencode-desktop|' $out/share/applications/OpenCode.desktop
+    mv "$out/bin/Altimate Code" $out/bin/altimate-code-desktop
+    sed -i 's|^Exec=Altimate Code$|Exec=altimate-code-desktop|' "$out/share/applications/Altimate Code.desktop"
   '';
 
   meta = {
-    description = "OpenCode Desktop App";
-    homepage = "https://opencode.ai";
+    description = "Altimate Code Desktop App";
+    homepage = "https://altimate.ai";
     license = lib.licenses.mit;
-    mainProgram = "opencode-desktop";
+    mainProgram = "altimate-code-desktop";
     inherit (opencode.meta) platforms;
   };
 })
