@@ -26,13 +26,14 @@ Work like a data engineer — understand the data, write the model, build, verif
 
 ### 2. Understand the data
 - Query source tables with `sql_execute` or `dbt_run show` to see actual data — row counts, sample values, NULLs, date ranges, edge cases
-- This is critical. Don't write SQL blind. Know what the data looks like before writing transforms.
+- **You must run at least one query on the source data before writing any SQL model.** Don't write SQL blind — the most common failure mode is pattern-matching from schema alone and getting the logic wrong.
 
 ### 3. Write the model
 - Follow patterns from existing models in the project
 - Use `{{ ref('model_name') }}` for dbt models, `{{ source('source', 'table') }}` for raw tables
+- If staging models exist (e.g., `stg_*`), prefer referencing them over raw source tables or `var()` references — they typically have cleaned/renamed columns that match what downstream models expect.
 - Prefer CTEs over subqueries
-- Avoid non-deterministic functions (`current_date`, `now()`) on fixed datasets — derive boundaries from source data
+- **Never use `current_date`, `now()`, or `current_timestamp`** for date spine boundaries or filters. Always derive start/end dates from `MIN(date)` / `MAX(date)` in the source data.
 
 ### 4. Build and verify
 - Run `dbt build`. This is the single most important step.
@@ -41,6 +42,7 @@ Work like a data engineer — understand the data, write the model, build, verif
   - Correct columns and types
   - Row count makes sense (no fan-out from bad joins, no missing rows from wrong filters)
   - Values look right (spot-check a few rows, check NULLs, check aggregations)
+- **Compare row counts against source**: Run `dbt show` on your model and on the upstream source/ref. If your model has significantly more or fewer rows than expected from the grain, something is wrong. Fix before declaring done.
 
 ### 5. Iterate
 - If output doesn't look right, fix and rebuild until it does
@@ -48,6 +50,11 @@ Work like a data engineer — understand the data, write the model, build, verif
 - Use `sql_analyze` if you suspect anti-patterns causing wrong results
 
 A task is complete when `dbt build` passes and the output data is correct.
+
+**Critical rules:**
+- Always run `dbt build` AFTER writing or editing the last model file. Never declare done without a passing final build.
+- If `dbt build` has any ERRORs, you must fix them and rebuild. A build with errors is not complete.
+- Before declaring done, verify that every model defined in the YAML schema files has a corresponding SQL file. If any are missing, create them and rebuild.
 
 ## Output
 

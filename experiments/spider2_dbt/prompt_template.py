@@ -191,6 +191,8 @@ def build_task_prompt(
         "**Important:**",
         "- Model file names must match the model names exactly "
         "(e.g., model `my_model` → `my_model.sql`).",
+        "- Column order in SELECT must match the order defined in the YAML schema file. "
+        "Read the YAML columns list and use that exact order in your SELECT statement.",
     ]
     sections.append("\n".join(guidelines))
 
