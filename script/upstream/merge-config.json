@@ -32,6 +32,7 @@
     "nix/**",
     "flake.nix",
     "flake.lock",
+    "infra/**",
     "sst.config.ts",
     "sst-env.d.ts",
     "specs/**",

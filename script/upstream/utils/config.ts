@@ -290,6 +290,7 @@ export const defaultConfig: MergeConfig = {
     "flake.nix",
     "flake.lock",
     // SST infrastructure
+    "infra/**",
     "sst.config.ts",
     "sst-env.d.ts",
     // Upstream project specs
