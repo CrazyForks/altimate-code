@@ -7,7 +7,7 @@
     "altimate-dbt": "./bin/altimate-dbt"
   },
   "scripts": {
-    "build": "bun build src/index.ts --outdir dist --target node --format esm",
+    "build": "bun build src/index.ts --outdir dist --target node --format esm && bun run script/copy-python.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test --timeout 30000"
   },
