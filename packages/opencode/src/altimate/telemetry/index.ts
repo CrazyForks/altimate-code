@@ -274,6 +274,17 @@ export namespace Telemetry {
         budget: number
         scopes_used: string[]
       }
+    | {
+        type: "docs_lookup"
+        timestamp: number
+        session_id: string
+        tool_id: string
+        method: "ctx7" | "webfetch"
+        status: "success" | "error" | "not_found"
+        duration_ms: number
+        error?: string
+        source_url?: string
+      }
 
   const FILE_TOOLS = new Set(["read", "write", "edit", "glob", "grep", "bash"])
 
@@ -287,6 +298,7 @@ export namespace Telemetry {
     { category: "warehouse", keywords: ["warehouse", "connection"] },
     { category: "lineage", keywords: ["lineage", "dag"] },
     { category: "memory", keywords: ["memory"] },
+    { category: "docs", keywords: ["docs_lookup"] },
   ]
 
   export function categorizeToolName(name: string, type: "standard" | "mcp"): string {
