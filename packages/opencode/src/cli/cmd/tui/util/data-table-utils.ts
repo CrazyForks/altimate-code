@@ -21,22 +21,25 @@ export function detectColumnType(
   columnIndex: number,
   rows: any[][],
 ): "number" | "date" | "null" | "string" {
-  let hasNumeric = false
-  let hasDate = false
-  let allNull = true
+  let numericCount = 0
+  let dateCount = 0
+  let otherCount = 0
+  let nonNullCount = 0
 
   const sampleSize = Math.min(rows.length, 20)
   for (let i = 0; i < sampleSize; i++) {
     const val = rows[i]?.[columnIndex]
     if (val === null || val === undefined) continue
-    allNull = false
-    if (isNumeric(val)) hasNumeric = true
-    else if (isDateLike(val)) hasDate = true
+    nonNullCount++
+    if (isNumeric(val)) numericCount++
+    else if (isDateLike(val)) dateCount++
+    else otherCount++
   }
 
-  if (allNull) return "null"
-  if (hasNumeric && !hasDate) return "number"
-  if (hasDate) return "date"
+  if (nonNullCount === 0) return "null"
+  // Only classify as number/date if ALL non-null values match that type
+  if (numericCount === nonNullCount) return "number"
+  if (dateCount === nonNullCount) return "date"
   return "string"
 }
 
@@ -48,6 +51,8 @@ export function formatCell(val: unknown, colType: ColumnType): string {
   const s = String(val)
   if (colType === "number") {
     const n = Number(s)
+    // Fall back to string display if value isn't actually a valid number
+    if (!Number.isFinite(n)) return s
     if (Number.isInteger(n)) return n.toLocaleString()
     return n.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 4 })
   }
@@ -91,6 +96,8 @@ export function calculateColumnWidths(
 
 /** Pad/truncate a string to fit a given width */
 export function fitToWidth(text: string, width: number, align: "left" | "right"): string {
+  if (width <= 0) return ""
+  if (width === 1) return text.length > 1 ? "…" : text.length === 1 ? text : " "
   if (text.length > width) {
     return text.slice(0, width - 1) + "…"
   }
@@ -102,7 +109,8 @@ export function fitToWidth(text: string, width: number, align: "left" | "right")
 
 /** Format elapsed time in human-readable form */
 export function formatElapsed(ms: number): string {
-  if (ms < 1000) return `${ms}ms`
+  if (!Number.isFinite(ms) || ms < 0) return "—"
+  if (ms < 1000) return `${Math.round(ms)}ms`
   if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
   const minutes = Math.floor(ms / 60000)
   const seconds = ((ms % 60000) / 1000).toFixed(0)

@@ -13,6 +13,8 @@ export function formatCostColor(cost: number): "green" | "yellow" | "red" {
 /** Truncate a SQL query for display, removing extra whitespace */
 export function truncateQuery(query: string, maxLen: number = 60): string {
   const cleaned = query.replace(/\s+/g, " ").trim()
+  if (maxLen <= 0) return ""
   if (cleaned.length <= maxLen) return cleaned
+  if (maxLen <= 3) return cleaned.slice(0, maxLen)
   return cleaned.slice(0, maxLen - 3) + "..."
 }
