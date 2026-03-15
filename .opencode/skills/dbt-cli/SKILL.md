@@ -37,8 +37,6 @@ altimate-dbt init --python-path /path      # Override Python interpreter
 
 This writes `~/.altimate-code/dbt.json`. Run `altimate-dbt doctor` to verify everything is healthy.
 
-If `altimate-dbt` is not found, the binary lives at `packages/dbt-tools/bin/altimate-dbt` in the altimate-code repo. Build with `bun run --cwd packages/dbt-tools build` if `dist/` is missing.
-
 ## Commands
 
 ### Health & Info
