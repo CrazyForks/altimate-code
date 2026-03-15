@@ -18,6 +18,15 @@ of relying on training data.
 ## Requirements
 **Tools used:** docs_lookup, glob, read
 
+## Privacy
+
+By default, documentation is fetched **directly from official documentation sites**
+(e.g., docs.snowflake.com, duckdb.org, postgresql.org). No user data is sent to
+third-party services.
+
+Optionally, set `ALTIMATE_DOCS_PROVIDER=ctx7` to use Context7 for richer
+library/SDK documentation. Note: this sends queries to context7.com (third-party).
+
 ## When to Use
 
 Activate this skill when the user:
@@ -65,9 +74,7 @@ docs_lookup(tool="postgresql", query="JSONB operators and functions")
 docs_lookup(tool="clickhouse", query="MergeTree engine settings")
 ```
 
-The tool automatically selects the best method:
-- **Context7 (ctx7)** for Python libraries/SDKs — indexed, searchable docs
-- **Web fetch** for database platforms — fetches from official documentation sites
+The tool fetches documentation directly from official docs sites by default.
 
 For platform docs with a **specific page URL** (see `references/library-ids.md`),
 pass it via the `url` parameter for better results:
@@ -86,13 +93,13 @@ docs_lookup(tool="postgresql", query="JSON functions", url="https://www.postgres
 
 ## Supported Tools
 
-**Libraries/SDKs (via Context7):** dbt-core, airflow, pyspark, snowflake-connector-python,
+**Libraries/SDKs:** dbt-core, airflow, pyspark, snowflake-connector-python,
 snowpark-python, google-cloud-bigquery, databricks-sdk, duckdb, psycopg2, psycopg,
 clickhouse-connect, confluent-kafka, sqlalchemy, polars, pandas, great-expectations,
 dbt-utils, dbt-expectations, dbt-snowflake, dbt-bigquery, dbt-databricks, dbt-postgres,
 dbt-redshift, dbt-spark, dbt-duckdb, dbt-clickhouse, elementary
 
-**Platforms (via web fetch):** snowflake, databricks, duckdb, postgresql, clickhouse, bigquery
+**Platforms (official docs):** snowflake, databricks, duckdb, postgresql, clickhouse, bigquery
 
 ## Guidelines
 
