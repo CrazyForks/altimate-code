@@ -1,0 +1,13 @@
+diff --git a/index.js b/index.js
+index 1234567..abcdefg 100644
+--- a/index.js
++++ b/index.js
+@@ -2,7 +2,7 @@
+
+ let Promise = require('bluebird');
+ let path = require('path');
+-let child_process = Promise.promisifyAll(require('child_process'));
++let child_process = require('child_process');
+
+ const PYTHON_BRIDGE_SCRIPT = path.join(__dirname, 'node_python_bridge.py');
+
