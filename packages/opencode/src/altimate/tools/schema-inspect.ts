@@ -20,14 +20,26 @@ export const SchemaInspectTool = Tool.define("schema_inspect", {
 
       return {
         title: `Schema: ${result.table}`,
-        metadata: { columnCount: result.columns.length, rowCount: result.row_count },
+        metadata: {
+          columnCount: result.columns.length,
+          rowCount: result.row_count,
+          tableName: result.table,
+          schemaName: result.schema_name,
+          columns: result.columns,
+        },
         output: formatSchema(result),
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       return {
         title: "Schema: ERROR",
-        metadata: { columnCount: 0, rowCount: undefined },
+        metadata: {
+          columnCount: 0,
+          rowCount: undefined,
+          tableName: args.table,
+          schemaName: args.schema_name,
+          columns: [],
+        },
         output: `Failed to inspect schema: ${msg}\n\nEnsure the Python bridge is running and a warehouse connection is configured.`,
       }
     }

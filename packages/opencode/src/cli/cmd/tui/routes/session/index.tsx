@@ -81,6 +81,12 @@ import { DialogExportOptions } from "../../ui/dialog-export-options"
 import { formatTranscript } from "../../util/transcript"
 import { UI } from "@/cli/ui.ts"
 import { useTuiConfig } from "../../context/tui-config"
+import { DataTable } from "../../component/data-table"
+import { QueryProgress } from "../../component/query-progress"
+import { CostBadge } from "../../component/cost-badge"
+import { SchemaPreview } from "../../component/schema-preview"
+import type { SqlExecuteTool } from "@/altimate/tools/sql-execute"
+import type { SchemaInspectTool } from "@/altimate/tools/schema-inspect"
 
 addDefaultParsers(parsers.parsers)
 
@@ -1552,6 +1558,12 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
         <Match when={props.part.tool === "skill"}>
           <Skill {...toolprops} />
         </Match>
+        <Match when={props.part.tool === "sql_execute"}>
+          <SqlExecute {...toolprops} />
+        </Match>
+        <Match when={props.part.tool === "schema_inspect"}>
+          <SchemaInspect {...toolprops} />
+        </Match>
         <Match when={true}>
           <GenericTool {...toolprops} />
         </Match>
@@ -2207,6 +2219,110 @@ function Skill(props: ToolProps<typeof SkillTool>) {
     <InlineTool icon="→" pending="Loading skill..." complete={props.input.name} part={props.part}>
       Skill "{props.input.name}"
     </InlineTool>
+  )
+}
+
+function SqlExecute(props: ToolProps<typeof SqlExecuteTool>) {
+  const { theme } = useTheme()
+  const isRunning = createMemo(() => props.part.state.status === "running")
+  const isCompleted = createMemo(() => props.part.state.status === "completed")
+  const hasResults = createMemo(
+    () => isCompleted() && (props.metadata.columns?.length ?? 0) > 0 && (props.metadata.rows?.length ?? 0) > 0,
+  )
+  const [expanded, setExpanded] = createSignal(false)
+
+  return (
+    <Switch>
+      {/* Running state: show progress with live timer */}
+      <Match when={isRunning()}>
+        <BlockTool title="# SQL Query" part={props.part} spinner={true}>
+          <QueryProgress
+            status="running"
+            query={props.input.query}
+            warehouse={props.metadata.warehouse ?? props.input.warehouse}
+          />
+        </BlockTool>
+      </Match>
+      {/* Completed with structured data: show rich table */}
+      <Match when={hasResults()}>
+        <BlockTool
+          title={`# SQL Query`}
+          part={props.part}
+          onClick={() => setExpanded((prev) => !prev)}
+        >
+          <box gap={1}>
+            <QueryProgress
+              status="completed"
+              query={props.input.query}
+              warehouse={props.metadata.warehouse ?? props.input.warehouse}
+              rowCount={props.metadata.rowCount}
+              elapsedMs={props.metadata.elapsedMs}
+              truncated={props.metadata.truncated}
+            />
+            <Show when={expanded()}>
+              <text fg={theme.textMuted}>$ {props.input.query}</text>
+            </Show>
+            <DataTable
+              columns={props.metadata.columns ?? []}
+              rows={props.metadata.rows ?? []}
+              rowCount={props.metadata.rowCount}
+              truncated={props.metadata.truncated}
+              elapsedMs={props.metadata.elapsedMs}
+              warehouse={props.metadata.warehouse ?? props.input.warehouse}
+            />
+          </box>
+        </BlockTool>
+      </Match>
+      {/* Completed with no structured data or error: show inline with cost badge */}
+      <Match when={isCompleted()}>
+        <InlineTool icon="⚡" pending="Executing SQL..." complete={true} part={props.part}>
+          SQL Query{" "}
+          <CostBadge
+            status="completed"
+            elapsedMs={props.metadata.elapsedMs}
+            rowCount={props.metadata.rowCount}
+            truncated={props.metadata.truncated}
+            warehouse={props.metadata.warehouse ?? props.input.warehouse}
+          />
+        </InlineTool>
+      </Match>
+      {/* Pending state */}
+      <Match when={true}>
+        <InlineTool icon="⚡" pending="Preparing SQL query..." complete={props.input.query} part={props.part}>
+          SQL: {props.input.query?.slice(0, 60)}
+        </InlineTool>
+      </Match>
+    </Switch>
+  )
+}
+
+function SchemaInspect(props: ToolProps<typeof SchemaInspectTool>) {
+  const isCompleted = createMemo(() => props.part.state.status === "completed")
+  const hasSchema = createMemo(() => isCompleted() && (props.metadata.columns?.length ?? 0) > 0)
+
+  return (
+    <Switch>
+      {/* Completed with structured schema data: show rich preview */}
+      <Match when={hasSchema()}>
+        <BlockTool title={`# Schema: ${props.metadata.tableName ?? props.input.table}`} part={props.part}>
+          <SchemaPreview
+            tableName={props.metadata.tableName ?? props.input.table ?? "unknown"}
+            schemaName={props.metadata.schemaName ?? props.input.schema_name}
+            columns={props.metadata.columns ?? []}
+            rowCount={props.metadata.rowCount}
+          />
+        </BlockTool>
+      </Match>
+      {/* Fallback: inline display */}
+      <Match when={true}>
+        <InlineTool icon="◈" pending="Inspecting schema..." complete={props.input.table} part={props.part}>
+          Schema: {props.input.table}
+          <Show when={props.metadata.columnCount}>
+            {" "}({props.metadata.columnCount} columns)
+          </Show>
+        </InlineTool>
+      </Match>
+    </Switch>
   )
 }
 

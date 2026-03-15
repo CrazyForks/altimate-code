@@ -11,6 +11,7 @@ export const SqlExecuteTool = Tool.define("sql_execute", {
     limit: z.number().optional().default(100).describe("Max rows to return"),
   }),
   async execute(args, ctx) {
+    const startTime = Date.now()
     try {
       const result = await Bridge.call("sql.execute", {
         sql: args.query,
@@ -18,17 +19,33 @@ export const SqlExecuteTool = Tool.define("sql_execute", {
         limit: args.limit,
       })
 
+      const elapsed = Date.now() - startTime
       const output = formatResult(result)
       return {
         title: `SQL: ${args.query.slice(0, 60)}${args.query.length > 60 ? "..." : ""}`,
-        metadata: { rowCount: result.row_count, truncated: result.truncated },
+        metadata: {
+          rowCount: result.row_count,
+          truncated: result.truncated,
+          columns: result.columns,
+          rows: result.rows,
+          elapsedMs: elapsed,
+          warehouse: args.warehouse,
+        },
         output,
       }
     } catch (e) {
+      const elapsed = Date.now() - startTime
       const msg = e instanceof Error ? e.message : String(e)
       return {
         title: "SQL: ERROR",
-        metadata: { rowCount: 0, truncated: false },
+        metadata: {
+          rowCount: 0,
+          truncated: false,
+          columns: [] as string[],
+          rows: [] as any[][],
+          elapsedMs: elapsed,
+          warehouse: args.warehouse,
+        },
         output: `Failed to execute SQL: ${msg}\n\nEnsure the Python bridge is running and a warehouse connection is configured.`,
       }
     }
