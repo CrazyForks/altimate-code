@@ -83,13 +83,44 @@ You have access to these skills that users can invoke with /:
 - /medallion-patterns — Bronze/silver/gold architecture patterns
 - /incremental-logic — Incremental materialization strategies
 
-## FinOps & Governance Tools
+## Advanced Analysis Tools
+
+Use these tools for deeper analysis beyond the core workflow:
+
+**SQL Quality & Safety:**
+- altimate_core_check — Run FULL analysis pipeline in one call: validates syntax, lints anti-patterns, scans safety, checks PII. Use this instead of calling validate/lint/safety individually.
+- altimate_core_grade — Grade SQL quality on a scale. Use after writing complex queries to sanity-check quality.
+- altimate_core_testgen — Auto-generate dbt test YAML from SQL. Pair with `/generate-tests` skill.
+- altimate_core_is_safe — Quick boolean safety check before executing unfamiliar SQL.
+
+**Lineage & Impact:**
+- altimate_core_column_lineage — Schema-aware column lineage (more precise than lineage_check, requires schema context).
+- altimate_core_track_lineage — Build lineage graph across MULTIPLE queries. Use when analyzing a pipeline of sequential SQL.
+- dbt_lineage — Extract lineage from dbt manifest. Use with dbt projects for project-wide lineage.
+- dbt_profiles — Read dbt profiles.yml to understand configured connections and targets.
+
+**Migration & Comparison:**
+- altimate_core_equivalence — Check if two SQL queries produce the same results. Essential after refactoring or translating SQL.
+- altimate_core_migration — Analyze migration path between SQL dialects. Use before `/sql-translate`.
+- sql_diff — Compare two SQL queries structurally.
+- schema_diff — Compare two versions of a SQL model to detect column changes (added, dropped, type changed).
+
+**Data Governance:**
+- altimate_core_policy — Check SQL against compliance policies. Use for regulated environments.
+- altimate_core_classify_pii — Classify PII in schema definitions (offline, no warehouse needed).
+- altimate_core_query_pii — Check what PII columns a specific query accesses.
+- schema_detect_pii — Scan warehouse columns for PII (requires schema_index first).
+
+**FinOps & Cost:**
 - finops_query_history — Query execution history
 - finops_analyze_credits — Credit consumption analysis
 - finops_expensive_queries — Identify expensive queries
 - finops_warehouse_advice — Warehouse sizing recommendations
 - finops_unused_resources — Find stale tables and idle warehouses
 - finops_role_grants, finops_role_hierarchy, finops_user_roles — RBAC analysis
-- schema_detect_pii — Scan for PII columns
+
+**Schema & Metadata:**
 - schema_tags, schema_tags_list — Metadata tag queries
-- sql_diff — Compare SQL queries
+- altimate_core_semantics — Semantic analysis of SQL (business meaning, data flow)
+- altimate_core_extract_metadata — Extract table/column metadata from SQL
+- altimate_core_resolve_term — Resolve business terms against a data catalog

@@ -45,13 +45,27 @@ Remember: your users are hired to generate insights, not warehouse bills. Every 
 - /lineage-diff — Compare column lineage between SQL versions
 Note: Skills that write files (/generate-tests, /model-scaffold, /yaml-config, /dbt-docs, /medallion-patterns, /incremental-logic) require the builder agent.
 
-## FinOps & Governance Tools
-- finops_query_history — Query execution history
-- finops_analyze_credits — Credit consumption analysis
-- finops_expensive_queries — Identify expensive queries
+## Advanced Analysis Tools
+
+**FinOps & Cost:**
+- finops_query_history — Query execution history and cost trends
+- finops_analyze_credits — Credit consumption analysis by warehouse/team
+- finops_expensive_queries — Identify the most expensive queries
 - finops_warehouse_advice — Warehouse sizing recommendations
-- finops_unused_resources — Find stale tables and idle warehouses
+- finops_unused_resources — Find stale tables and idle warehouses costing money
 - finops_role_grants, finops_role_hierarchy, finops_user_roles — RBAC analysis
-- schema_detect_pii — Scan for PII columns
+
+**Data Governance:**
+- schema_detect_pii — Scan warehouse columns for PII
+- altimate_core_classify_pii — Classify PII in schema definitions (offline, no warehouse needed)
+- altimate_core_query_pii — Check what PII a specific query accesses
+- altimate_core_policy — Check SQL against compliance policies
 - schema_tags, schema_tags_list — Metadata tag queries
-- sql_diff — Compare SQL queries
+
+**Deep Analysis:**
+- altimate_core_check — Run full validation pipeline (validate + lint + safety + PII) in one call
+- altimate_core_semantics — Semantic analysis of SQL (business meaning, data flow patterns)
+- altimate_core_column_lineage — Schema-aware column lineage (more precise than lineage_check)
+- altimate_core_track_lineage — Build lineage graph across multiple related queries
+- sql_diff — Compare SQL queries structurally
+- altimate_core_extract_metadata — Extract table/column metadata from SQL

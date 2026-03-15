@@ -121,6 +121,11 @@ export namespace Agent {
             altimate_core_validate: "allow", altimate_core_lint: "allow",
             altimate_core_safety: "allow", altimate_core_transpile: "allow",
             altimate_core_check: "allow",
+            // altimate_change: added analysis-critical tools
+            altimate_core_semantics: "allow", altimate_core_column_lineage: "allow",
+            altimate_core_track_lineage: "allow", altimate_core_classify_pii: "allow",
+            altimate_core_query_pii: "allow", altimate_core_policy: "allow",
+            altimate_core_extract_metadata: "allow",
             read: "allow", grep: "allow", glob: "allow",
             question: "allow", webfetch: "allow", websearch: "allow",
           }),
@@ -152,6 +157,11 @@ export namespace Agent {
             altimate_core_validate: "allow", altimate_core_lint: "allow",
             altimate_core_safety: "allow", altimate_core_transpile: "allow",
             altimate_core_check: "allow",
+            // altimate_change: added analysis-critical tools (same as analyst)
+            altimate_core_semantics: "allow", altimate_core_column_lineage: "allow",
+            altimate_core_track_lineage: "allow", altimate_core_classify_pii: "allow",
+            altimate_core_query_pii: "allow", altimate_core_policy: "allow",
+            altimate_core_extract_metadata: "allow",
             read: "allow", grep: "allow", glob: "allow",
             question: "allow", webfetch: "allow", websearch: "allow",
           }),
@@ -183,6 +193,10 @@ export namespace Agent {
             altimate_core_validate: "allow", altimate_core_lint: "allow",
             altimate_core_safety: "allow", altimate_core_transpile: "allow",
             altimate_core_check: "allow",
+            // altimate_change: added validation-critical tools
+            altimate_core_grade: "allow", altimate_core_policy: "allow",
+            altimate_core_column_lineage: "allow", altimate_core_track_lineage: "allow",
+            altimate_core_classify_pii: "allow", altimate_core_query_pii: "allow",
             read: "allow", grep: "allow", glob: "allow", bash: "allow",
             question: "allow",
           }),
@@ -200,7 +214,7 @@ export namespace Agent {
           defaults,
           PermissionNext.fromConfig({
             sql_execute: "allow", sql_validate: "allow", sql_translate: "allow",
-            sql_optimize: "allow", lineage_check: "allow",
+            sql_optimize: "allow", lineage_check: "allow", sql_analyze: "allow",
             warehouse_list: "allow", warehouse_test: "allow",
             schema_inspect: "allow", schema_index: "allow", schema_search: "allow",
             schema_cache_status: "allow", sql_explain: "allow", sql_format: "allow",
@@ -213,6 +227,9 @@ export namespace Agent {
             altimate_core_validate: "allow", altimate_core_lint: "allow",
             altimate_core_safety: "allow", altimate_core_transpile: "allow",
             altimate_core_check: "allow",
+            // altimate_change: added migration-critical tools
+            altimate_core_equivalence: "allow", altimate_core_migration: "allow",
+            altimate_core_schema_diff: "allow", schema_diff: "allow",
             read: "allow", write: "allow", edit: "allow",
             grep: "allow", glob: "allow", question: "allow",
           }),

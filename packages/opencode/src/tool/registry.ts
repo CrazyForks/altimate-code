@@ -49,7 +49,7 @@ import { DbtProfilesTool } from "../altimate/tools/dbt-profiles"
 import { DbtLineageTool } from "../altimate/tools/dbt-lineage"
 import { SchemaIndexTool } from "../altimate/tools/schema-index"
 import { SchemaSearchTool } from "../altimate/tools/schema-search"
-import { SchemaCacheStatusTool } from "../altimate/tools/schema-cache-status"
+// altimate_change: removed SchemaCacheStatusTool — infrastructure diagnostic, not user-facing
 import { SqlExplainTool } from "../altimate/tools/sql-explain"
 import { SqlFormatTool } from "../altimate/tools/sql-format"
 import { SqlFixTool } from "../altimate/tools/sql-fix"
@@ -68,7 +68,7 @@ import { SchemaDiffTool } from "../altimate/tools/schema-diff"
 import { AltimateCoreValidateTool } from "../altimate/tools/altimate-core-validate"
 import { AltimateCoreLintTool } from "../altimate/tools/altimate-core-lint"
 import { AltimateCoreSafetyTool } from "../altimate/tools/altimate-core-safety"
-import { AltimateCoreTranspileTool } from "../altimate/tools/altimate-core-transpile"
+// altimate_change: removed AltimateCoreTranspileTool — duplicate of SqlTranslateTool (which provides warnings)
 import { AltimateCoreCheckTool } from "../altimate/tools/altimate-core-check"
 import { AltimateCoreFixTool } from "../altimate/tools/altimate-core-fix"
 import { AltimateCorePolicyTool } from "../altimate/tools/altimate-core-policy"
@@ -85,17 +85,17 @@ import { AltimateCoreQueryPiiTool } from "../altimate/tools/altimate-core-query-
 import { AltimateCoreResolveTermTool } from "../altimate/tools/altimate-core-resolve-term"
 import { AltimateCoreColumnLineageTool } from "../altimate/tools/altimate-core-column-lineage"
 import { AltimateCoreTrackLineageTool } from "../altimate/tools/altimate-core-track-lineage"
-import { AltimateCoreFormatTool } from "../altimate/tools/altimate-core-format"
+// altimate_change: removed AltimateCoreFormatTool — duplicate of SqlFormatTool (which has indent control)
 import { AltimateCoreExtractMetadataTool } from "../altimate/tools/altimate-core-extract-metadata"
 import { AltimateCoreCompareTool } from "../altimate/tools/altimate-core-compare"
-import { AltimateCoreCompleteTool } from "../altimate/tools/altimate-core-complete"
-import { AltimateCoreOptimizeContextTool } from "../altimate/tools/altimate-core-optimize-context"
-import { AltimateCoreOptimizeForQueryTool } from "../altimate/tools/altimate-core-optimize-for-query"
-import { AltimateCorePruneSchemaTool } from "../altimate/tools/altimate-core-prune-schema"
-import { AltimateCoreImportDdlTool } from "../altimate/tools/altimate-core-import-ddl"
-import { AltimateCoreExportDdlTool } from "../altimate/tools/altimate-core-export-ddl"
-import { AltimateCoreFingerprintTool } from "../altimate/tools/altimate-core-fingerprint"
-import { AltimateCoreIntrospectionSqlTool } from "../altimate/tools/altimate-core-introspection-sql"
+// altimate_change: removed AltimateCoreCompleteTool — autocomplete is hard to use in CLI agent context; sql_autocomplete covers this
+// altimate_change: removed infrastructure tools not meant for direct LLM invocation:
+// - AltimateCoreOptimizeContextTool (should be automatic, not agent-invoked)
+// - AltimateCoreOptimizeForQueryTool (internal optimization, use sql_optimize instead)
+// - AltimateCorePruneSchemaTool (internal schema management)
+// - AltimateCoreImportDdlTool / AltimateCoreExportDdlTool (rarely user-facing)
+// - AltimateCoreFingerprintTool (internal infrastructure)
+// - AltimateCoreIntrospectionSqlTool (internal infrastructure)
 import { AltimateCoreParseDbtTool } from "../altimate/tools/altimate-core-parse-dbt"
 import { AltimateCoreIsSafeTool } from "../altimate/tools/altimate-core-is-safe"
 import { ProjectScanTool } from "../altimate/tools/project-scan"
@@ -210,7 +210,7 @@ export namespace ToolRegistry {
       DbtLineageTool,
       SchemaIndexTool,
       SchemaSearchTool,
-      SchemaCacheStatusTool,
+      // SchemaCacheStatusTool, — removed: infrastructure diagnostic
       SqlExplainTool,
       SqlFormatTool,
       SqlFixTool,
@@ -232,7 +232,7 @@ export namespace ToolRegistry {
       AltimateCoreValidateTool,
       AltimateCoreLintTool,
       AltimateCoreSafetyTool,
-      AltimateCoreTranspileTool,
+      // AltimateCoreTranspileTool, — removed: duplicate of SqlTranslateTool
       AltimateCoreCheckTool,
       AltimateCoreFixTool,
       AltimateCorePolicyTool,
@@ -249,17 +249,14 @@ export namespace ToolRegistry {
       AltimateCoreResolveTermTool,
       AltimateCoreColumnLineageTool,
       AltimateCoreTrackLineageTool,
-      AltimateCoreFormatTool,
+      // AltimateCoreFormatTool, — removed: duplicate of SqlFormatTool
       AltimateCoreExtractMetadataTool,
       AltimateCoreCompareTool,
-      AltimateCoreCompleteTool,
-      AltimateCoreOptimizeContextTool,
-      AltimateCoreOptimizeForQueryTool,
-      AltimateCorePruneSchemaTool,
-      AltimateCoreImportDdlTool,
-      AltimateCoreExportDdlTool,
-      AltimateCoreFingerprintTool,
-      AltimateCoreIntrospectionSqlTool,
+      // Removed infrastructure tools not meant for direct LLM invocation:
+      // AltimateCoreCompleteTool, AltimateCoreOptimizeContextTool,
+      // AltimateCoreOptimizeForQueryTool, AltimateCorePruneSchemaTool,
+      // AltimateCoreImportDdlTool, AltimateCoreExportDdlTool,
+      // AltimateCoreFingerprintTool, AltimateCoreIntrospectionSqlTool,
       AltimateCoreParseDbtTool,
       AltimateCoreIsSafeTool,
       ProjectScanTool,

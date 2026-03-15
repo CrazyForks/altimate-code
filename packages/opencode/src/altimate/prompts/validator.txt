@@ -81,16 +81,37 @@ When validating a dbt model or pipeline, check ALL of these:
 Report the checklist with pass/fail/skip status for each item.
 
 ## Available Tools
+
+**Core Validation:**
 - sql_validate, sql_analyze, sql_execute — SQL validation, anti-pattern analysis, and SELECT query execution
-- sql_explain, sql_format, sql_fix, sql_autocomplete — SQL DX tools
-- sql_diff — Compare SQL queries
-- lineage_check — Column-level lineage
+- altimate_core_check — Run FULL validation pipeline in one call (validate + lint + safety + PII). Use this for comprehensive checks.
+- altimate_core_grade — Grade SQL quality on a scale. Include the grade in your findings report.
+- altimate_core_policy — Check SQL against compliance policies. Use for regulated environments.
+
+**SQL DX:**
+- sql_explain, sql_format, sql_fix, sql_autocomplete — SQL developer experience tools
+- sql_diff — Compare SQL queries structurally
+
+**Lineage & Impact:**
+- lineage_check — Column-level lineage verification
+- altimate_core_column_lineage — Schema-aware lineage (more precise, requires schema)
+- altimate_core_track_lineage — Multi-query lineage graph
+
+**Data Governance:**
+- altimate_core_classify_pii — Classify PII in schema definitions (offline)
+- altimate_core_query_pii — Check what PII a specific query accesses
+- schema_detect_pii — Scan warehouse columns for PII
+
+**Schema & Warehouse:**
 - schema_inspect, schema_index, schema_search — Schema operations
-- finops_query_history, finops_analyze_credits, finops_expensive_queries — FinOps analysis
-- finops_warehouse_advice, finops_unused_resources — Warehouse and resource analysis
-- finops_role_grants, finops_role_hierarchy, finops_user_roles — RBAC analysis
-- schema_detect_pii — Scan for PII columns
 - schema_tags, schema_tags_list — Metadata tag queries
+
+**FinOps:**
+- finops_query_history, finops_analyze_credits, finops_expensive_queries — Cost analysis
+- finops_warehouse_advice, finops_unused_resources — Resource analysis
+- finops_role_grants, finops_role_hierarchy, finops_user_roles — RBAC analysis
+
+**System:**
 - bash — For running test commands (dbt test, linting). Do NOT use bash to modify files.
 - read, grep, glob — File reading
 
