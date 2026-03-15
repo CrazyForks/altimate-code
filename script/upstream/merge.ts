@@ -55,6 +55,7 @@ interface MergeState {
   backupBranch: string
   baseBranch: string
   step: number
+  versionSnapshot?: Record<string, { name: string; version: string }>
 }
 
 // ---------------------------------------------------------------------------
@@ -627,13 +628,14 @@ async function main(): Promise<void> {
     process.exit(1)
   }
 
-  // Save state for --continue
+  // Save state for --continue (include pre-merge version snapshot)
   saveState({
     version: mergeRef,
     mergeBranch,
     backupBranch,
     baseBranch,
     step: 4,
+    versionSnapshot,
   })
 
   // ─── Step 5: Merge upstream ─────────────────────────────────────────────────
@@ -688,13 +690,14 @@ async function main(): Promise<void> {
     console.log(`  ${RED}conflict${RESET}  ${file}`)
   }
 
-  // Update state for --continue
+  // Update state for --continue (preserve pre-merge version snapshot)
   saveState({
     version: mergeRef,
     mergeBranch,
     backupBranch,
     baseBranch,
     step: 7,
+    versionSnapshot,
   })
 
   console.log()
@@ -750,8 +753,8 @@ async function continueAfterConflicts(config: MergeConfig): Promise<void> {
   await $`git commit --no-edit`.cwd(root).quiet()
   logger.success("Merge committed")
 
-  // Re-snapshot versions (may have been modified during conflict resolution)
-  const versionSnapshot = snapshotVersions()
+  // Use pre-merge version snapshot from saved state, fall back to current if not available
+  const versionSnapshot = state.versionSnapshot ?? snapshotVersions()
 
   await postMergeTransforms(config, state.version, versionSnapshot)
 }
