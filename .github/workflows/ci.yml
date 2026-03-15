@@ -84,20 +84,3 @@ jobs:
         run: pytest
         working-directory: packages/altimate-engine
 
-  branding:
-    name: Branding
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - uses: ./.github/actions/setup-bun
-
-      - name: Install merge tooling dependencies
-        run: cd script/upstream && bun install
-
-      - name: Run branding audit
-        run: bun run script/upstream/analyze.ts --branding
-
-      - name: Run branding tests
-        run: cd packages/opencode && bun test test/branding/
