@@ -4,7 +4,7 @@ import { Bridge } from "../bridge/client"
 
 export const DbtRunTool = Tool.define("dbt_run", {
   description:
-    "Run a dbt CLI command (run, test, build, compile, etc.). Executes dbt in the project directory and returns stdout/stderr.",
+    "Run a raw dbt CLI command (run, test, build, compile, etc.). Prefer using `altimate-dbt` via bash instead — it provides column introspection, DAG navigation, and project-aware compilation. Use this tool only as a fallback when altimate-dbt is unavailable.",
   parameters: z.object({
     command: z.string().optional().default("run").describe("dbt command to run (run, test, build, compile, seed, snapshot)"),
     select: z.string().optional().describe("dbt node selector (e.g. 'my_model', '+my_model', 'tag:daily')"),

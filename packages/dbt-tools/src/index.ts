@@ -1,4 +1,6 @@
-import { read } from "./config"
+import { join, resolve } from "path"
+import { existsSync } from "fs"
+import { read, type Config } from "./config"
 import { init } from "./commands/init"
 import { validate } from "./check"
 
@@ -26,6 +28,11 @@ const USAGE = {
 
 const cmd = process.argv[2]
 const rest = process.argv.slice(3)
+
+function flag(args: string[], name: string): string | undefined {
+  const i = args.indexOf(`--${name}`)
+  return i >= 0 ? args[i + 1] : undefined
+}
 
 function diagnose(err: Error): { error: string; fix?: string } {
   const msg = err.message || String(err)
@@ -101,6 +108,17 @@ async function main() {
 
   const cfg = await read()
   if (!cfg) return { error: "No config found. Run: altimate-dbt init" }
+
+  // Override projectRoot: --project-dir flag > cwd auto-detect > config
+  const dirFlag = flag(rest, "project-dir")
+  if (dirFlag) {
+    cfg.projectRoot = resolve(dirFlag)
+  } else {
+    const cwdProject = join(process.cwd(), "dbt_project.yml")
+    if (existsSync(cwdProject) && resolve(process.cwd()) !== resolve(cfg.projectRoot)) {
+      cfg.projectRoot = resolve(process.cwd())
+    }
+  }
 
   if (cmd === "doctor") return (await import("./commands/doctor")).doctor(cfg)
 

@@ -40,6 +40,7 @@ If `doctor` fails, fix the environment first. Common issues:
 - Python not found → reinstall or set `--python-path`
 - dbt-core not installed → `pip install dbt-core`
 - No `dbt_project.yml` → wrong directory
+- Missing packages → if `packages.yml` exists but `dbt_packages/` doesn't, run `dbt deps`
 
 ### Step 2: Classify the Error
 

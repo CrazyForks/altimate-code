@@ -36,7 +36,7 @@ export async function init(args: string[]) {
   const cfg: Config = {
     projectRoot: project,
     pythonPath: py ?? python(),
-    dbtIntegration: "core",
+    dbtIntegration: "corecommand",
     queryLimit: 500,
   }
 

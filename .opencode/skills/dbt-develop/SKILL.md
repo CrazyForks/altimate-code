@@ -33,6 +33,7 @@ Before writing any SQL:
 - Read the task requirements carefully
 - Identify which layer this model belongs to (staging, intermediate, mart)
 - Check existing models for naming conventions and patterns
+- **Check dependencies:** If `packages.yml` exists, check for `dbt_packages/` or `package-lock.yml`. Only run `dbt deps` if packages are declared but not yet installed.
 
 ```bash
 altimate-dbt info                           # project name, adapter type
@@ -40,21 +41,40 @@ altimate-dbt parents --model <upstream>     # understand what feeds this model
 altimate-dbt children --model <downstream>  # understand what consumes it
 ```
 
-### 2. Discover — Know Your Data
+### 2. Discover — Understand the Data Before Writing
 
-Never write SQL without knowing the columns:
+**Never write SQL without deeply understanding your data first.** The #1 cause of wrong results is writing SQL blind — assuming grain, relationships, column names, or values without checking.
+
+**Step 2a: Read all documentation and schema definitions**
+- Read `sources.yml`, `schema.yml`, and any YAML files that describe the source/parent models
+- These contain column descriptions, data types, tests, and business context
+- Pay special attention to: primary keys, unique constraints, relationships between tables, and what each column represents
+
+**Step 2b: Understand the grain of each parent model/source**
+- What does one row represent? (one customer? one event? one day per customer?)
+- What are the primary/unique keys?
+- This is critical for JOINs — joining on the wrong grain causes fan-out (too many rows) or missing rows
 
 ```bash
 altimate-dbt columns --model <name>                         # existing model columns
 altimate-dbt columns-source --source <src> --table <tbl>    # source table columns
-altimate-dbt column-values --model <name> --column <col>    # sample values
+altimate-dbt execute --query "SELECT count(*) FROM {{ ref('model') }}" --limit 1
 altimate-dbt execute --query "SELECT * FROM {{ ref('model') }}" --limit 5
+altimate-dbt column-values --model <name> --column <col>    # sample values for key columns
 ```
 
-Read existing models in the same directory to match patterns:
+**Step 2c: Query the actual data to verify your understanding**
+- Check row counts, NULLs, date ranges, cardinality of key columns
+- Verify foreign key relationships actually hold (do all IDs in child exist in parent?)
+- Check for duplicates in what you think are unique keys
+
+**Step 2d: Read existing models that your new model will reference**
+- Read the actual SQL of parent models — understand their logic, filters, and transformations
+- Read 2-3 existing models in the same directory to match patterns and conventions
+
 ```bash
 glob models/**/*.sql     # find all model files
-read <model_file>        # understand existing patterns
+read <model_file>        # understand existing patterns and logic
 ```
 
 ### 3. Write — Follow Layer Patterns
@@ -64,20 +84,37 @@ See [references/medallion-architecture.md](references/medallion-architecture.md)
 See [references/incremental-strategies.md](references/incremental-strategies.md) for incremental materialization.
 See [references/yaml-generation.md](references/yaml-generation.md) for sources.yml and schema.yml.
 
-### 4. Validate — Always Build After Writing
+### 4. Validate — Build, Verify, Check Impact
 
 Never stop at writing the SQL. Always validate:
 
+**Build it:**
 ```bash
 altimate-dbt compile --model <name>                        # catch Jinja errors
 altimate-dbt build --model <name>                          # materialize + run tests
-altimate-dbt execute --query "SELECT * FROM {{ ref('<name>') }}" --limit 10  # spot-check
 ```
 
-If building downstream too:
+**Verify the output:**
 ```bash
-altimate-dbt build --model <name> --downstream
+altimate-dbt columns --model <name>                        # confirm expected columns exist
+altimate-dbt execute --query "SELECT count(*) FROM {{ ref('<name>') }}" --limit 1
+altimate-dbt execute --query "SELECT * FROM {{ ref('<name>') }}" --limit 10  # spot-check values
 ```
+- Do the columns match what schema.yml or the task expects?
+- Does the row count make sense? (no fan-out from bad joins, no missing rows from wrong filters)
+- Are values correct? (spot-check NULLs, aggregations, date ranges)
+
+**Check SQL quality** (on the compiled SQL from `altimate-dbt compile`):
+- `sql_analyze` — catches anti-patterns (SELECT *, cartesian products, missing filters)
+- `altimate_core_validate` — validates syntax and schema references
+- `altimate_core_column_lineage` — traces how source columns flow to output columns. Use this to verify your SELECT is pulling the right columns from the right sources, especially for complex JOINs or multi-CTE models.
+
+**Check downstream impact** (when modifying an existing model):
+```bash
+altimate-dbt children --model <name>                       # who depends on this?
+altimate-dbt build --model <name> --downstream             # rebuild downstream to catch breakage
+```
+Use `altimate-dbt children` and `altimate-dbt parents` to verify the DAG is intact when changes could affect downstream models.
 
 ## Iron Rules
 
