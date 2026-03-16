@@ -35,10 +35,16 @@ export namespace SessionProcessor {
     let blocked = false
     let attempt = 0
     let needsCompaction = false
+    let retryErrorType: string | null = null
+    let retryStartTime: number | null = null
+    let toolCallCounter = 0
 
     const result = {
       get message() {
         return input.assistantMessage
+      },
+      get toolCallCount() {
+        return toolCallCounter
       },
       partFromToolCall(toolCallID: string) {
         return toolcalls[toolCallID]
@@ -196,7 +202,7 @@ export namespace SessionProcessor {
                         attachments: value.output.attachments,
                       },
                     })
-
+                    toolCallCounter++
                     delete toolcalls[value.toolCallId]
                   }
                   break
@@ -377,12 +383,39 @@ export namespace SessionProcessor {
                 await SessionRetry.sleep(delay, input.abort).catch(() => {})
                 continue
               }
-              input.assistantMessage.error = error
-              Bus.publish(Session.Event.Error, {
-                sessionID: input.assistantMessage.sessionID,
-                error: input.assistantMessage.error,
+              retryErrorType = e?.name ?? "UnknownError"
+              attempt++
+
+              // Give up after max attempts or total retry time exceeded
+              const totalRetryTime = retryStartTime ? Date.now() - retryStartTime : 0
+              if (
+                attempt > SessionRetry.RETRY_MAX_ATTEMPTS ||
+                totalRetryTime > SessionRetry.RETRY_MAX_TOTAL_TIME_MS
+              ) {
+                log.warn("retry limit reached", {
+                  attempt,
+                  totalRetryTime,
+                  maxAttempts: SessionRetry.RETRY_MAX_ATTEMPTS,
+                  maxTotalTime: SessionRetry.RETRY_MAX_TOTAL_TIME_MS,
+                })
+                input.assistantMessage.error = error
+                Bus.publish(Session.Event.Error, {
+                  sessionID: input.assistantMessage.sessionID,
+                  error: input.assistantMessage.error,
+                })
+                SessionStatus.set(input.sessionID, { type: "idle" })
+                break
+              }
+
+              const delay = SessionRetry.delay(attempt, error.name === "APIError" ? error : undefined)
+              SessionStatus.set(input.sessionID, {
+                type: "retry",
+                attempt,
+                message: retry ?? "Retrying...",
+                next: Date.now() + delay,
               })
-              SessionStatus.set(input.sessionID, { type: "idle" })
+              await SessionRetry.sleep(delay, input.abort).catch(() => {})
+              continue
             }
           }
           if (snapshot) {

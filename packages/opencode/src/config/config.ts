@@ -1266,6 +1266,11 @@ export namespace Config {
             .describe(
               "Automatically enhance prompts with AI before sending (default: false). Uses a small model to rewrite rough prompts into clearer versions.",
             ),
+          // altimate_change start - dynamic skill loading toggle
+          dynamic_skills: z
+            .boolean()
+            .optional()
+            .describe("Enable dynamic skill filtering by environment fingerprint and per-turn message rescue"),
           // altimate_change end
         })
         .optional(),
