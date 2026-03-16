@@ -23,9 +23,10 @@ description: Debug dbt errors — compilation failures, runtime database errors,
 - Adding tests → use `dbt-test`
 - Analyzing change impact → use `dbt-analyze`
 
-## The Iron Rule
+## Iron Rules
 
-**Never modify a test to make it pass without understanding why it's failing.**
+1. **Never modify a test to make it pass without understanding why it's failing.**
+2. **Fix ALL errors, not just the reported one.** After fixing the specific issue, run a full `dbt build`. If other models fail — even ones not mentioned in the error report — fix them too. Your job is to leave the project in a fully working state. Never dismiss errors as "pre-existing" or "out of scope".
 
 ## Diagnostic Workflow
 

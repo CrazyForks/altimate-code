@@ -122,6 +122,7 @@ Use `altimate-dbt children` and `altimate-dbt parents` to verify the DAG is inta
 2. **Never stop at compile.** Always `altimate-dbt build` to catch runtime errors.
 3. **Match existing patterns.** Read 2-3 existing models in the same directory before writing.
 4. **One model, one purpose.** A staging model should not contain business logic. An intermediate model should not be materialized as a table unless it has consumers.
+5. **Fix ALL errors, not just yours.** After creating/modifying models, run a full `dbt build`. If ANY model fails — even pre-existing ones you didn't touch — fix them. Your job is to leave the project in a fully working state.
 
 ## Common Mistakes
 
