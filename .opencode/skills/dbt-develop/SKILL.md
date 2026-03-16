@@ -7,7 +7,7 @@ description: Create and modify dbt models — staging, intermediate, marts, incr
 
 ## Requirements
 **Agent:** builder or migrator (requires file write access)
-**Tools used:** bash (runs `altimate-dbt` commands), read, glob, write, edit
+**Tools used:** bash (runs `altimate-dbt` commands), read, glob, write, edit, altimate_core_validate, altimate_core_semantics, altimate_core_lint, altimate_core_column_lineage
 
 ## When to Use This Skill
 
@@ -63,10 +63,25 @@ altimate-dbt execute --query "SELECT * FROM {{ ref('model') }}" --limit 5
 altimate-dbt column-values --model <name> --column <col>    # sample values for key columns
 ```
 
-**Step 2c: Query the actual data to verify your understanding**
-- Check row counts, NULLs, date ranges, cardinality of key columns
-- Verify foreign key relationships actually hold (do all IDs in child exist in parent?)
-- Check for duplicates in what you think are unique keys
+**Step 2c: Query the actual data — this is where bugs are prevented**
+
+This step is not optional. Most wrong results come from assumptions about data that turn out to be false.
+
+```bash
+# For EVERY source/parent table you'll use, run these:
+altimate-dbt execute --query "SELECT count(*), count(DISTINCT <pk>) FROM {{ ref('model') }}" --limit 1
+altimate-dbt execute --query "SELECT <col>, count(*) FROM {{ ref('model') }} GROUP BY 1 ORDER BY 2 DESC" --limit 20
+
+# Check for NULLs in columns you plan to aggregate or join on:
+altimate-dbt execute --query "SELECT count(*) as total, count(<col>) as non_null, count(*) - count(<col>) as nulls FROM {{ ref('model') }}" --limit 1
+
+# Check value ranges and edge cases:
+altimate-dbt execute --query "SELECT min(<col>), max(<col>), avg(<col>) FROM {{ ref('model') }}" --limit 1
+```
+
+**What to look for:**
+- **Duplicate rows on join keys**: If a key isn't unique, your JOIN will fan out
+- **Date ranges**: If using `current_date` in a date spine, the output will change every day
 
 **Step 2d: Read existing models that your new model will reference**
 - Read the actual SQL of parent models — understand their logic, filters, and transformations
@@ -84,30 +99,63 @@ See [references/medallion-architecture.md](references/medallion-architecture.md)
 See [references/incremental-strategies.md](references/incremental-strategies.md) for incremental materialization.
 See [references/yaml-generation.md](references/yaml-generation.md) for sources.yml and schema.yml.
 
+**After writing SQL, validate before building:**
+```bash
+# 1. Validate syntax against schema
+altimate_core_validate --sql <compiled_sql>
+
+# 2. Check JOINs for logical errors (fan-out, cartesian products, wrong keys)
+altimate_core_semantics --sql <compiled_sql>
+
+# 3. Lint for anti-patterns (SELECT *, missing WHERE, implicit coercion)
+altimate_core_lint --sql <compiled_sql>
+```
+
 ### 4. Validate — Build, Verify, Check Impact
 
 Never stop at writing the SQL. Always validate:
 
 **Build it:**
 ```bash
-altimate-dbt compile --model <name>                        # catch Jinja errors
-altimate-dbt build --model <name>                          # materialize + run tests
+altimate-dbt compile --model <name>                        # catch Jinja errors for a single model
+dbt build                                                  # build ALL models in the project
 ```
 
-**Verify the output:**
+**CRITICAL: Always run `dbt build` (full project) after creating all SQL files.** Do NOT only build individual models — this misses intermediate models, package models, and cross-model dependencies. If you created multiple models, build them all at once.
+
+**Verify the output — this catches bugs that compile/build cannot:**
 ```bash
 altimate-dbt columns --model <name>                        # confirm expected columns exist
 altimate-dbt execute --query "SELECT count(*) FROM {{ ref('<name>') }}" --limit 1
 altimate-dbt execute --query "SELECT * FROM {{ ref('<name>') }}" --limit 10  # spot-check values
+
+# Check for NULLs in columns that should never be NULL:
+altimate-dbt execute --query "SELECT count(*) as total, count(<col>) as non_null FROM {{ ref('<name>') }}" --limit 1
+
+# Verify aggregation results make sense (reasonable ranges, no absurd totals):
+altimate-dbt execute --query "SELECT min(<metric>), max(<metric>), avg(<metric>) FROM {{ ref('<name>') }}" --limit 1
+
+# Check distinct values in categorical/key columns:
+altimate-dbt execute --query "SELECT <col>, count(*) FROM {{ ref('<name>') }} GROUP BY 1 ORDER BY 2 DESC" --limit 20
 ```
-- Do the columns match what schema.yml or the task expects?
+
+**What to verify:**
+- Do the columns match what schema.yml or the task expects? (names AND order)
 - Does the row count make sense? (no fan-out from bad joins, no missing rows from wrong filters)
-- Are values correct? (spot-check NULLs, aggregations, date ranges)
+- Are metric values correct? Check ranges (no impossible values) and NULL counts
+- Are aggregations correct? Verify sums and counts produce expected results
+- Does the date range match expectations? If using a date spine, check min/max dates
 
 **Check SQL quality** (on the compiled SQL from `altimate-dbt compile`):
 - `sql_analyze` — catches anti-patterns (SELECT *, cartesian products, missing filters)
 - `altimate_core_validate` — validates syntax and schema references
 - `altimate_core_column_lineage` — traces how source columns flow to output columns. Use this to verify your SELECT is pulling the right columns from the right sources, especially for complex JOINs or multi-CTE models.
+
+**Verify column names and order match the schema definition:**
+- Use `altimate_core_column_lineage` on the compiled SQL to get the output column list
+- Compare against the columns defined in `schema.yml` — names must match exactly
+- If the task specifies expected columns or column order, verify the SQL output matches
+- Column order matters for positional evaluation — reorder SELECT columns to match the expected schema
 
 **Check downstream impact** (when modifying an existing model):
 ```bash
@@ -119,9 +167,11 @@ Use `altimate-dbt children` and `altimate-dbt parents` to verify the DAG is inta
 ## Iron Rules
 
 1. **Never write SQL without reading the source columns first.** Use `altimate-dbt columns` or `altimate-dbt columns-source`.
-2. **Never stop at compile.** Always `altimate-dbt build` to catch runtime errors.
-3. **Match existing patterns.** Read 2-3 existing models in the same directory before writing.
-4. **One model, one purpose.** A staging model should not contain business logic. An intermediate model should not be materialized as a table unless it has consumers.
+2. **Never write SQL without querying the actual data.** Check NULLs, distinct values, and value ranges for every column you'll aggregate or join on. Step 2c is not optional.
+3. **Never stop at compile.** Always `altimate-dbt build` to catch runtime errors.
+4. **Never stop at build.** Always verify the output data — check row counts, NULL counts, and value ranges. Step 4 verification is not optional.
+5. **Match existing patterns.** Read 2-3 existing models in the same directory before writing. Match their column order, types, and conventions.
+6. **One model, one purpose.** A staging model should not contain business logic. An intermediate model should not be materialized as a table unless it has consumers.
 
 ## Common Mistakes
 
@@ -133,6 +183,7 @@ Use `altimate-dbt children` and `altimate-dbt parents` to verify the DAG is inta
 | Creating a staging model with JOINs | Staging = 1:1 with source. JOINs belong in intermediate or mart |
 | Not checking existing naming conventions | Read existing models in the same directory first |
 | Using `SELECT *` in final models | Explicitly list columns for clarity and contract stability |
+| Skipping post-build data verification | Always query the output: check row counts, NULLs, and value ranges |
 
 ## Reference Guides
 
