@@ -1,0 +1,10 @@
+INFO  2026-03-05T08:31:03 +318ms service=default version=0.0.0-validation-202603050818 args=["--print-logs"] altimate-code
+INFO  2026-03-05T08:31:03 +1ms service=db path=/Users/bharatramnatarajan/.local/share/altimate-code/altimate-code.db opening database
+INFO  2026-03-05T08:31:03 +1ms service=db count=3 mode=bundled applying migrations
+INFO  2026-03-05T08:31:03 +2ms service=telemetry mode=appinsights telemetry initialized
+INFO  2026-03-05T08:31:03 +1ms service=config path=/Users/bharatramnatarajan/.config/altimate-code/config.json loading
+INFO  2026-03-05T08:31:03 +0ms service=config path=/Users/bharatramnatarajan/.config/altimate-code/altimate-code.json loading
+INFO  2026-03-05T08:31:03 +1ms service=config path=/Users/bharatramnatarajan/.config/altimate-code/altimate-code.jsonc loading
+ERROR 2026-03-05T08:31:04 +211ms service=default [object ErrorEvent]
+ERROR 2026-03-05T09:55:58 +5094824ms service=models.dev error=The operation timed out. Failed to fetch models.dev
+ERROR 2026-03-06T03:38:56 +63777826ms service=models.dev error=Unable to connect. Is the computer able to access the url? Failed to fetch models.dev

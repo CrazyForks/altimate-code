@@ -22,6 +22,26 @@ import { lazy } from "../../util/lazy"
 
 const log = Log.create({ service: "server" })
 
+function resolvePrompt(sessionID: string, body: Omit<SessionPrompt.PromptInput, "sessionID">) {
+  const textPart = body.parts?.find((p: { type: string }) => p.type === "text")
+  const text = (textPart && "text" in textPart ? (textPart.text as string) : "").trimStart()
+  const typedSessionID = sessionID as SessionID
+
+  if (text.startsWith("/validate")) {
+    return SessionPrompt.command({
+      sessionID: typedSessionID,
+      command: "validate",
+      arguments: text.slice("/validate".length).trim(),
+      model: body.model ? `${body.model.providerID}/${body.model.modelID}` : undefined,
+      agent: body.agent,
+      variant: body.variant,
+      messageID: body.messageID,
+    })
+  }
+
+  return SessionPrompt.prompt({ ...body, sessionID: typedSessionID })
+}
+
 export const SessionRoutes = lazy(() =>
   new Hono()
     .get(
@@ -814,7 +834,9 @@ export const SessionRoutes = lazy(() =>
         return stream(c, async (stream) => {
           const sessionID = c.req.valid("param").sessionID
           const body = c.req.valid("json")
-          const msg = await SessionPrompt.prompt({ ...body, sessionID })
+
+          const msg = await resolvePrompt(sessionID, body)
+
           stream.write(JSON.stringify(msg))
         })
       },
@@ -846,7 +868,7 @@ export const SessionRoutes = lazy(() =>
         return stream(c, async () => {
           const sessionID = c.req.valid("param").sessionID
           const body = c.req.valid("json")
-          SessionPrompt.prompt({ ...body, sessionID })
+          resolvePrompt(sessionID, body)
         })
       },
     )
