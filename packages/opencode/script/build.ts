@@ -71,6 +71,15 @@ const migrations = await Promise.all(
 )
 console.log(`Loaded ${migrations.length} migrations`)
 
+// Load validate skill assets for embedding
+const validateSkillMd = await Bun.file(path.join(dir, "src/skill/validate/SKILL.md")).text()
+const validateBatchPy = await Bun.file(path.join(dir, "src/skill/validate/batch_validate.py")).text()
+console.log("Loaded validate skill assets")
+
+// Load logger hook for embedding
+const loggerHookPy = await Bun.file(path.join(dir, "src/skill/validate/logger_hook.py")).text()
+console.log("Loaded logger hook")
+
 const singleFlag = process.argv.includes("--single")
 const baselineFlag = process.argv.includes("--baseline")
 const skipInstall = process.argv.includes("--skip-install")
@@ -224,6 +233,9 @@ for (const item of targets) {
       OPENCODE_LIBC: item.os === "linux" ? `'${item.abi ?? "glibc"}'` : "undefined",
       OPENCODE_MIGRATIONS: JSON.stringify(migrations),
       OPENCODE_CHANGELOG: JSON.stringify(changelog),
+      ALTIMATE_VALIDATE_SKILL_MD: JSON.stringify(validateSkillMd),
+      ALTIMATE_VALIDATE_BATCH_PY: JSON.stringify(validateBatchPy),
+      ALTIMATE_LOGGER_HOOK_PY: JSON.stringify(loggerHookPy),
       OPENCODE_WORKER_PATH: workerPath,
       OTUI_TREE_SITTER_WORKER_PATH: bunfsRoot + workerRelativePath,
     },
