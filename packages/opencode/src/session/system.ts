@@ -36,7 +36,7 @@ export namespace SystemPrompt {
 
   export async function environment(model: Provider.Model) {
     const project = Instance.project
-    return [
+    const parts: string[] = [
       [
         `You are powered by the model named ${model.api.id}. The exact model ID is ${model.providerID}/${model.api.id}`,
         `Here is some useful information about the environment you are running in:`,
@@ -59,6 +59,38 @@ export namespace SystemPrompt {
         `</directories>`,
       ].join("\n"),
     ]
+
+    // altimate_change start - inject project context to guide connection discovery
+    const fingerprint = Fingerprint.get() ?? await Fingerprint.detect(Instance.directory, Instance.worktree)
+    if (fingerprint.tags.length > 0) {
+      const isDbt = fingerprint.tags.includes("dbt")
+      const adapterTags = ["snowflake", "bigquery", "redshift", "databricks", "postgres", "mysql", "duckdb", "trino", "spark", "clickhouse"]
+      const detectedAdapter = fingerprint.tags.find(t => adapterTags.includes(t))
+
+      parts.push(
+        [
+          `<project-context>`,
+          `  Detected project tags: ${fingerprint.tags.join(", ")}`,
+          ...(isDbt ? [
+            ``,
+            `  This workspace contains a dbt project. When executing SQL queries:`,
+            `  1. Attempt to use the dbt connection first (configured via profiles.yml${detectedAdapter ? `, adapter: ${detectedAdapter}` : ""}).`,
+            `  2. If the dbt connection is unavailable or fails, fall back to a configured warehouse connection.`,
+            `  3. If neither works, ask the user for the credentials needed to connect${detectedAdapter ? ` to ${detectedAdapter}` : ""}.`,
+            `  Do not assume the dbt connection will always succeed — be prepared to ask for credentials.`,
+          ] : [
+            ``,
+            `  No dbt project detected. When SQL execution is needed:`,
+            `  1. Check if a warehouse connection is already configured.`,
+            `  2. If not, ask the user for the connection credentials appropriate to this project${detectedAdapter ? ` (detected: ${detectedAdapter})` : ""}.`,
+          ]),
+          `</project-context>`,
+        ].join("\n"),
+      )
+    }
+    // altimate_change end
+
+    return parts
   }
 
   export async function skills(agent: Agent.Info) {
