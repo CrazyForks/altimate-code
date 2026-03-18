@@ -104,7 +104,7 @@ let cli = yargs(hideBin(process.argv))
     // altimate_change end
 
     // altimate_change start - propagate --yolo flag to env var so Flag.ALTIMATE_CLI_YOLO picks it up
-    if ((opts as any).yolo) {
+    if ("yolo" in opts && opts.yolo) {
       process.env.ALTIMATE_CLI_YOLO = "true"
     }
     // altimate_change end
