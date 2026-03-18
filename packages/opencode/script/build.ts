@@ -15,15 +15,8 @@ process.chdir(dir)
 import { Script } from "@opencode-ai/script"
 import pkg from "../package.json"
 
-// Read engine version from pyproject.toml
-const enginePyprojectPath = path.resolve(dir, "../altimate-engine/pyproject.toml")
-const enginePyproject = await Bun.file(enginePyprojectPath).text()
-const engineVersionMatch = enginePyproject.match(/^version\s*=\s*"([^"]+)"/m)
-if (!engineVersionMatch) {
-  throw new Error("Could not read engine version from altimate-engine/pyproject.toml")
-}
-const engineVersion = engineVersionMatch[1]
-console.log(`Engine version: ${engineVersion}`)
+// Python engine has been eliminated — all methods run natively in TypeScript.
+// ALTIMATE_ENGINE_VERSION is no longer needed at runtime.
 
 // Read CHANGELOG.md for bundling
 const changelogPath = path.resolve(dir, "../../CHANGELOG.md")
@@ -215,6 +208,18 @@ for (const item of targets) {
     tsconfig: "./tsconfig.json",
     plugins: [solidPlugin],
     sourcemap: "external",
+    // Packages excluded from the compiled binary — loaded lazily at runtime.
+    // NOTE: @altimateai/altimate-core is intentionally NOT external — it's a
+    // napi binary that must be bundled for the CLI to work out of the box.
+    external: [
+      // dbt integration — heavy transitive deps, loaded on first dbt operation
+      "@altimateai/dbt-integration",
+      // Database drivers — users install on demand per warehouse
+      "pg", "snowflake-sdk", "@google-cloud/bigquery", "@databricks/sql",
+      "mysql2", "mssql", "oracledb", "duckdb", "better-sqlite3",
+      // Optional infra packages
+      "keytar", "ssh2", "dockerode", "yaml",
+    ],
     compile: {
       autoloadBunfig: false,
       autoloadDotenv: false,
@@ -229,7 +234,7 @@ for (const item of targets) {
     define: {
       OPENCODE_VERSION: `'${Script.version}'`,
       OPENCODE_CHANNEL: `'${Script.channel}'`,
-      ALTIMATE_ENGINE_VERSION: `'${engineVersion}'`,
+      // ALTIMATE_ENGINE_VERSION removed — Python engine eliminated
       OPENCODE_LIBC: item.os === "linux" ? `'${item.abi ?? "glibc"}'` : "undefined",
       OPENCODE_MIGRATIONS: JSON.stringify(migrations),
       OPENCODE_CHANGELOG: JSON.stringify(changelog),
