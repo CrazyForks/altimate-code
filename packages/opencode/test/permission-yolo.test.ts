@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test"
+import { describe, test, expect, afterEach } from "bun:test"
 import { PermissionNext } from "../src/permission/next"
 import { Flag } from "../src/flag/flag"
 
@@ -85,11 +85,16 @@ describe("yolo mode: Flag.ALTIMATE_CLI_YOLO dynamic getter", () => {
     expect(Flag.ALTIMATE_CLI_YOLO).toBe(false)
   })
 
-  test("ALTIMATE_CLI_YOLO takes precedence over OPENCODE_YOLO when both set", () => {
+  test("ALTIMATE_CLI_YOLO=false overrides OPENCODE_YOLO=true (primary is authoritative)", () => {
     process.env["ALTIMATE_CLI_YOLO"] = "false"
     process.env["OPENCODE_YOLO"] = "true"
-    // ALTIMATE_CLI_YOLO="false" → false, OPENCODE_YOLO="true" → true
-    // Either being true should activate yolo
+    // ALTIMATE_CLI_YOLO is authoritative when defined — explicit false disables yolo
+    expect(Flag.ALTIMATE_CLI_YOLO).toBe(false)
+  })
+
+  test("OPENCODE_YOLO=true activates yolo when ALTIMATE_CLI_YOLO is undefined (fallback)", () => {
+    delete process.env["ALTIMATE_CLI_YOLO"]
+    process.env["OPENCODE_YOLO"] = "true"
     expect(Flag.ALTIMATE_CLI_YOLO).toBe(true)
   })
 })

@@ -141,10 +141,17 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
           const request = event.properties
           // altimate_change start - yolo mode: auto-approve without showing prompt
           if (Flag.ALTIMATE_CLI_YOLO) {
-            sdk.client.permission.reply({
-              requestID: request.id,
-              reply: "once",
-            })
+            sdk.client.permission
+              .reply({
+                requestID: request.id,
+                reply: "once",
+              })
+              .catch((e) => {
+                Log.Default.error("yolo mode auto-approve failed", {
+                  error: e instanceof Error ? e.message : String(e),
+                  requestID: request.id,
+                })
+              })
             break
           }
           // altimate_change end

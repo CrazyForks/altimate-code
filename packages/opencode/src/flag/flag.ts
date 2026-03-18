@@ -145,11 +145,16 @@ Object.defineProperty(Flag, "OPENCODE_CLIENT", {
 })
 
 // altimate_change start - yolo mode: dynamic getter (set at runtime via --yolo flag)
+// ALTIMATE_CLI_YOLO is authoritative when defined; only falls back to OPENCODE_YOLO when undefined
 Object.defineProperty(Flag, "ALTIMATE_CLI_YOLO", {
   get() {
-    const alt = process.env["ALTIMATE_CLI_YOLO"]?.toLowerCase()
+    const alt = process.env["ALTIMATE_CLI_YOLO"]
+    if (alt !== undefined) {
+      const v = alt.toLowerCase()
+      return v === "true" || v === "1"
+    }
     const oc = process.env["OPENCODE_YOLO"]?.toLowerCase()
-    return alt === "true" || alt === "1" || oc === "true" || oc === "1"
+    return oc === "true" || oc === "1"
   },
   enumerable: true,
   configurable: false,
