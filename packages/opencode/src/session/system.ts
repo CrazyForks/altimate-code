@@ -14,7 +14,7 @@ import type { Agent } from "@/agent/agent"
 import { PermissionNext } from "@/permission/next"
 import { Skill } from "@/skill"
 // altimate_change start - import for env-based skill selection
-import { Fingerprint } from "../altimate/fingerprint"
+import { Fingerprint, ADAPTER_TAGS } from "../altimate/fingerprint"
 import { Config } from "../config/config"
 import { selectSkillsWithLLM } from "../altimate/skill-selector"
 // altimate_change end
@@ -61,32 +61,36 @@ export namespace SystemPrompt {
     ]
 
     // altimate_change start - inject project context to guide connection discovery
-    const fingerprint = Fingerprint.get() ?? await Fingerprint.detect(Instance.directory, Instance.worktree)
-    if (fingerprint.tags.length > 0) {
-      const isDbt = fingerprint.tags.includes("dbt")
-      const adapterTags = ["snowflake", "bigquery", "redshift", "databricks", "postgres", "mysql", "duckdb", "trino", "spark", "clickhouse"]
-      const detectedAdapter = fingerprint.tags.find(t => adapterTags.includes(t))
+    try {
+      // detect() caches per-cwd, so calling it directly is both correct and cheap
+      const fingerprint = await Fingerprint.detect(Instance.directory, Instance.worktree)
+      if (fingerprint.tags.length > 0) {
+        const isDbt = fingerprint.tags.includes("dbt")
+        const detectedAdapter = fingerprint.tags.find(t => (ADAPTER_TAGS as readonly string[]).includes(t))
 
-      parts.push(
-        [
-          `<project-context>`,
-          `  Detected project tags: ${fingerprint.tags.join(", ")}`,
-          ...(isDbt ? [
-            ``,
-            `  This workspace contains a dbt project. When executing SQL queries:`,
-            `  1. Attempt to use the dbt connection first (configured via profiles.yml${detectedAdapter ? `, adapter: ${detectedAdapter}` : ""}).`,
-            `  2. If the dbt connection is unavailable or fails, fall back to a configured warehouse connection.`,
-            `  3. If neither works, ask the user for the credentials needed to connect${detectedAdapter ? ` to ${detectedAdapter}` : ""}.`,
-            `  Do not assume the dbt connection will always succeed — be prepared to ask for credentials.`,
-          ] : [
-            ``,
-            `  No dbt project detected. When SQL execution is needed:`,
-            `  1. Check if a warehouse connection is already configured.`,
-            `  2. If not, ask the user for the connection credentials appropriate to this project${detectedAdapter ? ` (detected: ${detectedAdapter})` : ""}.`,
-          ]),
-          `</project-context>`,
-        ].join("\n"),
-      )
+        parts.push(
+          [
+            `<project-context>`,
+            `  Detected project tags: ${fingerprint.tags.join(", ")}`,
+            ...(isDbt ? [
+              ``,
+              `  This workspace contains a dbt project. When executing SQL queries:`,
+              `  1. Attempt to use the dbt connection first (configured via profiles.yml${detectedAdapter ? `, adapter: ${detectedAdapter}` : ""}).`,
+              `  2. If the dbt connection is unavailable or fails, fall back to a configured warehouse connection.`,
+              `  3. If neither works, ask the user for the credentials needed to connect${detectedAdapter ? ` to ${detectedAdapter}` : ""}.`,
+              `  Do not assume the dbt connection will always succeed — be prepared to ask for credentials.`,
+            ] : [
+              ``,
+              `  No dbt project detected. When SQL execution is needed:`,
+              `  1. Check if a warehouse connection is already configured.`,
+              `  2. If not, ask the user for the connection credentials appropriate to this project${detectedAdapter ? ` (detected: ${detectedAdapter})` : ""}.`,
+            ]),
+            `</project-context>`,
+          ].join("\n"),
+        )
+      }
+    } catch {
+      // fingerprint detection is best-effort — never block session startup
     }
     // altimate_change end
 

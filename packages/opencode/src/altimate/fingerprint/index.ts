@@ -6,6 +6,12 @@ import path from "path"
 
 const log = Log.create({ service: "fingerprint" })
 
+/** Canonical list of warehouse adapter identifiers, shared with system prompt builder. */
+export const ADAPTER_TAGS = [
+  "snowflake", "bigquery", "redshift", "databricks", "postgres",
+  "mysql", "sqlite", "duckdb", "trino", "spark", "clickhouse",
+] as const
+
 export namespace Fingerprint {
   export interface Result {
     tags: string[]
@@ -102,7 +108,7 @@ export namespace Fingerprint {
       try {
         const content = await Filesystem.readText(path.join(dir, "profiles.yml"))
         const adapterMatch = content.match(
-          /type:\s*(snowflake|bigquery|redshift|databricks|postgres|mysql|sqlite|duckdb|trino|spark|clickhouse)/i,
+          new RegExp(`type:\\s*(${ADAPTER_TAGS.join("|")})`, "i"),
         )
         if (adapterMatch) {
           tags.push(adapterMatch[1]!.toLowerCase())
