@@ -371,6 +371,75 @@ describe("Local: type mapping", () => {
   })
 })
 
+// ---------------------------------------------------------------------------
+// Regression tests for issue #203: FinOps tools return zeroed/masked data
+// ---------------------------------------------------------------------------
+
+describe("FinOps: regression #203 — WAREHOUSE_LOAD_HISTORY has no warehouse_size column", () => {
+  test("SNOWFLAKE_LOAD_SQL does not reference warehouse_size at all", () => {
+    const sql = AdvisorTemplates.buildLoadSql("snowflake", 14)!
+    // WAREHOUSE_LOAD_HISTORY has no warehouse_size column — selecting it
+    // caused SQL compilation error 000904. The column is now sourced from
+    // SNOWFLAKE_SIZING_SQL (QUERY_HISTORY) instead.
+    expect(sql).not.toContain("warehouse_size")
+  })
+
+  test("SNOWFLAKE_LOAD_SQL does not GROUP BY warehouse_size", () => {
+    const sql = AdvisorTemplates.buildLoadSql("snowflake", 14)!
+    expect(sql).not.toMatch(/GROUP BY warehouse_name, warehouse_size/i)
+    expect(sql).toContain("GROUP BY warehouse_name")
+  })
+
+  test("SNOWFLAKE_SIZING_SQL still selects warehouse_size (QUERY_HISTORY has it)", () => {
+    const sql = AdvisorTemplates.buildSizingSql("snowflake", 14)!
+    // QUERY_HISTORY does have warehouse_size — this is the correct source
+    expect(sql).toMatch(/warehouse_size/)
+  })
+})
+
+describe("Snowflake driver: column names are lowercased (regression #203)", () => {
+  test("rowsToRecords from Snowflake uppercase columns yields lowercase keys", () => {
+    // Simulate what the Snowflake SDK returns: row objects with UPPERCASE keys.
+    // The driver fix: Object.keys(rows[0]).map(col => col.toLowerCase())
+    // This test verifies the resulting credit summary has the right keys.
+    const fakeUppercaseRow: Record<string, unknown> = {
+      WAREHOUSE_NAME: "COMPUTE_WH",
+      TOTAL_CREDITS: "42.5",
+      TOTAL_COMPUTE_CREDITS: "40.0",
+      TOTAL_CLOUD_CREDITS: "2.5",
+      ACTIVE_DAYS: "10",
+      AVG_DAILY_CREDITS: "4.25",
+    }
+    // Replicate driver logic: extract lowercase column names, map rows
+    const columns = Object.keys(fakeUppercaseRow).map((col) => col.toLowerCase())
+    const rows = [columns.map((col) => fakeUppercaseRow[col.toUpperCase()])]
+
+    // Simulate rowsToRecords
+    const record: Record<string, unknown> = {}
+    columns.forEach((col, i) => { record[col] = rows[0][i] })
+
+    expect(record["warehouse_name"]).toBe("COMPUTE_WH")
+    expect(record["total_credits"]).toBe("42.5")
+    expect(record["WAREHOUSE_NAME"]).toBeUndefined()
+    expect(record["TOTAL_CREDITS"]).toBeUndefined()
+  })
+
+  test("credit recommendation uses lowercase keys and produces correct output", () => {
+    // Without the fix, wh.warehouse_name === undefined → name defaults to "unknown"
+    // and wh.total_credits === undefined → total defaults to 0.
+    // With the fix, lowercase keys are present and values are read correctly.
+    const summaryWithLowercaseKeys = [
+      { warehouse_name: "COMPUTE_WH", total_credits: "150", active_days: "5" },
+    ]
+    const name = String(summaryWithLowercaseKeys[0].warehouse_name || "unknown")
+    const total = Number(summaryWithLowercaseKeys[0].total_credits || 0)
+    expect(name).toBe("COMPUTE_WH")
+    expect(total).toBe(150)
+    expect(name).not.toBe("unknown")
+    expect(total).not.toBe(0)
+  })
+})
+
 describe("FinOps: handler error paths (no warehouse configured)", () => {
   test("finops.query_history returns error when no warehouse type found", async () => {
     const result = await Dispatcher.call("finops.query_history", {

@@ -49,7 +49,7 @@ describe.skipIf(!HAS_SNOWFLAKE)("Snowflake Driver E2E", () => {
   describe("Password Auth", () => {
     test("connects successfully with password", async () => {
       const result = await connector.execute("SELECT CURRENT_USER() AS u")
-      expect(result.columns).toEqual(["U"])
+      expect(result.columns).toEqual(["u"])
       expect(result.rows.length).toBe(1)
       expect(typeof result.rows[0][0]).toBe("string")
     })
@@ -76,7 +76,7 @@ describe.skipIf(!HAS_SNOWFLAKE)("Snowflake Driver E2E", () => {
   describe("Query Execution", () => {
     test("SELECT literal integer", async () => {
       const r = await connector.execute("SELECT 1 AS n")
-      expect(r.columns).toEqual(["N"])
+      expect(r.columns).toEqual(["n"])
       expect(r.rows).toEqual([[1]])
       expect(r.row_count).toBe(1)
       expect(r.truncated).toBe(false)
@@ -103,7 +103,7 @@ describe.skipIf(!HAS_SNOWFLAKE)("Snowflake Driver E2E", () => {
       const r = await connector.execute(
         "SELECT 1 AS a, 'b' AS b, TRUE AS c, NULL AS d",
       )
-      expect(r.columns).toEqual(["A", "B", "C", "D"])
+      expect(r.columns).toEqual(["a", "b", "c", "d"])
       expect(r.rows[0][0]).toBe(1)
       expect(r.rows[0][1]).toBe("b")
       expect(r.rows[0][2]).toBe(true)

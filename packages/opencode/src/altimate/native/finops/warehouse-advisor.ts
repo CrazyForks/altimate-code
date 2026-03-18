@@ -17,14 +17,13 @@ import type {
 const SNOWFLAKE_LOAD_SQL = `
 SELECT
     warehouse_name,
-    warehouse_size,
     AVG(avg_running) as avg_concurrency,
     AVG(avg_queued_load) as avg_queue_load,
     MAX(avg_queued_load) as peak_queue_load,
     COUNT(*) as sample_count
 FROM SNOWFLAKE.ACCOUNT_USAGE.WAREHOUSE_LOAD_HISTORY
 WHERE start_time >= DATEADD('day', -{days}, CURRENT_TIMESTAMP())
-GROUP BY warehouse_name, warehouse_size
+GROUP BY warehouse_name
 ORDER BY avg_queue_load DESC
 `
 
@@ -154,9 +153,17 @@ function generateSizingRecommendations(
 ): Record<string, unknown>[] {
   const recs: Record<string, unknown>[] = []
 
+  // Build warehouse_name → warehouse_size lookup from QUERY_HISTORY data
+  const sizeByWarehouse = new Map<string, string>()
+  for (const row of sizingData) {
+    const n = String(row.warehouse_name || "")
+    const s = String(row.warehouse_size || "")
+    if (n && s) sizeByWarehouse.set(n, s)
+  }
+
   for (const wh of loadData) {
     const name = String(wh.warehouse_name || "unknown")
-    const size = String(wh.warehouse_size || "unknown")
+    const size = sizeByWarehouse.get(name) || "unknown"
     const avgQueue = Number(wh.avg_queue_load || 0)
     const peakQueue = Number(wh.peak_queue_load || 0)
     const avgConcurrency = Number(wh.avg_concurrency || 0)
