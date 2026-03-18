@@ -25,6 +25,20 @@ declare global {
 export namespace Installation {
   const log = Log.create({ service: "installation" })
 
+  // altimate_change start — fetch with timeout to prevent hanging
+  const FETCH_TIMEOUT_MS = 10_000
+
+  async function fetchWithTimeout(url: string, opts?: RequestInit): Promise<Response> {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+    try {
+      return await fetch(url, { ...opts, signal: controller.signal })
+    } finally {
+      clearTimeout(timeout)
+    }
+  }
+  // altimate_change end
+
   async function text(cmd: string[], opts: { cwd?: string; env?: NodeJS.ProcessEnv } = {}) {
     return Process.text(cmd, {
       cwd: opts.cwd,
@@ -34,10 +48,41 @@ export namespace Installation {
   }
 
   async function upgradeCurl(target: string) {
-    const body = await fetch("https://altimate.ai/install").then((res) => {
-      if (!res.ok) throw new Error(res.statusText)
-      return res.text()
-    })
+    // altimate_change start — use repo-hosted install script (altimate.ai/install returns HTML)
+    const installUrls = [
+      "https://raw.githubusercontent.com/AltimateAI/altimate-code/main/install",
+      "https://altimate.ai/install",
+    ]
+    let body = ""
+    for (const installUrl of installUrls) {
+      try {
+        const res = await fetchWithTimeout(installUrl)
+        if (!res.ok) continue
+        const text = await res.text()
+        if (text.trimStart().startsWith("<!") || text.trimStart().startsWith("<html")) continue
+        body = text
+        break
+      } catch {
+        continue
+      }
+    }
+    if (!body) {
+      throw new Error(
+        `Could not fetch install script from any source. ` +
+          `As a workaround, upgrade via npm: npm install -g @altimateai/altimate-code@${target}`,
+      )
+    }
+
+    // Guard: Windows users should use PowerShell install
+    if (process.platform === "win32") {
+      throw new Error(
+        `curl install method is not supported on Windows. ` +
+          `Use PowerShell: irm https://altimate.ai/install.ps1 | iex\n` +
+          `Or npm: npm install -g @altimateai/altimate-code@${target}`,
+      )
+    }
+    // altimate_change end
+
     const proc = Process.spawn(["bash"], {
       stdin: "pipe",
       stdout: "pipe",
@@ -101,6 +146,9 @@ export namespace Installation {
 
   export async function method() {
     if (process.execPath.includes(path.join(".opencode", "bin"))) return "curl"
+    // altimate_change start — detect altimate-code curl installs
+    if (process.execPath.includes(path.join(".altimate-code", "bin"))) return "curl"
+    // altimate_change end
     if (process.execPath.includes(path.join(".local", "bin"))) return "curl"
     const exec = process.execPath.toLowerCase()
 
@@ -186,7 +234,9 @@ export namespace Installation {
         result = await Process.run(["npm", "install", "-g", `@altimateai/altimate-code@${target}`], { nothrow: true })
         break
       case "pnpm":
-        result = await Process.run(["pnpm", "install", "-g", `@altimateai/altimate-code@${target}`], { nothrow: true })
+        // altimate_change start — pnpm needs --force to override cached version on upgrade
+        result = await Process.run(["pnpm", "install", "-g", "--force", `@altimateai/altimate-code@${target}`], { nothrow: true })
+        // altimate_change end
         break
       case "bun":
         result = await Process.run(["bun", "install", "-g", `@altimateai/altimate-code@${target}`], { nothrow: true })
@@ -230,11 +280,10 @@ export namespace Installation {
       default:
         throw new Error(`Unknown method: ${method}`)
     }
-    // altimate_change start — telemetry for upgrade result
+    // altimate_change start — telemetry for upgrade result + actual error messages
     const telemetryMethod = (["npm", "bun", "brew"].includes(method) ? method : "other") as "npm" | "bun" | "brew" | "other"
     if (!result || result.code !== 0) {
-      const stderr =
-        method === "choco" ? "not running from an elevated command shell" : result?.stderr.toString("utf8") || ""
+      const stderr = result?.stderr.toString("utf8") || "upgrade failed (unknown error)"
       const T = await getTelemetry()
       T.track({
         type: "upgrade_attempted",
@@ -282,19 +331,22 @@ export namespace Installation {
     if (detectedMethod === "brew") {
       const formula = await getBrewFormula()
       if (formula.includes("/")) {
+        // altimate_change start — safe JSON parse for brew info
         const infoJson = await text(["brew", "info", "--json=v2", formula])
-        const info = JSON.parse(infoJson)
-        const version = info.formulae?.[0]?.versions?.stable
-        if (!version) throw new Error(`Could not detect version for tap formula: ${formula}`)
-        return version
+        try {
+          const info = JSON.parse(infoJson)
+          const version = info.formulae?.[0]?.versions?.stable
+          if (!version) throw new Error(`Could not detect version for tap formula: ${formula}`)
+          return version
+        } catch (e: any) {
+          throw new Error(`Failed to parse brew info for ${formula}: ${e.message}`)
+        }
+        // altimate_change end
       }
       // altimate_change start — brew: use GitHub releases API as source of truth
       // altimate-code is NOT in core homebrew, so formulae.brew.sh will 404.
-      // `brew info --json=v2` returns the LOCAL cached version which can be stale
-      // if the tap hasn't been updated — using it would cause `latest()` to return
-      // the already-installed version, making the upgrade command skip silently.
       // GitHub releases API is the authoritative source for the actual latest version.
-      return fetch("https://api.github.com/repos/AltimateAI/altimate-code/releases/latest")
+      return fetchWithTimeout("https://api.github.com/repos/AltimateAI/altimate-code/releases/latest")
         .then((res) => {
           if (!res.ok) throw new Error(`GitHub releases API: ${res.status} ${res.statusText}`)
           return res.json()
@@ -307,6 +359,12 @@ export namespace Installation {
     }
 
     if (detectedMethod === "npm" || detectedMethod === "bun" || detectedMethod === "pnpm") {
+      // altimate_change start — skip registry check for local channel
+      if (CHANNEL === "local") {
+        log.info("skipping version check for local channel")
+        return VERSION
+      }
+      // altimate_change end
       const registry = await iife(async () => {
         const r = (await text(["npm", "config", "get", "registry"])).trim()
         const reg = r || "https://registry.npmjs.org"
@@ -314,7 +372,7 @@ export namespace Installation {
       })
       const channel = CHANNEL
       // altimate_change start — npm package name for version check
-      return fetch(`${registry}/@altimateai/altimate-code/${channel}`)
+      return fetchWithTimeout(`${registry}/@altimateai/altimate-code/${channel}`)
       // altimate_change end
         .then((res) => {
           if (!res.ok) throw new Error(res.statusText)
@@ -324,7 +382,7 @@ export namespace Installation {
     }
 
     if (detectedMethod === "choco") {
-      return fetch(
+      return fetchWithTimeout(
         "https://community.chocolatey.org/api/v2/Packages?$filter=Id%20eq%20%27opencode%27%20and%20IsLatestVersion&$select=Version",
         { headers: { Accept: "application/json;odata=verbose" } },
       )
@@ -332,25 +390,47 @@ export namespace Installation {
           if (!res.ok) throw new Error(res.statusText)
           return res.json()
         })
-        .then((data: any) => data.d.results[0].Version)
+        .then((data: any) => {
+          // altimate_change start — guard against empty results
+          const results = data?.d?.results
+          if (!results || !Array.isArray(results) || results.length === 0) {
+            throw new Error("Chocolatey package 'opencode' not found or returned empty results")
+          }
+          return results[0].Version
+          // altimate_change end
+        })
     }
 
     if (detectedMethod === "scoop") {
-      return fetch("https://raw.githubusercontent.com/ScoopInstaller/Main/master/bucket/opencode.json", {
+      return fetchWithTimeout("https://raw.githubusercontent.com/ScoopInstaller/Main/master/bucket/opencode.json", {
         headers: { Accept: "application/json" },
       })
         .then((res) => {
-          if (!res.ok) throw new Error(res.statusText)
+          if (!res.ok) throw new Error(`Scoop manifest fetch failed: ${res.status}`)
           return res.json()
         })
-        .then((data: any) => data.version)
+        .then((data: any) => {
+          // altimate_change start — guard against missing version field
+          if (!data?.version) {
+            throw new Error("Scoop manifest for 'opencode' missing version field")
+          }
+          return data.version
+          // altimate_change end
+        })
     }
 
-    return fetch("https://api.github.com/repos/AltimateAI/altimate-code/releases/latest")
+    // altimate_change start — fallback to GitHub releases with safe access
+    return fetchWithTimeout("https://api.github.com/repos/AltimateAI/altimate-code/releases/latest")
       .then((res) => {
-        if (!res.ok) throw new Error(res.statusText)
+        if (!res.ok) throw new Error(`GitHub releases API returned ${res.status}`)
         return res.json()
       })
-      .then((data: any) => data.tag_name.replace(/^v/, ""))
+      .then((data: any) => {
+        if (!data?.tag_name) {
+          throw new Error("No releases found for AltimateAI/altimate-code")
+        }
+        return data.tag_name.replace(/^v/, "")
+      })
+    // altimate_change end
   }
 }

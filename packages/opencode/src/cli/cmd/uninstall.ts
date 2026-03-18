@@ -9,6 +9,11 @@ import os from "os"
 import { Filesystem } from "../../util/filesystem"
 import { Process } from "../../util/process"
 
+// altimate_change start — shell config markers (current + legacy for migration)
+const SHELL_MARKERS = ["# altimate-code", "# opencode"]
+const BIN_PATHS = [".altimate-code/bin", ".opencode/bin"]
+// altimate_change end
+
 interface UninstallArgs {
   keepConfig: boolean
   keepData: boolean
@@ -180,13 +185,15 @@ async function executeUninstall(method: Installation.Method, targets: RemovalTar
 
   if (method !== "curl" && method !== "unknown") {
     const cmds: Record<string, string[]> = {
-      npm: ["npm", "uninstall", "-g", "opencode-ai"],
-      pnpm: ["pnpm", "uninstall", "-g", "opencode-ai"],
-      bun: ["bun", "remove", "-g", "opencode-ai"],
-      yarn: ["yarn", "global", "remove", "opencode-ai"],
-      brew: ["brew", "uninstall", "opencode"],
+      // altimate_change start — correct package names
+      npm: ["npm", "uninstall", "-g", "@altimateai/altimate-code"],
+      pnpm: ["pnpm", "uninstall", "-g", "@altimateai/altimate-code"],
+      bun: ["bun", "remove", "-g", "@altimateai/altimate-code"],
+      yarn: ["yarn", "global", "remove", "@altimateai/altimate-code"],
+      brew: ["brew", "uninstall", "altimate-code"],
       choco: ["choco", "uninstall", "opencode"],
       scoop: ["scoop", "uninstall", "opencode"],
+      // altimate_change end
     }
 
     const cmd = cmds[method]
@@ -215,7 +222,7 @@ async function executeUninstall(method: Installation.Method, targets: RemovalTar
     prompts.log.info(`  rm "${targets.binary}"`)
 
     const binDir = path.dirname(targets.binary)
-    if (binDir.includes(".opencode")) {
+    if (BIN_PATHS.some((p) => binDir.includes(p.split("/")[0]))) {
       prompts.log.info(`  rmdir "${binDir}" 2>/dev/null`)
     }
   }
@@ -266,7 +273,7 @@ async function getShellConfigFile(): Promise<string | null> {
     if (!exists) continue
 
     const content = await Filesystem.readText(file).catch(() => "")
-    if (content.includes("# opencode") || content.includes(".opencode/bin")) {
+    if (SHELL_MARKERS.some((m) => content.includes(m)) || BIN_PATHS.some((p) => content.includes(p))) {
       return file
     }
   }
@@ -284,22 +291,24 @@ async function cleanShellConfig(file: string) {
   for (const line of lines) {
     const trimmed = line.trim()
 
-    if (trimmed === "# opencode") {
+    // altimate_change start — handle both current (altimate-code) and legacy (opencode) markers
+    if (SHELL_MARKERS.includes(trimmed)) {
       skip = true
       continue
     }
 
     if (skip) {
       skip = false
-      if (trimmed.includes(".opencode/bin") || trimmed.includes("fish_add_path")) {
+      if (BIN_PATHS.some((p) => trimmed.includes(p)) || trimmed.includes("fish_add_path")) {
         continue
       }
     }
 
     if (
-      (trimmed.startsWith("export PATH=") && trimmed.includes(".opencode/bin")) ||
-      (trimmed.startsWith("fish_add_path") && trimmed.includes(".opencode"))
+      (trimmed.startsWith("export PATH=") && BIN_PATHS.some((p) => trimmed.includes(p))) ||
+      (trimmed.startsWith("fish_add_path") && BIN_PATHS.some((p) => trimmed.includes(p.split("/")[0])))
     ) {
+    // altimate_change end
       continue
     }
 
