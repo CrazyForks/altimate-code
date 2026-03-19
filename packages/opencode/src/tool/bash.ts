@@ -17,8 +17,52 @@ import { Shell } from "@/shell/shell"
 import { BashArity } from "@/permission/arity"
 import { Truncate } from "./truncation"
 import { Plugin } from "@/plugin"
+import { existsSync } from "fs"
 
 const MAX_METADATA_LENGTH = 30_000
+
+// altimate_change start - resolve dbt-tools/bin for PATH injection
+// dbt-tools is a sibling workspace package that provides the `altimate-dbt` CLI.
+// Without this, the agent can't find `altimate-dbt` and falls back to raw `dbt`.
+const dbtToolsBin = lazy(() => {
+  const candidates: string[] = []
+
+  // 1. Explicit env var override (highest priority)
+  if (process.env.ALTIMATE_DBT_TOOLS_BIN) {
+    candidates.push(process.env.ALTIMATE_DBT_TOOLS_BIN)
+  }
+
+  // 2. Dev mode: resolve from source tree
+  //    import.meta.dirname = packages/opencode/src/tool → ../../../../dbt-tools/bin
+  if (import.meta.dirname && !import.meta.dirname.startsWith("/$bunfs")) {
+    candidates.push(path.resolve(import.meta.dirname, "../../../../dbt-tools/bin"))
+  }
+
+  // 3. Compiled binary: resolve from the real binary location
+  //    Binary at: .../dist/@altimateai/altimate-code-<platform>/bin/altimate
+  //    Walk up to the package root and look for dbt-tools as sibling
+  try {
+    const binDir = path.dirname(process.execPath)
+    // Walk up to find a directory containing dbt-tools/bin
+    let dir = binDir
+    for (let i = 0; i < 8; i++) {
+      candidates.push(path.join(dir, "dbt-tools", "bin"))
+      candidates.push(path.join(dir, "packages", "dbt-tools", "bin"))
+      dir = path.dirname(dir)
+    }
+  } catch {}
+
+  // 4. Fallback: node_modules/.bin in cwd
+  candidates.push(path.resolve(process.cwd(), "node_modules", ".bin"))
+
+  for (const candidate of candidates) {
+    if (existsSync(path.join(candidate, "altimate-dbt"))) {
+      return candidate
+    }
+  }
+  return undefined
+})
+// altimate_change end
 const DEFAULT_TIMEOUT = Flag.OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 2 * 60 * 1000
 
 export const log = Log.create({ service: "bash-tool" })
@@ -164,12 +208,19 @@ export const BashTool = Tool.define("bash", async () => {
         { cwd, sessionID: ctx.sessionID, callID: ctx.callID },
         { env: {} },
       )
+      // altimate_change start - prepend dbt-tools/bin to PATH so `altimate-dbt` is findable
+      const extraPath = dbtToolsBin()
+      const envPATH = extraPath
+        ? `${extraPath}${path.delimiter}${process.env.PATH ?? ""}`
+        : process.env.PATH
+      // altimate_change end
       const proc = spawn(params.command, {
         shell,
         cwd,
         env: {
           ...process.env,
           ...shellEnv.env,
+          ...(extraPath ? { PATH: envPATH } : {}),
         },
         stdio: ["ignore", "pipe", "pipe"],
         detached: process.platform !== "win32",

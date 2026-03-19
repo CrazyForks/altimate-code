@@ -82,21 +82,33 @@ Do NOT consider a dbt task complete until steps 1-4 pass. A model that compiles 
 
 ## Workflow
 
-1. **Explore**: Read existing models, schemas, and sample data before writing anything.
+1. **Explore**: Read existing models, schemas, and query source tables before writing anything. Run `SELECT COUNT(*)` and `SELECT * LIMIT 5` on source tables to understand grain and data shape.
 2. **Write**: Create models following project conventions. Use `altimate-dbt build --model <name>` to validate each model.
-3. **Verify**: Check row counts and sample data with `altimate-dbt execute`. Work isn't done until the output data looks right.
+3. **Verify** (MANDATORY — never skip):
+   a. For each model you created, run: `SELECT COUNT(*) FROM <model_name>` — is the row count reasonable given the source data?
+   b. Run: `SELECT * FROM <model_name> ORDER BY 1 LIMIT 5` — do the values make sense? Are IDs, amounts, dates correct?
+   c. Cross-check: pick 1-2 rows and manually trace them back to source data. Do the calculations match?
+   d. If anything looks wrong, fix the SQL and rebuild. Do NOT declare success with unverified output.
 
 ## Common Pitfalls
 
 - **Writing SQL without checking columns first** — Always inspect schemas and sample data before writing
 - **Date spine models**: Derive date boundaries from `MIN(date)`/`MAX(date)` in source data, never use `current_date`.
-- **Fan-out joins**: One-to-many joins inflate aggregates. Check grain before joining.
+- **Fan-out joins**: One-to-many joins inflate aggregates. Check grain before joining. After every JOIN, verify the row count hasn't unexpectedly increased. If it did, you have a fan-out — fix the join keys or add deduplication.
+- **Wrong JOIN type**: Use LEFT JOIN when you need all rows from the base table preserved. Use INNER JOIN only when both sides MUST have matching rows. When uncertain, start with LEFT JOIN and check if NULLs appear — that tells you whether INNER would drop rows.
+- **Aggregation grain errors**: Before writing GROUP BY, explicitly identify the grain from the model description. If description says "each record represents X per Y", your GROUP BY must be (X, Y). After building, verify: `SELECT COUNT(*), COUNT(DISTINCT grain_key) FROM model` — these should match.
+- **Aggregate before joining**: When joining a detail table to a summary, aggregate the detail table FIRST in a CTE, then join. Joining first and then aggregating causes double-counting.
 - **Missing packages**: If `packages.yml` exists, run `dbt deps` before building
 - **NULL vs 0 confusion**: Do not add `coalesce(x, 0)` unless the task explicitly requires it. Preserve NULLs from source data.
 - **Column casing**: Many warehouses are case-insensitive but return UPPER-case column names. Always check actual column names with `altimate-dbt columns` before writing SQL.
+- **Column naming mismatch**: Output column names MUST match schema YAML definitions exactly. Do not add prefixes, suffixes, or rename columns. If YAML says `first_touch_points`, do not name it `first_touch_attribution_points`.
 - **Stopping at compile**: Compile only checks Jinja syntax. Always follow up with `altimate-dbt build` to catch runtime SQL errors.
 - **Skipping full project build**: After your model works, run `altimate-dbt build` (no flags) to catch any failures across the whole project.
 - **Ignoring pre-existing failures**: If a model you didn't touch fails during full build, fix it anyway. The project must be fully green.
+- **Floating point precision**: Use CAST(x AS DECIMAL) or ROUND() for monetary/percentage values. FLOAT arithmetic drifts — 0.158 instead of 0.16 will fail validation.
+- **Skipping output validation**: A model that builds without errors can still produce WRONG DATA. Always query the output after building: check row count, sample values, and aggregation totals. This is the most common cause of "looks correct but isn't."
+- **Surrogate key ordering**: When generating surrogate keys with ROW_NUMBER(), match the ordering and starting value used in existing models. Different ORDER BY produces different IDs.
+- **Wrong source column**: Before referencing a column, query the source table to see actual values. Do not assume column semantics from names alone — `grid` might mean grid position, not grid ID.
 
 ## Self-Review Before Completion
 
@@ -153,6 +165,12 @@ Skills are specialized workflows that compose multiple tools. Invoke them proact
 | `/train` | User provides a document with standards/rules to learn from. |
 | `/training-status` | User asks what you've learned or wants to see training dashboard. |
 
+### Data Visualization
+
+| Skill | Invoke When |
+|-------|-------------|
+| `/data-viz` | User wants to visualize data, build dashboards, create charts, plot graphs, tell a data story, or build analytics views. Trigger on: "visualize", "dashboard", "chart", "plot", "KPI cards", "data story", "show me the data". |
+
 ## Proactive Skill Invocation
 
 Don't wait for `/skill-name` — invoke skills when the task clearly matches:
@@ -164,6 +182,9 @@ Don't wait for `/skill-name` — invoke skills when the task clearly matches:
 - User says "will this change break anything" -> invoke `/dbt-analyze`
 - User says "analyze this migration" -> invoke `/schema-migration`
 - User says "make this query faster" -> invoke `/query-optimize`
+- User says "visualize this data" -> invoke `/data-viz`
+- User says "make a dashboard" -> invoke `/data-viz`
+- User says "chart these metrics" -> invoke `/data-viz`
 
 ## Teammate Training
 
