@@ -21,6 +21,8 @@ import { existsSync } from "fs"
 
 const MAX_METADATA_LENGTH = 30_000
 
+export const log = Log.create({ service: "bash-tool" })
+
 const DBT_BINARY_NAMES =
   process.platform === "win32" ? ["altimate-dbt.exe", "altimate-dbt.cmd", "altimate-dbt"] : ["altimate-dbt"]
 
@@ -37,9 +39,9 @@ const dbtToolsBin = lazy(() => {
   }
 
   // 2. Dev mode: resolve from source tree
-  //    import.meta.dirname = packages/opencode/src/tool → ../../../../dbt-tools/bin
+  //    import.meta.dirname = packages/opencode/src/tool → ../../../dbt-tools/bin
   if (import.meta.dirname && !import.meta.dirname.startsWith("/$bunfs")) {
-    const devPath = path.resolve(import.meta.dirname, "../../../../dbt-tools/bin")
+    const devPath = path.resolve(import.meta.dirname, "../../../dbt-tools/bin")
     if (hasDbtBinary(devPath)) return devPath
   }
 
@@ -74,9 +76,8 @@ const dbtToolsBin = lazy(() => {
 
   return undefined
 })
-const DEFAULT_TIMEOUT = Flag.OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 2 * 60 * 1000
 
-export const log = Log.create({ service: "bash-tool" })
+const DEFAULT_TIMEOUT = Flag.OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 2 * 60 * 1000
 
 const resolveWasm = (asset: string) => {
   if (asset.startsWith("file://")) return fileURLToPath(asset)
@@ -219,17 +220,17 @@ export const BashTool = Tool.define("bash", async () => {
         { cwd, sessionID: ctx.sessionID, callID: ctx.callID },
         { env: {} },
       )
+      const baseEnv: Record<string, string | undefined> = { ...process.env, ...shellEnv.env }
       const extraPath = dbtToolsBin()
       const envPATH = extraPath
-        ? `${extraPath}${path.delimiter}${process.env.PATH ?? ""}`
-        : process.env.PATH
+        ? `${extraPath}${path.delimiter}${baseEnv.PATH ?? ""}`
+        : baseEnv.PATH
       const proc = spawn(params.command, {
         shell,
         cwd,
         env: {
-          ...process.env,
-          ...shellEnv.env,
-          ...(extraPath ? { PATH: envPATH } : {}),
+          ...baseEnv,
+          ...(envPATH ? { PATH: envPATH } : {}),
         },
         stdio: ["ignore", "pipe", "pipe"],
         detached: process.platform !== "win32",
