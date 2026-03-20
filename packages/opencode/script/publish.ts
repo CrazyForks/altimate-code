@@ -1,5 +1,7 @@
 #!/usr/bin/env bun
 import { $ } from "bun"
+import fs from "fs"
+import path from "path"
 import pkg from "../package.json"
 import { Script } from "@opencode-ai/script"
 import { fileURLToPath } from "url"
@@ -43,12 +45,31 @@ for (const filepath of new Bun.Glob("**/package.json").scanSync({ cwd: "./dist" 
 console.log("binaries", binaries)
 const version = Object.values(binaries)[0]
 
+// Build dbt-tools so we can bundle it in the published package.
+// dbt-tools provides the `altimate-dbt` CLI used by the builder agent.
+const dbtToolsDir = "../dbt-tools"
+await $`bun run build`.cwd(dbtToolsDir)
+
+// Bundle dbt-tools into the wrapper package: bin shim + bundled JS + Python packages.
+// Native .node files are NOT copied — @altimateai/altimate-core is already a runtime
+// dependency and provides them. This keeps the package ~200 MB lighter.
+async function copyDbtTools(destRoot: string) {
+  await $`mkdir -p ${destRoot}/dbt-tools/bin`
+  await $`mkdir -p ${destRoot}/dbt-tools/dist`
+  await $`cp ${dbtToolsDir}/bin/altimate-dbt ${destRoot}/dbt-tools/bin/`
+  await $`cp ${dbtToolsDir}/dist/index.js ${destRoot}/dbt-tools/dist/`
+  if (fs.existsSync(path.join(dbtToolsDir, "dist/altimate_python_packages"))) {
+    await $`cp -r ${dbtToolsDir}/dist/altimate_python_packages ${destRoot}/dbt-tools/dist/`
+  }
+}
+
 await $`mkdir -p ./dist/${pkg.name}`
 await $`cp -r ./bin ./dist/${pkg.name}/bin`
 await $`cp -r ../../.opencode/skills ./dist/${pkg.name}/skills`
 await $`cp ./script/postinstall.mjs ./dist/${pkg.name}/postinstall.mjs`
 await Bun.file(`./dist/${pkg.name}/LICENSE`).write(await Bun.file("../../LICENSE").text())
 await Bun.file(`./dist/${pkg.name}/CHANGELOG.md`).write(await Bun.file("../../CHANGELOG.md").text())
+await copyDbtTools(`./dist/${pkg.name}`)
 
 await Bun.file(`./dist/${pkg.name}/package.json`).write(
   JSON.stringify(
@@ -57,6 +78,7 @@ await Bun.file(`./dist/${pkg.name}/package.json`).write(
       bin: {
         altimate: "./bin/altimate",
         "altimate-code": "./bin/altimate-code",
+        "altimate-dbt": "./dbt-tools/bin/altimate-dbt",
       },
       scripts: {
         postinstall: "bun ./postinstall.mjs || node ./postinstall.mjs",
@@ -94,6 +116,7 @@ try {
   await Bun.file(`${unscopedDir}/LICENSE`).write(await Bun.file("../../LICENSE").text())
   await Bun.file(`${unscopedDir}/CHANGELOG.md`).write(await Bun.file("../../CHANGELOG.md").text())
   await Bun.file(`${unscopedDir}/README.md`).write(await Bun.file("../../README.md").text())
+  await copyDbtTools(unscopedDir)
   await Bun.file(`${unscopedDir}/package.json`).write(
     JSON.stringify(
       {
@@ -108,6 +131,7 @@ try {
         bin: {
           altimate: "./bin/altimate",
           "altimate-code": "./bin/altimate-code",
+          "altimate-dbt": "./dbt-tools/bin/altimate-dbt",
         },
         scripts: {
           postinstall: "bun ./postinstall.mjs || node ./postinstall.mjs",

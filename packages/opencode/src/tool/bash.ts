@@ -17,8 +17,63 @@ import { Shell } from "@/shell/shell"
 import { BashArity } from "@/permission/arity"
 import { Truncate } from "./truncation"
 import { Plugin } from "@/plugin"
+import { existsSync } from "fs"
 
 const MAX_METADATA_LENGTH = 30_000
+
+const DBT_BINARY_NAMES =
+  process.platform === "win32" ? ["altimate-dbt.exe", "altimate-dbt.cmd", "altimate-dbt"] : ["altimate-dbt"]
+
+function hasDbtBinary(dir: string): boolean {
+  return DBT_BINARY_NAMES.some((name) => existsSync(path.join(dir, name)))
+}
+
+// Resolve dbt-tools/bin so `altimate-dbt` is on PATH when spawning bash commands.
+// Checks: env var → dev source tree → npm-installed wrapper package → walk-up fallback.
+const dbtToolsBin = lazy(() => {
+  // 1. Explicit env var override
+  if (process.env.ALTIMATE_DBT_TOOLS_BIN && hasDbtBinary(process.env.ALTIMATE_DBT_TOOLS_BIN)) {
+    return process.env.ALTIMATE_DBT_TOOLS_BIN
+  }
+
+  // 2. Dev mode: resolve from source tree
+  //    import.meta.dirname = packages/opencode/src/tool → ../../../../dbt-tools/bin
+  if (import.meta.dirname && !import.meta.dirname.startsWith("/$bunfs")) {
+    const devPath = path.resolve(import.meta.dirname, "../../../../dbt-tools/bin")
+    if (hasDbtBinary(devPath)) return devPath
+  }
+
+  // 3. npm installed: compiled binary lives in a platform-specific package,
+  //    dbt-tools ships in the wrapper package alongside it.
+  //    Binary:    node_modules/@altimateai/altimate-code-<platform>/bin/altimate
+  //    Scoped:    node_modules/@altimateai/altimate-code/dbt-tools/bin/altimate-dbt
+  //    Unscoped:  node_modules/altimate-code/dbt-tools/bin/altimate-dbt
+  try {
+    const binDir = path.dirname(process.execPath)
+    // scopeDir = node_modules/@altimateai (for scoped wrapper lookup)
+    const scopeDir = path.resolve(binDir, "../..")
+    // nodeModulesDir = node_modules (for unscoped wrapper lookup)
+    const nodeModulesDir = path.dirname(scopeDir)
+    for (const wrapper of ["altimate-code", "opencode"]) {
+      const scoped = path.join(scopeDir, wrapper, "dbt-tools", "bin")
+      if (hasDbtBinary(scoped)) return scoped
+      const unscoped = path.join(nodeModulesDir, wrapper, "dbt-tools", "bin")
+      if (hasDbtBinary(unscoped)) return unscoped
+    }
+    // Walk up for other layouts (global installs, pnpm, monorepos)
+    let dir = binDir
+    for (let i = 0; i < 8; i++) {
+      if (hasDbtBinary(path.join(dir, "dbt-tools", "bin"))) return path.join(dir, "dbt-tools", "bin")
+      const parent = path.dirname(dir)
+      if (parent === dir) break // reached filesystem root
+      dir = parent
+    }
+  } catch (e) {
+    log.debug("dbtToolsBin: failed to resolve from execPath", { error: String(e) })
+  }
+
+  return undefined
+})
 const DEFAULT_TIMEOUT = Flag.OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 2 * 60 * 1000
 
 export const log = Log.create({ service: "bash-tool" })
@@ -164,12 +219,17 @@ export const BashTool = Tool.define("bash", async () => {
         { cwd, sessionID: ctx.sessionID, callID: ctx.callID },
         { env: {} },
       )
+      const extraPath = dbtToolsBin()
+      const envPATH = extraPath
+        ? `${extraPath}${path.delimiter}${process.env.PATH ?? ""}`
+        : process.env.PATH
       const proc = spawn(params.command, {
         shell,
         cwd,
         env: {
           ...process.env,
           ...shellEnv.env,
+          ...(extraPath ? { PATH: envPATH } : {}),
         },
         stdio: ["ignore", "pipe", "pipe"],
         detached: process.platform !== "win32",
