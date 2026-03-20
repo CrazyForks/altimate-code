@@ -1,10 +1,24 @@
-// altimate_change - SQL query classifier for write detection
+// altimate_change start — SQL query classifier for write detection
 //
 // Uses altimate-core's AST-based getStatementTypes() for accurate classification.
 // Handles CTEs, string literals, procedural blocks, all dialects correctly.
+// Lazy-loads altimate-core on first use to avoid crashing at import time
+// when the native binary is unavailable (e.g. GLIBC mismatch).
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const core: any = require("@altimateai/altimate-core")
+let _core: any = null
+
+function getCore(): any {
+  if (!_core) {
+    try {
+      _core = require("@altimateai/altimate-core")
+    } catch {
+      // Native binding unavailable — return null so callers can degrade gracefully
+      return null
+    }
+  }
+  return _core
+}
 
 // Categories from altimate-core that indicate write operations
 const WRITE_CATEGORIES = new Set(["dml", "ddl", "dcl", "tcl"])
@@ -17,8 +31,11 @@ const HARD_DENY_TYPES = new Set(["DROP DATABASE", "DROP SCHEMA", "TRUNCATE", "TR
 /**
  * Classify a SQL string as "read" or "write" using AST parsing.
  * If ANY statement is a write, returns "write".
+ * Falls back to "write" (safe default) if native binding is unavailable.
  */
 export function classify(sql: string): "read" | "write" {
+  const core = getCore()
+  if (!core) return "write" // fail-safe: treat as write when native unavailable
   const result = core.getStatementTypes(sql)
   if (!result?.categories?.length) return "read"
   // Treat unknown categories (not in WRITE or READ sets) as write to fail safe
@@ -36,8 +53,11 @@ export function classifyMulti(sql: string): "read" | "write" {
 /**
  * Single-pass: classify and check for hard-denied statement types.
  * Returns both the overall query type and whether a hard-deny pattern was found.
+ * Falls back to write + not-blocked when native binding is unavailable.
  */
 export function classifyAndCheck(sql: string): { queryType: "read" | "write"; blocked: boolean } {
+  const core = getCore()
+  if (!core) return { queryType: "write", blocked: false }
   const result = core.getStatementTypes(sql)
   if (!result?.statements?.length) return { queryType: "read", blocked: false }
 
@@ -50,3 +70,4 @@ export function classifyAndCheck(sql: string): { queryType: "read" | "write"; bl
   const queryType = categories.some((c: string) => !READ_CATEGORIES.has(c)) ? "write" : "read"
   return { queryType: queryType as "read" | "write", blocked }
 }
+// altimate_change end

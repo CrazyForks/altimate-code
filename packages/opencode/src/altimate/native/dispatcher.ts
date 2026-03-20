@@ -35,12 +35,30 @@ export async function call<M extends BridgeMethod>(
   method: M,
   params: (typeof BridgeMethods)[M] extends { params: infer P } ? P : never,
 ): Promise<(typeof BridgeMethods)[M] extends { result: infer R } ? R : never> {
-  // Lazy registration: load all handler modules on first call
+  // altimate_change start — graceful degradation when native binding unavailable
+  // Lazy registration: load all handler modules on first call.
+  // If the native binding fails to load (e.g. GLIBC mismatch on older Linux),
+  // log a warning and continue — tools that don't need native will still work.
   if (_ensureRegistered) {
     const fn = _ensureRegistered
     _ensureRegistered = null
-    await fn()
+    try {
+      await fn()
+    } catch (e: any) {
+      const msg = String(e?.message || e)
+      if (msg.includes("native binding") || msg.includes("GLIBC") || msg.includes("ERR_DLOPEN_FAILED")) {
+        console.error(
+          `\n⚠ Native module (@altimateai/altimate-core) failed to load.\n` +
+          `  SQL analysis tools (validate, lint, transpile, lineage, etc.) will be unavailable.\n` +
+          `  Other features (warehouse connections, schema indexing, dbt) still work.\n` +
+          `  Cause: ${msg.slice(0, 200)}\n`,
+        )
+      } else {
+        throw e
+      }
+    }
   }
+  // altimate_change end
 
   const native = nativeHandlers.get(method as string)
 
