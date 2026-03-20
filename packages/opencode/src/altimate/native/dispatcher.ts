@@ -51,7 +51,12 @@ export async function call<M extends BridgeMethod>(
           `\n⚠ Native module (@altimateai/altimate-core) failed to load.\n` +
           `  SQL analysis tools (validate, lint, transpile, lineage, etc.) will be unavailable.\n` +
           `  Other features (warehouse connections, schema indexing, dbt) still work.\n` +
-          `  Cause: ${msg.slice(0, 200)}\n`,
+          `  Cause: ${msg.slice(0, 200)}\n` +
+          `\n` +
+          `  To fix this, upgrade to a system with GLIBC >= 2.35:\n` +
+          `    • Ubuntu 22.04+ / Debian 12+ / Fedora 36+ / RHEL 9+\n` +
+          `    • Or run inside a Docker container with a newer base image\n` +
+          `    • Check your version: ldd --version\n`,
         )
       } else {
         throw e
