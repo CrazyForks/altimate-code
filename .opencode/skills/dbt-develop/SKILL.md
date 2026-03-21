@@ -1,6 +1,6 @@
 ---
 name: dbt-develop
-description: Create and modify dbt models — staging, intermediate, marts, incremental, medallion architecture. Use when building new SQL models, extending existing ones, scaffolding YAML configs, or reorganizing project structure. Powered by altimate-dbt.
+description: Create and modify dbt models — staging, intermediate, marts, incremental, medallion architecture, Data Vault 2.0 (hubs, links, satellites). Use when building new SQL models, extending existing ones, scaffolding YAML configs, or reorganizing project structure. Powered by altimate-dbt.
 ---
 
 # dbt Model Development
@@ -13,9 +13,10 @@ description: Create and modify dbt models — staging, intermediate, marts, incr
 
 **Use when the user wants to:**
 - Create a new dbt model (staging, intermediate, mart, OBT)
+- Build Data Vault 2.0 models (hubs, links, satellites, business vault)
 - Add or modify SQL logic in an existing model
 - Generate sources.yml or schema.yml from warehouse metadata
-- Reorganize models into layers (staging/intermediate/mart or bronze/silver/gold)
+- Reorganize models into layers (staging/intermediate/mart, bronze/silver/gold, or Data Vault)
 - Convert a model to incremental materialization
 - Scaffold a new dbt project structure
 
@@ -85,6 +86,7 @@ read <model_file>        # understand existing patterns and logic
 
 See [references/layer-patterns.md](references/layer-patterns.md) for staging/intermediate/mart templates.
 See [references/medallion-architecture.md](references/medallion-architecture.md) for bronze/silver/gold patterns.
+See [references/datavault-modeling.md](references/datavault-modeling.md) for Data Vault 2.0 (hubs, links, satellites).
 See [references/incremental-strategies.md](references/incremental-strategies.md) for incremental materialization.
 See [references/yaml-generation.md](references/yaml-generation.md) for sources.yml and schema.yml.
 
@@ -146,6 +148,7 @@ Use `altimate-dbt children` and `altimate-dbt parents` to verify the DAG is inta
 | [references/altimate-dbt-commands.md](references/altimate-dbt-commands.md) | Need the full CLI reference |
 | [references/layer-patterns.md](references/layer-patterns.md) | Creating staging, intermediate, or mart models |
 | [references/medallion-architecture.md](references/medallion-architecture.md) | Organizing into bronze/silver/gold layers |
+| [references/datavault-modeling.md](references/datavault-modeling.md) | Building Data Vault 2.0 (hubs, links, satellites) |
 | [references/incremental-strategies.md](references/incremental-strategies.md) | Converting to incremental materialization |
 | [references/yaml-generation.md](references/yaml-generation.md) | Generating sources.yml or schema.yml |
 | [references/common-mistakes.md](references/common-mistakes.md) | Extended anti-patterns catalog |
