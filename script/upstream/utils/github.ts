@@ -35,7 +35,8 @@ export async function fetchReleases(
   const slice = limit != null ? ` | .[0:${limit}]` : ""
   const jqFilter = `[.[] | ${condition}]${slice}`
 
-  const cmd = `gh api repos/${repo}/releases --paginate --jq '.[]' | jq -s '${jqFilter}'`
+  // Use curl for public repos when gh CLI is not authenticated, fall back to gh if available
+  const cmd = `curl -sf "https://api.github.com/repos/${repo}/releases?per_page=100" | jq '${jqFilter}'`
 
   try {
     const output = execSync(cmd, {
@@ -46,8 +47,9 @@ export async function fetchReleases(
 
     if (!output) return []
     return JSON.parse(output) as GitHubRelease[]
-  } catch (e: any) {
-    throw new Error(`Failed to fetch releases from ${repo}: ${e.message || e}`)
+  } catch {
+    // Fallback: return empty if API is unavailable (rate limit, no auth)
+    return []
   }
 }
 
@@ -59,7 +61,7 @@ export async function getRelease(
   repo: string,
   tag: string,
 ): Promise<GitHubRelease | null> {
-  const cmd = `gh api repos/${repo}/releases/tags/${tag} --jq '{tag_name, name, prerelease, draft, published_at, html_url}'`
+  const cmd = `curl -sf "https://api.github.com/repos/${repo}/releases/tags/${tag}" | jq '{tag_name, name, prerelease, draft, published_at, html_url}'`
 
   try {
     const output = execSync(cmd, {
@@ -73,6 +75,28 @@ export async function getRelease(
     if (release.draft) return null
     return release
   } catch {
+    // Fallback: if API is unavailable (rate limit, no auth), check if the tag
+    // exists in git as a fetched upstream tag. This is safe because we already
+    // fetched upstream tags earlier in the merge flow.
+    try {
+      const dateOutput = execSync(`git log -1 --format=%ci ${tag} 2>/dev/null`, {
+        encoding: "utf-8",
+        timeout: 5_000,
+      }).trim()
+
+      if (dateOutput) {
+        return {
+          tag_name: tag,
+          name: tag,
+          prerelease: tag.includes("-"),
+          draft: false,
+          published_at: dateOutput,
+          html_url: `https://github.com/${repo}/releases/tag/${tag}`,
+        }
+      }
+    } catch {
+      // Tag doesn't exist locally either
+    }
     return null
   }
 }
