@@ -73,7 +73,6 @@ export namespace ProviderError {
           // altimate_change start — branding: altimate auth
           return "Unauthorized: request was blocked by a gateway or proxy. Your authentication token may be missing or expired — try running `altimate auth login <your provider URL>` to re-authenticate."
           // altimate_change end
-          return "Unauthorized: request was blocked by a gateway or proxy. Your authentication token may be missing or expired — try running `opencode auth login <your provider URL>` to re-authenticate."
         }
         if (e.statusCode === 403) {
           return "Forbidden: request was blocked by a gateway or proxy. You may not have permission to access this resource — check your account and provider settings."

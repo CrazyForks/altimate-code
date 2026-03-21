@@ -144,8 +144,6 @@ export namespace Config {
       // altimate_change start - support both .altimate-code and .opencode config dirs
       if (dir.endsWith(".altimate-code") || dir.endsWith(".opencode") || dir === Flag.OPENCODE_CONFIG_DIR) {
       // altimate_change end
-      if (dir.endsWith(".opencode") || dir === Flag.OPENCODE_CONFIG_DIR) {
-        for (const file of ["opencode.jsonc", "opencode.json"]) {
         // altimate_change start - support altimate-code.json config filename
         for (const file of ["altimate-code.json", "opencode.jsonc", "opencode.json"]) {
         // altimate_change end
@@ -217,7 +215,6 @@ export namespace Config {
       // altimate_change start - support altimate-code.json config filename
       for (const file of ["altimate-code.json", "opencode.jsonc", "opencode.json"]) {
       // altimate_change end
-      for (const file of ["opencode.jsonc", "opencode.json"]) {
         result = mergeConfigConcatArrays(result, await loadFile(path.join(managedDir, file)))
       }
     }
@@ -1436,9 +1433,6 @@ export namespace Config {
       path.join(Global.Path.config, file),
     )
     // altimate_change end
-    const candidates = ["opencode.jsonc", "opencode.json", "config.json"].map((file) =>
-      path.join(Global.Path.config, file),
-    )
     for (const file of candidates) {
       if (existsSync(file)) return file
     }

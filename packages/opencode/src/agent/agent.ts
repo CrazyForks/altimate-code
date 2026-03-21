@@ -346,7 +346,6 @@ export namespace Agent {
       // altimate_change start - default agent is "builder" not "build"
       sortBy([(x) => (cfg.default_agent ? x.name === cfg.default_agent : x.name === "builder"), "desc"]),
       // altimate_change end
-      sortBy([(x) => (cfg.default_agent ? x.name === cfg.default_agent : x.name === "build"), "desc"]),
     )
   }
 

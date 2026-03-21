@@ -323,12 +323,6 @@ export function Session() {
     )
   }
   // altimate_change end
-  function toBottom() {
-    setTimeout(() => {
-      if (!scroll || scroll.isDestroyed) return
-      scroll.scrollTo(scroll.scrollHeight)
-    }, 50)
-  }
 
   const local = useLocal()
 

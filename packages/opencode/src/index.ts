@@ -30,33 +30,18 @@ import { WebCommand } from "./cli/cmd/web"
 import { PrCommand } from "./cli/cmd/pr"
 import { SessionCommand } from "./cli/cmd/session"
 import { DbCommand } from "./cli/cmd/db"
+import { TraceCommand } from "./cli/cmd/trace"
 import path from "path"
 import { Global } from "./global"
 import { JsonMigration } from "./storage/json-migration"
 import { Database } from "./storage/db"
-// altimate_change start - welcome banner
-import { showWelcomeBannerIfNeeded } from "./cli/welcome"
-// altimate_change end
 // altimate_change start - telemetry import
 import { Telemetry } from "./telemetry"
 // altimate_change end
+// altimate_change start - welcome banner
+import { showWelcomeBannerIfNeeded } from "./cli/welcome"
+// altimate_change end
 
-    // altimate_change start - app name in logs
-    Log.Default.info("altimate-code", {
-    // altimate_change end
-    // altimate_change start - welcome banner on first run after install/upgrade
-    showWelcomeBannerIfNeeded()
-    // altimate_change end
-    // altimate_change start - telemetry init
-    // Initialize telemetry early so events from MCP, engine, auth are captured.
-    // init() is idempotent — safe to call again later in session prompt.
-    Telemetry.init().catch(() => {})
-    // altimate_change end
-    // altimate_change start - propagate --yolo flag to env var so Flag.ALTIMATE_CLI_YOLO picks it up
-    if ("yolo" in opts && opts.yolo) {
-      process.env.ALTIMATE_CLI_YOLO = "true"
-    }
-    // altimate_change end
 process.on("unhandledRejection", (e) => {
   Log.Default.error("rejection", {
     e: e instanceof Error ? e.message : e,
@@ -69,12 +54,16 @@ process.on("uncaughtException", (e) => {
   })
 })
 
+// Ensure the process exits on terminal hangup (eg. closing the terminal tab).
+// Without this, long-running commands like `serve` block on a never-resolving
+// promise and survive as orphaned processes.
+process.on("SIGHUP", () => process.exit())
+
 let cli = yargs(hideBin(process.argv))
   .parserConfiguration({ "populate--": true })
   // altimate_change start - script name
   .scriptName("altimate-code")
   // altimate_change end
-  .scriptName("opencode")
   .wrap(100)
   .help("help", "show help")
   .alias("help", "h")
@@ -114,7 +103,25 @@ let cli = yargs(hideBin(process.argv))
     process.env.DATAPILOT = "1"
     // altimate_change end
 
-    Log.Default.info("opencode", {
+    // altimate_change start - propagate --yolo flag to env var so Flag.ALTIMATE_CLI_YOLO picks it up
+    if ("yolo" in opts && opts.yolo) {
+      process.env.ALTIMATE_CLI_YOLO = "true"
+    }
+    // altimate_change end
+
+    // altimate_change start - telemetry init
+    // Initialize telemetry early so events from MCP, engine, auth are captured.
+    // init() is idempotent — safe to call again later in session prompt.
+    Telemetry.init().catch(() => {})
+    // altimate_change end
+
+    // altimate_change start - welcome banner on first run after install/upgrade
+    showWelcomeBannerIfNeeded()
+    // altimate_change end
+
+    // altimate_change start - app name in logs
+    Log.Default.info("altimate-code", {
+    // altimate_change end
       version: Installation.VERSION,
       args: process.argv.slice(2),
     })
@@ -122,7 +129,6 @@ let cli = yargs(hideBin(process.argv))
     // altimate_change start - db marker name
     const marker = path.join(Global.Path.data, "altimate-code.db")
     // altimate_change end
-    const marker = path.join(Global.Path.data, "opencode.db")
     if (!(await Filesystem.exists(marker))) {
       const tty = process.stderr.isTTY
       process.stderr.write("Performing one time database migration, may take a few minutes..." + EOL)
@@ -183,6 +189,7 @@ let cli = yargs(hideBin(process.argv))
   .command(PrCommand)
   .command(SessionCommand)
   .command(DbCommand)
+  .command(TraceCommand)
 
 if (Installation.isLocal()) {
   cli = cli.command(WorkspaceServeCommand)

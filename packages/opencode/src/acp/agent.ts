@@ -551,22 +551,6 @@ export namespace ACP {
         }
       }
       // altimate_change end
-      const authMethod: AuthMethod = {
-        description: "Run `opencode auth login` in the terminal",
-        name: "Login with opencode",
-        id: "opencode-login",
-      }
-
-      // If client supports terminal-auth capability, use that instead.
-      if (params.clientCapabilities?._meta?.["terminal-auth"] === true) {
-        authMethod._meta = {
-          "terminal-auth": {
-            command: "opencode",
-            args: ["auth", "login"],
-            label: "Altimate Code Login",
-          },
-        }
-      }
 
       return {
         protocolVersion: 1,

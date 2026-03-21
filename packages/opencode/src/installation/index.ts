@@ -155,8 +155,6 @@ export namespace Installation {
       const installedName =
         check.name === "brew" ? "altimate-code" : check.name === "choco" || check.name === "scoop" ? "opencode" : "@altimateai/altimate-code"
       // altimate_change end
-      const installedName =
-        check.name === "brew" || check.name === "choco" || check.name === "scoop" ? "opencode" : "opencode-ai"
       if (output.includes(installedName)) {
         return check.name
       }
@@ -181,13 +179,6 @@ export namespace Installation {
     return "AltimateAI/tap/altimate-code"
   }
   // altimate_change end
-  async function getBrewFormula() {
-    const tapFormula = await text(["brew", "list", "--formula", "AltimateAI/tap/altimate-code"])
-    if (tapFormula.includes("opencode")) return "AltimateAI/tap/altimate-code"
-    const coreFormula = await text(["brew", "list", "--formula", "opencode"])
-    if (coreFormula.includes("opencode")) return "opencode"
-    return "opencode"
-  }
 
   export async function upgrade(method: Method, target: string) {
     let result: Awaited<ReturnType<typeof upgradeCurl>> | undefined
@@ -299,7 +290,6 @@ export namespace Installation {
   // altimate_change start — normalize VERSION: strip "v" prefix from CI git tag
   export const VERSION = typeof OPENCODE_VERSION === "string" ? OPENCODE_VERSION.trim().replace(/^v/, "") : "local"
   // altimate_change end
-  export const VERSION = typeof OPENCODE_VERSION === "string" ? OPENCODE_VERSION : "local"
   export const CHANNEL = typeof OPENCODE_CHANNEL === "string" ? OPENCODE_CHANNEL : "local"
   export const USER_AGENT = `opencode/${CHANNEL}/${VERSION}/${Flag.OPENCODE_CLIENT}`
 
@@ -331,12 +321,6 @@ export namespace Installation {
           return data.tag_name.replace(/^v/, "")
         })
       // altimate_change end
-      return fetch("https://formulae.brew.sh/api/formula/opencode.json")
-        .then((res) => {
-          if (!res.ok) throw new Error(res.statusText)
-          return res.json()
-        })
-        .then((data: any) => data.versions.stable)
     }
 
     if (detectedMethod === "npm" || detectedMethod === "bun" || detectedMethod === "pnpm") {
@@ -349,7 +333,6 @@ export namespace Installation {
       // altimate_change start — npm package name for version check
       return fetch(`${registry}/@altimateai/altimate-code/${channel}`)
       // altimate_change end
-      return fetch(`${registry}/opencode-ai/${channel}`)
         .then((res) => {
           if (!res.ok) throw new Error(res.statusText)
           return res.json()

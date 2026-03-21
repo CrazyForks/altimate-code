@@ -328,13 +328,6 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
             <span>{Installation.VERSION}</span>
           </text>
           {/* altimate_change end */}
-          <text fg={theme.textMuted}>
-            <span style={{ fg: theme.success }}>•</span> <b>Open</b>
-            <span style={{ fg: theme.text }}>
-              <b>Code</b>
-            </span>{" "}
-            <span>{Installation.VERSION}</span>
-          </text>
         </box>
       </box>
     </Show>

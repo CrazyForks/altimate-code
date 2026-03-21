@@ -7,7 +7,6 @@ import { Filesystem } from "../util/filesystem"
 // altimate_change start - app name
 const app = "altimate-code"
 // altimate_change end
-const app = "opencode"
 
 const data = path.join(xdgData!, app)
 const cache = path.join(xdgCache!, app)

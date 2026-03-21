@@ -83,7 +83,6 @@ export namespace SystemPrompt {
       // altimate_change start - use filtered skill list
       Skill.fmt(filtered, { verbose: true }),
       // altimate_change end
-      Skill.fmt(list, { verbose: true }),
     ].join("\n")
   }
 }

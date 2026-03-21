@@ -27,22 +27,7 @@ import { Flag } from "@/flag/flag"
 import { Log } from "@/util/log"
 import { LspTool } from "./lsp"
 import { Truncate } from "./truncation"
-      // altimate_change start - register MCP discovery tool
-      McpDiscoverTool,
-      // altimate_change end
-// altimate_change start - import training tools for AI teammate
-import { TrainingSaveTool } from "../altimate/tools/training-save"
-import { TrainingListTool } from "../altimate/tools/training-list"
-import { TrainingRemoveTool } from "../altimate/tools/training-remove"
-// altimate_change end
 
-// altimate_change start - import altimate persistent memory tools
-import { MemoryReadTool } from "../memory/tools/memory-read"
-import { MemoryWriteTool } from "../memory/tools/memory-write"
-import { MemoryDeleteTool } from "../memory/tools/memory-delete"
-import { MemoryAuditTool } from "../memory/tools/memory-audit"
-import { MemoryExtractTool } from "../memory/tools/memory-extract"
-// altimate_change end
 import { ApplyPatchTool } from "./apply_patch"
 import { Glob } from "../util/glob"
 import { pathToFileURL } from "url"
@@ -114,6 +99,20 @@ import { ProjectScanTool } from "../altimate/tools/project-scan"
 import { DatamateManagerTool } from "../altimate/tools/datamate"
 import { FeedbackSubmitTool } from "../altimate/tools/feedback-submit"
 // altimate_change end
+
+// altimate_change start - import altimate persistent memory tools
+import { MemoryReadTool } from "../memory/tools/memory-read"
+import { MemoryWriteTool } from "../memory/tools/memory-write"
+import { MemoryDeleteTool } from "../memory/tools/memory-delete"
+import { MemoryAuditTool } from "../memory/tools/memory-audit"
+import { MemoryExtractTool } from "../memory/tools/memory-extract"
+// altimate_change end
+// altimate_change start - import training tools for AI teammate
+import { TrainingSaveTool } from "../altimate/tools/training-save"
+import { TrainingListTool } from "../altimate/tools/training-list"
+import { TrainingRemoveTool } from "../altimate/tools/training-remove"
+// altimate_change end
+
 export namespace ToolRegistry {
   const log = Log.create({ service: "tool.registry" })
 
@@ -203,6 +202,78 @@ export namespace ToolRegistry {
       ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [LspTool] : []),
       ...(config.experimental?.batch_tool === true ? [BatchTool] : []),
       ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [PlanExitTool] : []),
+      // altimate_change start - register custom data engineering tools
+      SqlExecuteTool,
+      SchemaInspectTool,
+      SqlAnalyzeTool,
+      SqlOptimizeTool,
+      SqlTranslateTool,
+      LineageCheckTool,
+      WarehouseListTool,
+      WarehouseTestTool,
+      WarehouseAddTool,
+      WarehouseRemoveTool,
+      WarehouseDiscoverTool,
+      // altimate_change start - register MCP discovery tool
+      McpDiscoverTool,
+      // altimate_change end
+
+      DbtManifestTool,
+      DbtProfilesTool,
+      DbtLineageTool,
+      SchemaIndexTool,
+      SchemaSearchTool,
+      SchemaCacheStatusTool,
+      SqlExplainTool,
+      SqlFormatTool,
+      SqlFixTool,
+      SqlAutocompleteTool,
+      SqlDiffTool,
+      FinopsQueryHistoryTool,
+      FinopsAnalyzeCreditsTool,
+      FinopsExpensiveQueriesTool,
+      FinopsWarehouseAdviceTool,
+      FinopsUnusedResourcesTool,
+      FinopsRoleGrantsTool,
+      FinopsRoleHierarchyTool,
+      FinopsUserRolesTool,
+      SchemaDetectPiiTool,
+      SchemaTagsTool,
+      SchemaTagsListTool,
+      SqlRewriteTool,
+      AltimateCoreRewriteTool,
+      SchemaDiffTool,
+      AltimateCoreValidateTool,
+      AltimateCoreCheckTool,
+      AltimateCoreFixTool,
+      AltimateCorePolicyTool,
+      AltimateCoreSemanticsTool,
+      AltimateCoreTestgenTool,
+      AltimateCoreEquivalenceTool,
+      AltimateCoreMigrationTool,
+      AltimateCoreSchemaDiffTool,
+      AltimateCoreCorrectTool,
+      AltimateCoreGradeTool,
+      AltimateCoreClassifyPiiTool,
+      AltimateCoreQueryPiiTool,
+      AltimateCoreResolveTermTool,
+      AltimateCoreColumnLineageTool,
+      AltimateCoreTrackLineageTool,
+      AltimateCoreExtractMetadataTool,
+      AltimateCoreCompareTool,
+      AltimateCoreCompleteTool,
+      AltimateCoreOptimizeContextTool,
+      AltimateCorePruneSchemaTool,
+      AltimateCoreImportDdlTool,
+      AltimateCoreExportDdlTool,
+      AltimateCoreFingerprintTool,
+      AltimateCoreIntrospectionSqlTool,
+      AltimateCoreParseDbtTool,
+      ToolLookupTool,
+      ProjectScanTool,
+      DatamateManagerTool,
+      FeedbackSubmitTool,
+      // altimate_change end
       // altimate_change start - register altimate persistent memory tools
       ...(!Flag.ALTIMATE_DISABLE_MEMORY ? [MemoryReadTool, MemoryWriteTool, MemoryDeleteTool, MemoryAuditTool, ...(Flag.ALTIMATE_MEMORY_AUTO_EXTRACT ? [MemoryExtractTool] : [])] : []),
       // altimate_change end
@@ -211,6 +282,11 @@ export namespace ToolRegistry {
       // altimate_change end
       ...custom,
     ]
+  }
+
+  /** All tool infos without model/provider filtering. */
+  export async function allInfos(): Promise<Tool.Info[]> {
+    return all()
   }
 
   export async function ids() {

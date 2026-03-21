@@ -92,23 +92,6 @@ export namespace SessionCompaction {
     return count >= base - headroom
   }
   // altimate_change end
-  export async function isOverflow(input: { tokens: MessageV2.Assistant["tokens"]; model: Provider.Model }) {
-    const config = await Config.get()
-    if (config.compaction?.auto === false) return false
-    const context = input.model.limit.context
-    if (context === 0) return false
-
-    const count =
-      input.tokens.total ||
-      input.tokens.input + input.tokens.output + input.tokens.cache.read + input.tokens.cache.write
-
-    const reserved =
-      config.compaction?.reserved ?? Math.min(COMPACTION_BUFFER, ProviderTransform.maxOutputTokens(input.model))
-    const usable = input.model.limit.input
-      ? input.model.limit.input - reserved
-      : context - ProviderTransform.maxOutputTokens(input.model)
-    return count >= usable
-  }
 
   export const PRUNE_MINIMUM = 20_000
   export const PRUNE_PROTECT = 40_000

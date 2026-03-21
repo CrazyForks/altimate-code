@@ -101,12 +101,6 @@ export namespace Project {
       )
   }
   // altimate_change end
-  function readCachedId(dir: string) {
-    return Filesystem.readText(path.join(dir, "opencode"))
-      .then((x) => x.trim())
-      .then(ProjectID.make)
-      .catch(() => undefined)
-  }
 
   export async function fromDirectory(directory: string) {
     log.info("fromDirectory", { directory })
