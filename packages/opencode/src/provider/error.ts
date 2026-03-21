@@ -21,8 +21,6 @@ export namespace ProviderError {
     /exceeded model token limit/i, // Kimi For Coding, Moonshot
     /context[_ ]length[_ ]exceeded/i, // Generic fallback
     /request entity too large/i, // HTTP 413
-    /the request was too long/i, // Azure OpenAI
-    /maximum tokens for requested operation/i, // Azure OpenAI
   ]
 
   function isOpenAiErrorRetryable(e: APICallError) {
@@ -72,9 +70,7 @@ export namespace ProviderError {
       // provide a human-readable message instead of dumping raw markup
       if (/^\s*<!doctype|^\s*<html/i.test(e.responseBody)) {
         if (e.statusCode === 401) {
-          // altimate_change start — branding: altimate auth
-          return "Unauthorized: request was blocked by a gateway or proxy. Your authentication token may be missing or expired — try running `altimate auth login <your provider URL>` to re-authenticate."
-          // altimate_change end
+          return "Unauthorized: request was blocked by a gateway or proxy. Your authentication token may be missing or expired — try running `opencode auth login <your provider URL>` to re-authenticate."
         }
         if (e.statusCode === 403) {
           return "Forbidden: request was blocked by a gateway or proxy. You may not have permission to access this resource — check your account and provider settings."

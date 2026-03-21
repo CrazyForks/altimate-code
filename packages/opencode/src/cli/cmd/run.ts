@@ -27,8 +27,6 @@ import { SkillTool } from "../../tool/skill"
 import { BashTool } from "../../tool/bash"
 import { TodoWriteTool } from "../../tool/todo"
 import { Locale } from "../../util/locale"
-import { Tracer, FileExporter, HttpExporter, type TraceExporter } from "../../altimate/observability/tracing"
-import { Config } from "../../config/config"
 
 type ToolProps<T extends Tool.Info> = {
   input: Tool.InferParameters<T>
@@ -214,33 +212,6 @@ function todo(info: ToolProps<typeof TodoWriteTool>) {
   )
 }
 
-function splitSqlStatements(sql: string): string[] {
-  const stmts: string[] = []
-  const current: string[] = []
-  let inStr = false
-  let strChar = ""
-  for (let i = 0; i < sql.length; i++) {
-    const ch = sql[i]
-    if (!inStr && (ch === "'" || ch === '"' || ch === "`")) {
-      inStr = true
-      strChar = ch
-      current.push(ch)
-    } else if (inStr && ch === strChar) {
-      inStr = false
-      current.push(ch)
-    } else if (!inStr && ch === ";" ) {
-      const s = current.join("").trim()
-      if (s) stmts.push(s)
-      current.length = 0
-    } else {
-      current.push(ch)
-    }
-  }
-  const last = current.join("").trim()
-  if (last) stmts.push(last)
-  return stmts.length ? stmts : [sql]
-}
-
 function normalizePath(input?: string) {
   if (!input) return ""
   if (path.isAbsolute(input)) return path.relative(process.cwd(), input) || "."
@@ -249,7 +220,7 @@ function normalizePath(input?: string) {
 
 export const RunCommand = cmd({
   command: "run [message..]",
-  describe: "run altimate with a message",
+  describe: "run opencode with a message",
   builder: (yargs: Argv) => {
     return yargs
       .positional("message", {
@@ -307,7 +278,7 @@ export const RunCommand = cmd({
       })
       .option("attach", {
         type: "string",
-        describe: "attach to a running altimate server (e.g., http://localhost:4096)",
+        describe: "attach to a running opencode server (e.g., http://localhost:4096)",
       })
       .option("password", {
         alias: ["p"],
@@ -330,26 +301,6 @@ export const RunCommand = cmd({
         type: "boolean",
         describe: "show thinking blocks",
         default: false,
-      })
-      .option("output", {
-        alias: ["o"],
-        type: "string",
-        describe: "write final assistant response to file (.md or .txt)",
-      })
-      .option("audience", {
-        type: "string",
-        choices: ["executive", "technical"] as const,
-        describe: "output calibration: executive (no SQL/jargon, business framing) or technical (default)",
-      })
-      .option("query", {
-        alias: ["q"],
-        type: "number",
-        describe: "when using --file with a SQL file, analyze only the Nth statement (1-indexed)",
-      })
-      .option("trace", {
-        type: "boolean",
-        describe: "enable session tracing (default: true, disable with --no-trace)",
-        default: true,
       })
   },
   handler: async (args) => {
@@ -389,28 +340,6 @@ export const RunCommand = cmd({
           mime,
         })
       }
-    }
-
-    // --query N: extract the Nth SQL statement from attached file(s) as a text part
-    if (args.query !== undefined && args.file) {
-      const fileList = Array.isArray(args.file) ? args.file : [args.file]
-      const extractedParts: string[] = []
-      for (const filePath of fileList) {
-        const resolvedPath = path.resolve(process.cwd(), filePath)
-        const content = await Bun.file(resolvedPath).text()
-        const stmts = splitSqlStatements(content)
-        const n = args.query
-        if (n < 1 || n > stmts.length) {
-          UI.error(`--query ${n} is out of range (${path.basename(filePath)} has ${stmts.length} statement${stmts.length === 1 ? "" : "s"})`)
-          process.exit(1)
-        }
-        extractedParts.push(
-          `[${path.basename(filePath)}, statement ${n} of ${stmts.length}]\n\`\`\`sql\n${stmts[n - 1].trim()}\n\`\`\``
-        )
-      }
-      // Replace file attachments with extracted statement as inline text
-      files.length = 0
-      message = [extractedParts.join("\n\n"), message].filter(Boolean).join("\n\n")
     }
 
     if (!process.stdin.isTTY) message += "\n" + (await Bun.stdin.text())
@@ -479,18 +408,7 @@ export const RunCommand = cmd({
       }
     }
 
-    const EXECUTIVE_DIRECTIVE = `## Output Calibration — Executive Mode
-You are speaking to a non-technical business executive. Follow these rules strictly:
-- NEVER show SQL queries, column names in backticks, or code blocks
-- NEVER use engineering jargon (Cartesian product, referential integrity, column pruning, NULL, schema, index, CTE, predicate)
-- Translate ALL technical findings to business impact: revenue, cost, risk, time, compliance exposure
-- Lead with the business implication, then briefly explain the cause in plain English if needed
-- Format output for a slide deck or email: short paragraphs, simple tables with business-friendly headers
-- "Query Duration" not "total_elapsed_time" — "Data Processed" not "bytes_scanned" — "Monthly Cost" not "credits_used * 3.00"`
-
     async function execute(sdk: OpencodeClient) {
-      const outputParts: string[] = []
-
       function tool(part: ToolPart) {
         try {
           if (part.tool === "bash") return bash(props<typeof BashTool>(part))
@@ -523,30 +441,6 @@ You are speaking to a non-technical business executive. Follow these rules stric
       const events = await sdk.event.subscribe()
       let error: string | undefined
 
-      // Build tracer from config + CLI flags — must never crash the run command
-      const tracer = await (async () => {
-        try {
-          if (args.trace === false) return null
-
-          const cfg = await Config.get()
-          const tracingCfg = cfg.tracing
-          if (tracingCfg?.enabled === false) return null
-
-          const exporters: TraceExporter[] = [new FileExporter(tracingCfg?.dir)]
-
-          if (tracingCfg?.exporters) {
-            for (const exp of tracingCfg.exporters) {
-              exporters.push(new HttpExporter(exp.name, exp.endpoint, exp.headers))
-            }
-          }
-
-          return Tracer.withExporters(exporters, { maxFiles: tracingCfg?.maxFiles })
-        } catch {
-          // Config failure should never prevent the run command from working
-          return null
-        }
-      })()
-
       async function loop() {
         const toggles = new Map<string, boolean>()
 
@@ -561,15 +455,6 @@ You are speaking to a non-technical business executive. Follow these rules stric
             UI.println(`> ${event.properties.info.agent} · ${event.properties.info.modelID}`)
             UI.empty()
             toggles.set("start", true)
-
-            // Enrich trace with resolved model/provider from the first assistant message
-            const info = event.properties.info
-            tracer?.enrichFromAssistant({
-              modelID: info.modelID,
-              providerID: info.providerID,
-              agent: info.agent,
-              variant: info.variant,
-            })
           }
 
           if (event.type === "message.part.updated") {
@@ -577,7 +462,6 @@ You are speaking to a non-technical business executive. Follow these rules stric
             if (part.sessionID !== sessionID) continue
 
             if (part.type === "tool" && (part.state.status === "completed" || part.state.status === "error")) {
-              tracer?.logToolCall(part as Parameters<Tracer["logToolCall"]>[0])
               if (emit("tool_use", { part })) continue
               if (part.state.status === "completed") {
                 tool(part)
@@ -602,21 +486,17 @@ You are speaking to a non-technical business executive. Follow these rules stric
             }
 
             if (part.type === "step-start") {
-              tracer?.logStepStart(part)
               if (emit("step_start", { part })) continue
             }
 
             if (part.type === "step-finish") {
-              tracer?.logStepFinish(part)
               if (emit("step_finish", { part })) continue
             }
 
             if (part.type === "text" && part.time?.end) {
-              tracer?.logText(part)
               if (emit("text", { part })) continue
               const text = part.text.trim()
               if (!text) continue
-              if (args.output) outputParts.push(text)
               if (!process.stdout.isTTY) {
                 process.stdout.write(text + EOL)
                 continue
@@ -664,37 +544,61 @@ You are speaking to a non-technical business executive. Follow these rules stric
           if (event.type === "permission.asked") {
             const permission = event.properties
             if (permission.sessionID !== sessionID) continue
-            // altimate_change start - yolo mode: auto-approve instead of auto-reject
-            const yolo = args.yolo || Flag.ALTIMATE_CLI_YOLO
-            if (yolo) {
-              UI.println(
-                UI.Style.TEXT_WARNING_BOLD + "!",
-                UI.Style.TEXT_NORMAL +
-                  `yolo mode: auto-approved ${permission.permission} (${permission.patterns.join(", ")})`,
-              )
-              await sdk.permission.reply({
-                requestID: permission.id,
-                reply: "once",
-              })
-            } else {
-              UI.println(
-                UI.Style.TEXT_WARNING_BOLD + "!",
-                UI.Style.TEXT_NORMAL +
-                  `permission requested: ${permission.permission} (${permission.patterns.join(", ")}); auto-rejecting`,
-              )
-              await sdk.permission.reply({
-                requestID: permission.id,
-                reply: "reject",
-              })
-            }
-            // altimate_change end
+            UI.println(
+              UI.Style.TEXT_WARNING_BOLD + "!",
+              UI.Style.TEXT_NORMAL +
+                `permission requested: ${permission.permission} (${permission.patterns.join(", ")}); auto-rejecting`,
+            )
+            await sdk.permission.reply({
+              requestID: permission.id,
+              reply: "reject",
+            })
           }
         }
       }
 
-      // Validate agent if specified; capture audience option from agent definition
-      const { agent, agentAudience } = await (async () => {
-        if (!args.agent) return { agent: undefined, agentAudience: undefined }
+      // Validate agent if specified
+      const agent = await (async () => {
+        if (!args.agent) return undefined
+
+        // When attaching, validate against the running server instead of local Instance state.
+        if (args.attach) {
+          const modes = await sdk.app
+            .agents(undefined, { throwOnError: true })
+            .then((x) => x.data ?? [])
+            .catch(() => undefined)
+
+          if (!modes) {
+            UI.println(
+              UI.Style.TEXT_WARNING_BOLD + "!",
+              UI.Style.TEXT_NORMAL,
+              `failed to list agents from ${args.attach}. Falling back to default agent`,
+            )
+            return undefined
+          }
+
+          const agent = modes.find((a) => a.name === args.agent)
+          if (!agent) {
+            UI.println(
+              UI.Style.TEXT_WARNING_BOLD + "!",
+              UI.Style.TEXT_NORMAL,
+              `agent "${args.agent}" not found. Falling back to default agent`,
+            )
+            return undefined
+          }
+
+          if (agent.mode === "subagent") {
+            UI.println(
+              UI.Style.TEXT_WARNING_BOLD + "!",
+              UI.Style.TEXT_NORMAL,
+              `agent "${args.agent}" is a subagent, not a primary agent. Falling back to default agent`,
+            )
+            return undefined
+          }
+
+          return args.agent
+        }
+
         const entry = await Agent.get(args.agent)
         if (!entry) {
           UI.println(
@@ -702,7 +606,7 @@ You are speaking to a non-technical business executive. Follow these rules stric
             UI.Style.TEXT_NORMAL,
             `agent "${args.agent}" not found. Falling back to default agent`,
           )
-          return { agent: undefined, agentAudience: undefined }
+          return undefined
         }
         if (entry.mode === "subagent") {
           UI.println(
@@ -710,15 +614,10 @@ You are speaking to a non-technical business executive. Follow these rules stric
             UI.Style.TEXT_NORMAL,
             `agent "${args.agent}" is a subagent, not a primary agent. Falling back to default agent`,
           )
-          return { agent: undefined, agentAudience: undefined }
+          return undefined
         }
-        const aud = entry.options?.audience as string | undefined
-        return { agent: args.agent, agentAudience: aud }
+        return args.agent
       })()
-
-      // Build audience system directive (--audience flag overrides agent-level setting)
-      const audienceMode = args.audience ?? agentAudience
-      const audienceSystem = audienceMode === "executive" ? EXECUTIVE_DIRECTIVE : undefined
 
       const sessionID = await session(sdk)
       if (!sessionID) {
@@ -727,28 +626,7 @@ You are speaking to a non-technical business executive. Follow these rules stric
       }
       await share(sdk, sessionID)
 
-      // Start trace now that sessionID is available
-      tracer?.startTrace(sessionID, {
-        title: title() || message.slice(0, 80),
-        model: args.model,
-        agent,
-        variant: args.variant,
-        prompt: message,
-      })
-      // altimate_change start - activate tracer for session
-      if (tracer) Tracer.setActive(tracer)
-      // altimate_change end
-
-      // Register crash handlers to flush the trace on unexpected exit
-      const onSigint = () => { tracer?.flushSync("Process interrupted"); process.exit(130) }
-      const onSigterm = () => { tracer?.flushSync("Process interrupted"); process.exit(143) }
-      const onBeforeExit = () => { tracer?.flushSync("Process exited") }
-      process.on("SIGINT", onSigint)
-      process.on("SIGTERM", onSigterm)
-      process.on("beforeExit", onBeforeExit)
-
-      // Start event listener before sending the prompt so no events are missed
-      const loopPromise = loop().catch((e) => {
+      loop().catch((e) => {
         console.error(e)
         process.exit(1)
       })
@@ -770,36 +648,7 @@ You are speaking to a non-technical business executive. Follow these rules stric
           model,
           variant: args.variant,
           parts: [...files, { type: "text", text: message }],
-          ...(audienceSystem ? { system: audienceSystem } : {}),
         })
-      }
-
-      // Wait for the event loop to drain (breaks when session reaches idle)
-      await loopPromise
-
-      // Remove crash handlers — trace will be finalized cleanly
-      process.removeListener("SIGINT", onSigint)
-      process.removeListener("SIGTERM", onSigterm)
-      process.removeListener("beforeExit", onBeforeExit)
-
-      // Finalize trace and save to disk
-      if (tracer) {
-        Tracer.setActive(null)
-        const tracePath = await tracer.endTrace(error)
-        if (tracePath) {
-          emit("trace_saved", { path: tracePath })
-          if (args.format !== "json" && process.stdout.isTTY) {
-            UI.println(UI.Style.TEXT_DIM + `Trace saved: ${tracePath}` + UI.Style.TEXT_NORMAL)
-          }
-        }
-      }
-
-      // Write accumulated text output to file if --output was specified
-      if (args.output) {
-        const outputPath = path.resolve(args.output)
-        const content = outputParts.join("\n\n") || "(no text output — tool-only response)"
-        await Bun.write(outputPath, content)
-        process.stderr.write(`\n✓ Output saved to: ${outputPath}\n`)
       }
     }
 
@@ -820,7 +669,7 @@ You are speaking to a non-technical business executive. Follow these rules stric
         const request = new Request(input, init)
         return Server.Default().fetch(request)
       }) as typeof globalThis.fetch
-      const sdk = createOpencodeClient({ baseUrl: "http://altimate-code.internal", fetch: fetchFn })
+      const sdk = createOpencodeClient({ baseUrl: "http://opencode.internal", fetch: fetchFn })
       await execute(sdk)
     })
   },

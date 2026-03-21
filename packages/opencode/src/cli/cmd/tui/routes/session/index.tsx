@@ -13,7 +13,6 @@ import {
   useContext,
 } from "solid-js"
 import { Dynamic } from "solid-js/web"
-import { Log } from "@/util/log"
 import path from "path"
 import { useRoute, useRouteData } from "@tui/context/route"
 import { useSync } from "@tui/context/sync"
@@ -196,7 +195,7 @@ export function Session() {
         if (scroll) scroll.scrollBy(100_000)
       })
       .catch((e) => {
-        Log.Default.error("session sync failed", { error: e })
+        console.error(e)
         toast.show({
           message: `Session not found: ${route.sessionID}`,
           variant: "error",
@@ -254,7 +253,7 @@ export function Session() {
         `${logo[3] ?? ""}`,
         ``,
         `  ${weak("Session")}${UI.Style.TEXT_NORMAL_BOLD}${title}${UI.Style.TEXT_NORMAL}`,
-        `  ${weak("Continue")}${UI.Style.TEXT_NORMAL_BOLD}altimate -s ${session()?.id}${UI.Style.TEXT_NORMAL}`,
+        `  ${weak("Continue")}${UI.Style.TEXT_NORMAL_BOLD}opencode -s ${session()?.id}${UI.Style.TEXT_NORMAL}`,
         ``,
       ].join("\n"),
     )
@@ -313,17 +312,12 @@ export function Session() {
     dialog.clear()
   }
 
-  // altimate_change start - smooth streaming: reduce scroll lag
   function toBottom() {
-    setTimeout(
-      () => {
-        if (!scroll || scroll.isDestroyed) return
-        scroll.scrollTo(scroll.scrollHeight)
-      },
-      Flag.ALTIMATE_SMOOTH_STREAMING ? 0 : 50,
-    )
+    setTimeout(() => {
+      if (!scroll || scroll.isDestroyed) return
+      scroll.scrollTo(scroll.scrollHeight)
+    }, 50)
   }
-  // altimate_change end
 
   const local = useLocal()
 
@@ -1461,43 +1455,15 @@ function ReasoningPart(props: { last: boolean; part: ReasoningPart; message: Ass
 function TextPart(props: { last: boolean; part: TextPart; message: AssistantMessage }) {
   const ctx = use()
   const { theme, syntax } = useTheme()
-  // altimate_change start - smooth streaming: memoize trim
-  const trimmed = createMemo(() => props.part.text.trim())
-  // altimate_change end
-  // altimate_change start - smooth streaming: use <code> during streaming to avoid layout jumps
-  const isStreaming = createMemo(() => Flag.ALTIMATE_SMOOTH_STREAMING && !props.message.time.completed)
-  // altimate_change end
-  // altimate_change start - calm mode: cap content width for readability, respect small screens
-  const cappedWidth = createMemo(() => {
-    const cap = Flag.ALTIMATE_CONTENT_MAX_WIDTH
-    if (!cap) return undefined
-    const available = ctx.width
-    // +3 accounts for paddingLeft on this box
-    const desired = cap + 3
-    // On small screens, don't constrain — let it use full available width
-    return available <= desired ? undefined : desired
-  })
-  // altimate_change end
   return (
-    <Show when={trimmed()}>
-      <box id={"text-" + props.part.id} paddingLeft={3} marginTop={1} flexShrink={0} maxWidth={cappedWidth()}>
+    <Show when={props.part.text.trim()}>
+      <box id={"text-" + props.part.id} paddingLeft={3} marginTop={1} flexShrink={0}>
         <Switch>
-          <Match when={isStreaming()}>
-            <code
-              filetype="markdown"
-              drawUnstyledText={false}
-              streaming={true}
-              syntaxStyle={syntax()}
-              content={trimmed()}
-              conceal={ctx.conceal()}
-              fg={theme.text}
-            />
-          </Match>
           <Match when={Flag.OPENCODE_EXPERIMENTAL_MARKDOWN}>
             <markdown
               syntaxStyle={syntax()}
-              streaming={!props.message.time.completed}
-              content={trimmed()}
+              streaming={true}
+              content={props.part.text.trim()}
               conceal={ctx.conceal()}
             />
           </Match>
@@ -1505,9 +1471,9 @@ function TextPart(props: { last: boolean; part: TextPart; message: AssistantMess
             <code
               filetype="markdown"
               drawUnstyledText={false}
-              streaming={!props.message.time.completed}
+              streaming={true}
               syntaxStyle={syntax()}
-              content={trimmed()}
+              content={props.part.text.trim()}
               conceal={ctx.conceal()}
               fg={theme.text}
             />

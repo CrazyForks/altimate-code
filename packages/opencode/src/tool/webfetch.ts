@@ -7,13 +7,6 @@ import { abortAfterAny } from "../util/abort"
 const MAX_RESPONSE_SIZE = 5 * 1024 * 1024 // 5MB
 const DEFAULT_TIMEOUT = 30 * 1000 // 30 seconds
 const MAX_TIMEOUT = 120 * 1000 // 2 minutes
-// altimate_change start — branding: honest bot UA
-const HONEST_UA = "altimate-code/1.0 (+https://github.com/AltimateAI/altimate-code)"
-// altimate_change end
-const BROWSER_UA =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
-// Status codes that warrant a retry with a different User-Agent
-const RETRYABLE_STATUSES = new Set([403, 406])
 
 export const WebFetchTool = Tool.define("webfetch", {
   description: DESCRIPTION,
@@ -62,43 +55,36 @@ export const WebFetchTool = Tool.define("webfetch", {
         acceptHeader =
           "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
     }
-    const baseHeaders = {
+    const headers = {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
       Accept: acceptHeader,
       "Accept-Language": "en-US,en;q=0.9",
     }
 
-    // Strategy: honest bot UA first, browser UA as fallback.
-    // Many sites block spoofed browser UAs (TLS fingerprint mismatch) but allow known bots.
-    const honestHeaders = { ...baseHeaders, "User-Agent": HONEST_UA }
-    const browserHeaders = { ...baseHeaders, "User-Agent": BROWSER_UA }
+    const initial = await fetch(params.url, { signal, headers })
 
-    let arrayBuffer: ArrayBuffer
-    let response: Response
-    try {
-      response = await fetch(params.url, { signal, headers: honestHeaders })
+    // Retry with honest UA if blocked by Cloudflare bot detection (TLS fingerprint mismatch)
+    const response =
+      initial.status === 403 && initial.headers.get("cf-mitigated") === "challenge"
+        ? await fetch(params.url, { signal, headers: { ...headers, "User-Agent": "opencode" } })
+        : initial
 
-      // Retry with browser UA if the honest UA was rejected
-      if (!response.ok && RETRYABLE_STATUSES.has(response.status)) {
-        await response.body?.cancel().catch(() => {})
-        response = await fetch(params.url, { signal, headers: browserHeaders })
-      }
+    clearTimeout()
 
-      if (!response.ok) {
-        throw new Error(`Request failed with status code: ${response.status}`)
-      }
+    if (!response.ok) {
+      throw new Error(`Request failed with status code: ${response.status}`)
+    }
 
-      // Check content length
-      const contentLength = response.headers.get("content-length")
-      if (contentLength && parseInt(contentLength) > MAX_RESPONSE_SIZE) {
-        throw new Error("Response too large (exceeds 5MB limit)")
-      }
+    // Check content length
+    const contentLength = response.headers.get("content-length")
+    if (contentLength && parseInt(contentLength) > MAX_RESPONSE_SIZE) {
+      throw new Error("Response too large (exceeds 5MB limit)")
+    }
 
-      arrayBuffer = await response.arrayBuffer()
-      if (arrayBuffer.byteLength > MAX_RESPONSE_SIZE) {
-        throw new Error("Response too large (exceeds 5MB limit)")
-      }
-    } finally {
-      clearTimeout()
+    const arrayBuffer = await response.arrayBuffer()
+    if (arrayBuffer.byteLength > MAX_RESPONSE_SIZE) {
+      throw new Error("Response too large (exceeds 5MB limit)")
     }
 
     const contentType = response.headers.get("content-type") || ""

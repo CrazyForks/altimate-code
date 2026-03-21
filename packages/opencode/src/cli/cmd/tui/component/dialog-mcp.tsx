@@ -7,7 +7,6 @@ import { useTheme } from "../context/theme"
 import { Keybind } from "@/util/keybind"
 import { TextAttributes } from "@opentui/core"
 import { useSDK } from "@tui/context/sdk"
-import { Log } from "@/util/log"
 
 function Status(props: { enabled: boolean; loading: boolean }) {
   const { theme } = useTheme()
@@ -62,10 +61,10 @@ export function DialogMcp() {
           if (status.data) {
             sync.set("mcp", status.data)
           } else {
-            Log.Default.error("Failed to refresh MCP status: no data returned")
+            console.error("Failed to refresh MCP status: no data returned")
           }
         } catch (error) {
-          Log.Default.error("Failed to toggle MCP", { error })
+          console.error("Failed to toggle MCP:", error)
         } finally {
           setLoading(null)
         }

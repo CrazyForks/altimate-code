@@ -8,7 +8,6 @@ import { ToolRegistry } from "../../src/tool/registry"
 describe("tool.registry", () => {
   test("loads tools from .opencode/tool (singular)", async () => {
     await using tmp = await tmpdir({
-      git: true,
       init: async (dir) => {
         const opencodeDir = path.join(dir, ".opencode")
         await fs.mkdir(opencodeDir, { recursive: true })
@@ -43,7 +42,6 @@ describe("tool.registry", () => {
 
   test("loads tools from .opencode/tools (plural)", async () => {
     await using tmp = await tmpdir({
-      git: true,
       init: async (dir) => {
         const opencodeDir = path.join(dir, ".opencode")
         await fs.mkdir(opencodeDir, { recursive: true })
@@ -78,7 +76,6 @@ describe("tool.registry", () => {
 
   test("loads tools with external dependencies without crashing", async () => {
     await using tmp = await tmpdir({
-      git: true,
       init: async (dir) => {
         const opencodeDir = path.join(dir, ".opencode")
         await fs.mkdir(opencodeDir, { recursive: true })
@@ -86,25 +83,26 @@ describe("tool.registry", () => {
         const toolsDir = path.join(opencodeDir, "tools")
         await fs.mkdir(toolsDir, { recursive: true })
 
-        // Use a self-contained local module instead of an npm dependency
-        // (cowsay) to avoid triggering bun install which caused 15s+ timeouts.
-        // No package.json needed - the tool imports a relative local module.
-
-        // Create a local module that the tool imports
         await Bun.write(
-          path.join(opencodeDir, "helper.js"),
-          "export function greet(name) { return `Hello, ${name}!` }\n",
+          path.join(opencodeDir, "package.json"),
+          JSON.stringify({
+            name: "custom-tools",
+            dependencies: {
+              "@opencode-ai/plugin": "^0.0.0",
+              cowsay: "^1.6.0",
+            },
+          }),
         )
 
         await Bun.write(
-          path.join(toolsDir, "greeter.ts"),
+          path.join(toolsDir, "cowsay.ts"),
           [
-            "import { greet } from '../helper.js'",
+            "import { say } from 'cowsay'",
             "export default {",
-            "  description: 'tool that imports a local module at top level',",
+            "  description: 'tool that imports cowsay at top level',",
             "  args: { text: { type: 'string' } },",
             "  execute: async ({ text }: { text: string }) => {",
-            "    return greet(text)",
+            "    return say({ text })",
             "  },",
             "}",
             "",
@@ -117,7 +115,7 @@ describe("tool.registry", () => {
       directory: tmp.path,
       fn: async () => {
         const ids = await ToolRegistry.ids()
-        expect(ids).toContain("greeter")
+        expect(ids).toContain("cowsay")
       },
     })
   })

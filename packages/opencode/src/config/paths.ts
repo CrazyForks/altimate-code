@@ -20,15 +20,12 @@ export namespace ConfigPaths {
   }
 
   export async function directories(directory: string, worktree: string) {
-    // altimate_change start - dual config dir support: .altimate-code (primary) + .opencode (fallback)
-    const configTargets = [".altimate-code", ".opencode"]
-    // altimate_change end
     return [
       Global.Path.config,
       ...(!Flag.OPENCODE_DISABLE_PROJECT_CONFIG
         ? await Array.fromAsync(
             Filesystem.up({
-              targets: configTargets,
+              targets: [".opencode"],
               start: directory,
               stop: worktree,
             }),
@@ -36,7 +33,7 @@ export namespace ConfigPaths {
         : []),
       ...(await Array.fromAsync(
         Filesystem.up({
-          targets: configTargets,
+          targets: [".opencode"],
           start: Global.Path.home,
           stop: Global.Path.home,
         }),

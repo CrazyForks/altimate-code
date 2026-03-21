@@ -253,9 +253,7 @@ export const ProvidersLoginCommand = cmd({
   builder: (yargs) =>
     yargs
       .positional("url", {
-        // altimate_change start — branding
-        describe: "altimate auth provider",
-        // altimate_change end
+        describe: "opencode auth provider",
         type: "string",
       })
       .option("provider", {
@@ -422,7 +420,7 @@ export const ProvidersLoginCommand = cmd({
         }
 
         if (provider === "opencode") {
-          prompts.log.info("Create an api key at https://altimate.ai/auth")
+          prompts.log.info("Create an api key at https://opencode.ai/auth")
         }
 
         if (provider === "vercel") {
@@ -431,7 +429,7 @@ export const ProvidersLoginCommand = cmd({
 
         if (["cloudflare", "cloudflare-ai-gateway"].includes(provider)) {
           prompts.log.info(
-            "Cloudflare AI Gateway can be configured with CLOUDFLARE_GATEWAY_ID, CLOUDFLARE_ACCOUNT_ID, and CLOUDFLARE_API_TOKEN environment variables. Read more: https://altimate.ai/docs/providers/#cloudflare-ai-gateway",
+            "Cloudflare AI Gateway can be configured with CLOUDFLARE_GATEWAY_ID, CLOUDFLARE_ACCOUNT_ID, and CLOUDFLARE_API_TOKEN environment variables. Read more: https://opencode.ai/docs/providers/#cloudflare-ai-gateway",
           )
         }
 

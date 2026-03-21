@@ -1,9 +1,6 @@
 import z from "zod"
 import path from "path"
 import os from "os"
-// altimate_change start — gray-matter for parsing embedded builtin skill frontmatter
-import matter from "gray-matter"
-// altimate_change end
 import { Config } from "../config/config"
 import { Instance } from "../project/instance"
 import { NamedError } from "@opencode-ai/util/error"
@@ -19,12 +16,6 @@ import { Glob } from "../util/glob"
 import { pathToFileURL } from "url"
 import type { Agent } from "@/agent/agent"
 import { PermissionNext } from "@/permission/next"
-
-// altimate_change start — builtin skills embedded at build time for all distribution channels
-declare const OPENCODE_BUILTIN_SKILLS:
-  | { name: string; content: string }[]
-  | undefined
-// altimate_change end
 
 export namespace Skill {
   const log = Log.create({ service: "skill" })
@@ -112,50 +103,6 @@ export namespace Skill {
           log.error(`failed to scan ${scope} skills`, { dir: root, error })
         })
     }
-
-    // altimate_change start — load builtin skills from filesystem or binary-embedded data
-    if (!Flag.OPENCODE_DISABLE_EXTERNAL_SKILLS) {
-      let loadedFromFs = false
-
-      // Try filesystem first — postinstall copies skills (including references/) to
-      // ~/.altimate/builtin/. Filesystem paths are required for @references resolution.
-      const builtinDir = path.join(Global.Path.home, ".altimate", "builtin")
-      if (await Filesystem.isDir(builtinDir)) {
-        const matches = await Glob.scan(SKILL_PATTERN, {
-          cwd: builtinDir,
-          absolute: true,
-          include: "file",
-          symlink: true,
-        })
-        if (matches.length > 0) {
-          await Promise.all(matches.map(addSkill))
-          loadedFromFs = true
-        }
-      }
-
-      // Fallback: load from binary-embedded data when filesystem is unavailable
-      // (e.g. Homebrew, AUR, Docker installs that skip npm postinstall).
-      // Note: @references won't resolve for embedded skills, but core functionality works.
-      if (!loadedFromFs && typeof OPENCODE_BUILTIN_SKILLS !== "undefined") {
-        for (const entry of OPENCODE_BUILTIN_SKILLS) {
-          try {
-            const md = matter(entry.content)
-            const meta = Info.pick({ name: true, description: true }).safeParse(md.data)
-            if (!meta.success) continue
-            skills[meta.data.name] = {
-              name: meta.data.name,
-              description: meta.data.description,
-              location: `builtin:${entry.name}/SKILL.md`,
-              content: md.content,
-            }
-          } catch (err) {
-            log.error("failed to parse embedded skill", { skill: entry.name, err })
-          }
-        }
-        log.info("loaded embedded builtin skills", { count: OPENCODE_BUILTIN_SKILLS.length })
-      }
-    }
-    // altimate_change end
 
     // Scan external skill directories (.claude/skills/, .agents/skills/, etc.)
     // Load global (home) first, then project-level (so project-level overwrites)
@@ -260,9 +207,7 @@ export namespace Skill {
           `  <skill>`,
           `    <name>${skill.name}</name>`,
           `    <description>${skill.description}</description>`,
-          // altimate_change start — handle builtin: protocol for embedded skills
-          `    <location>${skill.location.startsWith("builtin:") ? skill.location : pathToFileURL(skill.location).href}</location>`,
-          // altimate_change end
+          `    <location>${pathToFileURL(skill.location).href}</location>`,
           `  </skill>`,
         ]),
         "</available_skills>",

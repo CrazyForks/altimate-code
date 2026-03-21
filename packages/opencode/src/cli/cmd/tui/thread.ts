@@ -189,7 +189,7 @@ export const TuiThreadCommand = cmd({
             events: undefined,
           }
         : {
-            url: "http://altimate-code.internal",
+            url: "http://opencode.internal",
             fetch: createWorkerFetch(client),
             events: createEventSource(client),
           }

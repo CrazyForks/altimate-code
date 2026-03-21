@@ -47,7 +47,7 @@ import { ProviderTransform } from "./transform"
 import { Installation } from "../installation"
 import { ModelID, ProviderID } from "./schema"
 
-const DEFAULT_CHUNK_TIMEOUT = 120_000
+const DEFAULT_CHUNK_TIMEOUT = 300_000
 
 export namespace Provider {
   const log = Log.create({ service: "provider" })
@@ -402,7 +402,7 @@ export namespace Provider {
         autoload: false,
         options: {
           headers: {
-            "HTTP-Referer": "https://altimate.ai/",
+            "HTTP-Referer": "https://opencode.ai/",
             "X-Title": "opencode",
           },
         },
@@ -413,7 +413,7 @@ export namespace Provider {
         autoload: false,
         options: {
           headers: {
-            "http-referer": "https://altimate.ai/",
+            "http-referer": "https://opencode.ai/",
             "x-title": "opencode",
           },
         },
@@ -512,7 +512,7 @@ export namespace Provider {
         autoload: false,
         options: {
           headers: {
-            "HTTP-Referer": "https://altimate.ai/",
+            "HTTP-Referer": "https://opencode.ai/",
             "X-Title": "opencode",
           },
         },
@@ -604,12 +604,10 @@ export namespace Provider {
       })()
 
       if (!apiToken) {
-        // altimate_change start — branding: altimate auth
         throw new Error(
           "CLOUDFLARE_API_TOKEN (or CF_AIG_TOKEN) is required for Cloudflare AI Gateway. " +
-            "Set it via environment variable or run `altimate auth cloudflare-ai-gateway`.",
+            "Set it via environment variable or run `opencode auth cloudflare-ai-gateway`.",
         )
-        // altimate_change end
       }
 
       // Use official ai-gateway-provider package (v2.x for AI SDK v5 compatibility)
@@ -664,7 +662,7 @@ export namespace Provider {
         autoload: false,
         options: {
           headers: {
-            "HTTP-Referer": "https://altimate.ai/",
+            "HTTP-Referer": "https://opencode.ai/",
             "X-Title": "opencode",
           },
         },

@@ -11,8 +11,6 @@ import { useKeybind } from "../../context/keybind"
 import { useDirectory } from "../../context/directory"
 import { useKV } from "../../context/kv"
 import { TodoItem } from "../../component/todo-item"
-// altimate_change start - trace section
-// altimate_change end
 
 export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
   const sync = useSync()
@@ -108,16 +106,6 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
               <text fg={theme.textMuted}>{context()?.percentage ?? 0}% used</text>
               <text fg={theme.textMuted}>{cost()} spent</text>
             </box>
-            {/* altimate_change start - trace section */}
-            <box>
-              <text fg={theme.text}>
-                <b>Trace</b>
-              </text>
-              <text fg={theme.textMuted}>Every tool call, LLM request,</text>
-              <text fg={theme.textMuted}>and decision in a live view</text>
-              <text fg={theme.textMuted}>type <span style={{ fg: theme.accent }}>/trace</span> to open</text>
-            </box>
-            {/* altimate_change end */}
             <Show when={mcpEntries().length > 0}>
               <box>
                 <box
@@ -304,7 +292,7 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
                     ✕
                   </text>
                 </box>
-                <text fg={theme.textMuted}>Altimate CLI includes free models so you can start immediately.</text>
+                <text fg={theme.textMuted}>OpenCode includes free models so you can start immediately.</text>
                 <text fg={theme.textMuted}>
                   Connect from 75+ providers to use other models, including Claude, GPT, Gemini etc
                 </text>
@@ -319,15 +307,13 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
             <span style={{ fg: theme.textMuted }}>{directory().split("/").slice(0, -1).join("/")}/</span>
             <span style={{ fg: theme.text }}>{directory().split("/").at(-1)}</span>
           </text>
-          {/* altimate_change start — sidebar branding */}
           <text fg={theme.textMuted}>
-            <span style={{ fg: theme.success }}>•</span> <b>Altimate</b>
+            <span style={{ fg: theme.success }}>•</span> <b>Open</b>
             <span style={{ fg: theme.text }}>
-              <b> Code</b>
+              <b>Code</b>
             </span>{" "}
             <span>{Installation.VERSION}</span>
           </text>
-          {/* altimate_change end */}
         </box>
       </box>
     </Show>

@@ -164,24 +164,13 @@ export const BashTool = Tool.define("bash", async () => {
         { cwd, sessionID: ctx.sessionID, callID: ctx.callID },
         { env: {} },
       )
-
-      // altimate_change start — prepend bundled tools dir (ALTIMATE_BIN_DIR) to PATH
-      const mergedEnv: Record<string, string | undefined> = { ...process.env, ...shellEnv.env }
-      const binDir = process.env.ALTIMATE_BIN_DIR
-      if (binDir) {
-        const sep = process.platform === "win32" ? ";" : ":"
-        const basePath = mergedEnv.PATH ?? mergedEnv.Path ?? ""
-        const pathEntries = basePath.split(sep).filter(Boolean)
-        if (!pathEntries.some((entry) => entry === binDir)) {
-          mergedEnv.PATH = basePath ? `${binDir}${sep}${basePath}` : binDir
-        }
-      }
-      // altimate_change end
-
       const proc = spawn(params.command, {
         shell,
         cwd,
-        env: mergedEnv,
+        env: {
+          ...process.env,
+          ...shellEnv.env,
+        },
         stdio: ["ignore", "pipe", "pipe"],
         detached: process.platform !== "win32",
         windowsHide: process.platform === "win32",

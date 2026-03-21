@@ -88,19 +88,12 @@ export namespace Project {
     }
   }
 
-  // altimate_change start — support legacy .git/altimate-code project ID cache
   function readCachedId(dir: string) {
     return Filesystem.readText(path.join(dir, "opencode"))
       .then((x) => x.trim())
       .then(ProjectID.make)
-      .catch(() =>
-        Filesystem.readText(path.join(dir, "altimate-code"))
-          .then((x) => x.trim())
-          .then(ProjectID.make)
-          .catch(() => undefined),
-      )
+      .catch(() => undefined)
   }
-  // altimate_change end
 
   export async function fromDirectory(directory: string) {
     log.info("fromDirectory", { directory })
@@ -154,7 +147,7 @@ export namespace Project {
 
         // generate id from root commit
         if (!id) {
-          const roots = await git(["rev-list", "--max-parents=0", "--all"], {
+          const roots = await git(["rev-list", "--max-parents=0", "HEAD"], {
             cwd: sandbox,
           })
             .then(async (result) =>
@@ -177,7 +170,8 @@ export namespace Project {
 
           id = roots[0] ? ProjectID.make(roots[0]) : undefined
           if (id) {
-            await Filesystem.write(path.join(dotgit, "opencode"), id).catch(() => undefined)
+            // Write to common dir so the cache is shared across worktrees.
+            await Filesystem.write(path.join(worktree, ".git", "opencode"), id).catch(() => undefined)
           }
         }
 

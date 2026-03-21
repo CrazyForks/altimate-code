@@ -6,9 +6,7 @@ import { RouteProvider, useRoute } from "@tui/context/route"
 import { Switch, Match, createEffect, untrack, ErrorBoundary, createSignal, onMount, batch, Show, on } from "solid-js"
 import { win32DisableProcessedInput, win32FlushInputBuffer, win32InstallCtrlCGuard } from "./win32"
 import { Installation } from "@/installation"
-import { UPGRADE_KV_KEY } from "./component/upgrade-indicator-utils"
 import { Flag } from "@/flag/flag"
-import { Log } from "@/util/log"
 import { DialogProvider, useDialog } from "@tui/ui/dialog"
 import { DialogProvider as DialogProviderList } from "@tui/component/dialog-provider"
 import { SDKProvider, useSDK } from "@tui/context/sdk"
@@ -29,63 +27,6 @@ import { Home } from "@tui/routes/home"
 import { Session } from "@tui/routes/session"
 import { PromptHistoryProvider } from "./component/prompt/history"
 import { FrecencyProvider } from "./component/prompt/frecency"
-import { Tracer } from "@/altimate/observability/tracing"
-import { renderTraceViewer } from "@/altimate/observability/viewer"
-import { DialogTraceList } from "./component/dialog-trace-list"
-import fsAsync from "fs/promises"
-
-// altimate_change start - shared trace viewer server
-let traceViewerServer: ReturnType<typeof Bun.serve> | undefined
-let traceViewerTracesDir: string | undefined
-function getTraceViewerUrl(sessionID: string, tracesDir?: string): string {
-  if (!traceViewerServer) {
-    traceViewerTracesDir = Tracer.getTracesDir(tracesDir)
-    traceViewerServer = Bun.serve({
-      port: 0, // random available port
-      hostname: "127.0.0.1",
-      async fetch(req) {
-        const url = new URL(req.url)
-        // Extract session ID from path: /view/<sessionID> or /api/<sessionID>
-        const parts = url.pathname.split("/").filter(Boolean)
-        const action = parts[0] // "view" or "api"
-        const encodedSid = parts[1]
-        if (!encodedSid) return new Response("Usage: /view/<sessionID>", { status: 400 })
-        let sid: string
-        try {
-          sid = decodeURIComponent(encodedSid)
-        } catch {
-          return new Response("Invalid session ID encoding", { status: 400 })
-        }
-
-        const safeId = sid.replace(/[/\\.:]/g, "_")
-        const traceFile = `${traceViewerTracesDir}/${safeId}.json`
-
-        if (action === "api") {
-          try {
-            const content = await fsAsync.readFile(traceFile, "utf-8")
-            return new Response(content, {
-              headers: { "Content-Type": "application/json", "Cache-Control": "no-cache" },
-            })
-          } catch {
-            return new Response("{}", { status: 404 })
-          }
-        }
-
-        // Serve HTML viewer
-        try {
-          const trace = JSON.parse(await fsAsync.readFile(traceFile, "utf-8"))
-          const html = renderTraceViewer(trace, { live: true, apiPath: "/api/" + encodeURIComponent(sid) })
-          return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8" } })
-        } catch {
-          return new Response("Trace not found. Try again after the agent responds.", { status: 404 })
-        }
-      },
-    })
-  }
-  return `http://127.0.0.1:${traceViewerServer.port}/view/${encodeURIComponent(sessionID)}`
-}
-
-// altimate_change end — renderInlineViewer removed, now using renderTraceViewer from viewer.ts
 import { PromptStashProvider } from "./component/prompt/stash"
 import { DialogAlert } from "./ui/dialog-alert"
 import { ToastProvider, useToast } from "./ui/toast"
@@ -249,7 +190,7 @@ export function tui(input: {
           keyBindings: [{ name: "y", ctrl: true, action: "copy-selection" }],
           onCopySelection: (text) => {
             Clipboard.copy(text).catch((error) => {
-              Log.Default.error(`Failed to copy console selection to clipboard: ${error}`)
+              console.error(`Failed to copy console selection to clipboard: ${error}`)
             })
           },
         },
@@ -273,39 +214,6 @@ function App() {
   const sync = useSync()
   const exit = useExit()
   const promptRef = usePromptRef()
-
-  // altimate_change start - shared trace viewer helper
-  // Load custom tracing dir from config (same as worker.ts and trace.ts)
-  const [tracesDir, setTracesDir] = createSignal<string | undefined>(undefined)
-  onMount(async () => {
-    try {
-      const { Config } = await import("@/config/config")
-      const cfg = await Config.get()
-      setTracesDir(cfg.tracing?.dir)
-    } catch {
-      // Config failure should not prevent TUI from working
-    }
-  })
-
-  async function openTraceInBrowser(sessionID: string) {
-    try {
-      // Check if trace file exists on disk before opening browser
-      const safeId = sessionID.replace(/[/\\.:]/g, "_")
-      const traceFile = `${Tracer.getTracesDir(tracesDir())}/${safeId}.json`
-      const exists = await fsAsync.access(traceFile).then(() => true).catch(() => false)
-      if (!exists) {
-        toast.show({ variant: "warning", message: "Trace not available yet — send a prompt first", duration: 4000 })
-        return
-      }
-      const url = getTraceViewerUrl(sessionID, tracesDir())
-      await open(url)
-      toast.show({ variant: "info", message: `Trace viewer: ${url}`, duration: 6000 })
-    } catch (err) {
-      Log.Default.error(`Failed to open trace viewer: ${err}`)
-      toast.show({ variant: "warning", message: `Failed to open browser. Trace files: ${Tracer.getTracesDir(tracesDir())}`, duration: 8000 })
-    }
-  }
-  // altimate_change end
 
   useKeyboard((evt) => {
     if (!Flag.OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT) return
@@ -349,7 +257,7 @@ function App() {
   const [terminalTitleEnabled, setTerminalTitleEnabled] = createSignal(kv.get("terminal_title_enabled", true))
 
   createEffect(() => {
-    Log.Default.debug("route changed", { route: route.data })
+    console.log(JSON.stringify(route.data))
   })
 
   // Update terminal window title based on current route and session
@@ -357,14 +265,14 @@ function App() {
     if (!terminalTitleEnabled() || Flag.OPENCODE_DISABLE_TERMINAL_TITLE) return
 
     if (route.data.type === "home") {
-      renderer.setTerminalTitle("Altimate Code")
+      renderer.setTerminalTitle("OpenCode")
       return
     }
 
     if (route.data.type === "session") {
       const session = sync.session.get(route.data.sessionID)
       if (!session || SessionApi.isDefaultTitle(session.title)) {
-        renderer.setTerminalTitle("Altimate Code")
+        renderer.setTerminalTitle("OpenCode")
         return
       }
 
@@ -670,7 +578,7 @@ function App() {
       title: "Open docs",
       value: "docs.open",
       onSelect: () => {
-        open("https://altimate.ai/docs").catch(() => {})
+        open("https://opencode.ai/docs").catch(() => {})
         dialog.clear()
       },
       category: "System",
@@ -685,26 +593,6 @@ function App() {
       onSelect: () => exit(),
       category: "System",
     },
-    // altimate_change start - trace history command
-    {
-      title: "View traces",
-      value: "trace.view",
-      category: "Debug",
-      slash: {
-        name: "trace",
-      },
-      onSelect: (dialog) => {
-        const currentSessionID = route.data.type === "session" ? route.data.sessionID : undefined
-        dialog.replace(() => (
-          <DialogTraceList
-            currentSessionID={currentSessionID}
-            tracesDir={tracesDir()}
-            onSelect={openTraceInBrowser}
-          />
-        ))
-      },
-    },
-    // altimate_change end
     {
       title: "Toggle debug panel",
       category: "System",
@@ -841,23 +729,14 @@ function App() {
     })
   })
 
-  // altimate_change start — branding: altimate upgrade
   sdk.event.on(Installation.Event.UpdateAvailable.type, (evt) => {
-    kv.set(UPGRADE_KV_KEY, evt.properties.version)
     toast.show({
       variant: "info",
       title: "Update Available",
-      message: `Altimate Code v${evt.properties.version} is available. Run 'altimate upgrade' to update manually.`,
+      message: `OpenCode v${evt.properties.version} is available. Run 'opencode upgrade' to update manually.`,
       duration: 10000,
     })
   })
-
-  sdk.event.on(Installation.Event.Updated.type, () => {
-    if (kv.get(UPGRADE_KV_KEY) !== Installation.VERSION) {
-      kv.set(UPGRADE_KV_KEY, Installation.VERSION)
-    }
-  })
-  // altimate_change end
 
   return (
     <box
@@ -909,7 +788,7 @@ function ErrorComponent(props: {
   })
   const [copied, setCopied] = createSignal(false)
 
-  const issueURL = new URL("https://github.com/AltimateAI/altimate-code/issues/new?template=bug-report.yml")
+  const issueURL = new URL("https://github.com/anomalyco/opencode/issues/new?template=bug-report.yml")
 
   // Choose safe fallback colors per mode since theme context may not be available
   const isLight = props.mode === "light"

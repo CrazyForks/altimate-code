@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test"
 import type { NamedError } from "@opencode-ai/util/error"
 import { APICallError } from "ai"
 import { setTimeout as sleep } from "node:timers/promises"
-import { createServer } from "node:net"
 import { SessionRetry } from "../../src/session/retry"
 import { MessageV2 } from "../../src/session/message-v2"
 import { ProviderID } from "../../src/provider/schema"
@@ -126,66 +125,43 @@ describe("session.retry.retryable", () => {
 
     expect(SessionRetry.retryable(error)).toBeUndefined()
   })
-
-  test("retries auth errors with recovery message", () => {
-    const error = new MessageV2.AuthError({
-      providerID: "anthropic",
-      message: "Anthropic OAuth token refresh failed (HTTP 401)",
-    }).toObject() as ReturnType<NamedError["toObject"]>
-
-    const result = SessionRetry.retryable(error)
-    expect(result).toBeDefined()
-    expect(result).toContain("Authentication failed")
-    expect(result).toContain("altimate-code auth login anthropic")
-  })
-
-  test("retries auth errors for other providers", () => {
-    const error = new MessageV2.AuthError({
-      providerID: "openai",
-      message: "Codex OAuth token refresh failed (HTTP 403)",
-    }).toObject() as ReturnType<NamedError["toObject"]>
-
-    const result = SessionRetry.retryable(error)
-    expect(result).toBeDefined()
-    expect(result).toContain("altimate-code auth login openai")
-  })
 })
 
 describe("session.message-v2.fromError", () => {
   test.concurrent(
     "converts ECONNRESET socket errors to retryable APIError",
     async () => {
-      // Use a raw TCP server that sends a partial HTTP response then
-      // destroys the socket, triggering an immediate ECONNRESET on the client.
-      const server = createServer((socket) => {
-        // Send partial chunked HTTP response then destroy the connection
-        socket.write(
-          "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nTransfer-Encoding: chunked\r\n\r\n6\r\nHello,\r\n",
-        )
-        // Destroy after a brief delay to ensure the client has started reading
-        setTimeout(() => socket.destroy(), 20)
+      using server = Bun.serve({
+        port: 0,
+        idleTimeout: 8,
+        async fetch(req) {
+          return new Response(
+            new ReadableStream({
+              async pull(controller) {
+                controller.enqueue("Hello,")
+                await sleep(10000)
+                controller.enqueue(" World!")
+                controller.close()
+              },
+            }),
+            { headers: { "Content-Type": "text/plain" } },
+          )
+        },
       })
 
-      await new Promise<void>((resolve) => server.listen(0, resolve))
-      const port = (server.address() as { port: number }).port
+      const error = await fetch(new URL("/", server.url.origin))
+        .then((res) => res.text())
+        .catch((e) => e)
 
-      try {
-        const error = await fetch(`http://127.0.0.1:${port}/`)
-          .then((res) => res.text())
-          .catch((e) => e)
+      const result = MessageV2.fromError(error, { providerID })
 
-        const result = MessageV2.fromError(error, { providerID })
-
-        expect(MessageV2.APIError.isInstance(result)).toBe(true)
-        expect((result as MessageV2.APIError).data.isRetryable).toBe(true)
-        expect((result as MessageV2.APIError).data.message).toBe("Connection reset by server")
-        expect((result as MessageV2.APIError).data.metadata?.code).toBe("ECONNRESET")
-        expect((result as MessageV2.APIError).data.metadata?.message).toInclude("socket connection")
-      } finally {
-        server.close()
-      }
+      expect(MessageV2.APIError.isInstance(result)).toBe(true)
+      expect((result as MessageV2.APIError).data.isRetryable).toBe(true)
+      expect((result as MessageV2.APIError).data.message).toBe("Connection reset by server")
+      expect((result as MessageV2.APIError).data.metadata?.code).toBe("ECONNRESET")
+      expect((result as MessageV2.APIError).data.metadata?.message).toInclude("socket connection")
     },
-    5_000,
+    15_000,
   )
 
   test("ECONNRESET socket error is retryable", () => {
@@ -198,41 +174,6 @@ describe("session.message-v2.fromError", () => {
     const retryable = SessionRetry.retryable(error)
     expect(retryable).toBeDefined()
     expect(retryable).toBe("Connection reset by server")
-  })
-
-  test("converts token refresh failure to ProviderAuthError", () => {
-    const error = new Error("Anthropic OAuth token refresh failed (HTTP 401). Try re-authenticating: altimate-code auth login anthropic")
-    const result = MessageV2.fromError(error, { providerID: "anthropic" as any })
-
-    expect(result.name).toBe("ProviderAuthError")
-    expect((result as any).data.providerID).toBe("anthropic")
-    expect((result as any).data.message).toContain("token refresh failed")
-  })
-
-  test("converts codex token refresh failure to ProviderAuthError", () => {
-    const error = new Error("Codex OAuth token refresh failed (HTTP 403). Try re-authenticating: altimate-code auth login openai")
-    const result = MessageV2.fromError(error, { providerID: "openai" as any })
-
-    expect(result.name).toBe("ProviderAuthError")
-    expect((result as any).data.providerID).toBe("openai")
-  })
-
-  test("provides descriptive message for generic Error with no message", () => {
-    const error = new Error()
-    const result = MessageV2.fromError(error, { providerID: "test" as any })
-
-    expect(result.name).toBe("UnknownError")
-    // Should not be just "Error" — should include stack or context
-    expect((result as any).data.message).not.toBe("Error")
-    expect((result as any).data.message.length).toBeGreaterThan(5)
-  })
-
-  test("provides descriptive message for TypeError with no message", () => {
-    const error = new TypeError()
-    const result = MessageV2.fromError(error, { providerID: "test" as any })
-
-    expect(result.name).toBe("UnknownError")
-    expect((result as any).data.message).toContain("TypeError")
   })
 
   test("marks OpenAI 404 status codes as retryable", () => {

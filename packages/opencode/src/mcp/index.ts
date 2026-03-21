@@ -23,17 +23,10 @@ import { BusEvent } from "../bus/bus-event"
 import { Bus } from "@/bus"
 import { TuiEvent } from "@/cli/cmd/tui/event"
 import open from "open"
-import { Telemetry } from "@/telemetry"
 
 export namespace MCP {
   const log = Log.create({ service: "mcp" })
   const DEFAULT_TIMEOUT = 30_000
-
-  const registeredMcpTools = new Set<string>()
-
-  export function isMcpTool(name: string): boolean {
-    return registeredMcpTools.has(name)
-  }
 
   export const Resource = z
     .object({
@@ -167,23 +160,34 @@ export namespace MCP {
     return typeof entry === "object" && entry !== null && "type" in entry
   }
 
+  async function descendants(pid: number): Promise<number[]> {
+    if (process.platform === "win32") return []
+    const pids: number[] = []
+    const queue = [pid]
+    while (queue.length > 0) {
+      const current = queue.shift()!
+      const proc = Bun.spawn(["pgrep", "-P", String(current)], { stdout: "pipe", stderr: "pipe" })
+      const [code, out] = await Promise.all([proc.exited, new Response(proc.stdout).text()]).catch(
+        () => [-1, ""] as const,
+      )
+      if (code !== 0) continue
+      for (const tok of out.trim().split(/\s+/)) {
+        const cpid = parseInt(tok, 10)
+        if (!isNaN(cpid) && pids.indexOf(cpid) === -1) {
+          pids.push(cpid)
+          queue.push(cpid)
+        }
+      }
+    }
+    return pids
+  }
+
   const state = Instance.state(
     async () => {
       const cfg = await Config.get()
       const config = cfg.mcp ?? {}
       const clients: Record<string, MCPClient> = {}
       const status: Record<string, Status> = {}
-      const transports: Record<string, "stdio" | "sse" | "streamable-http"> = {}
-
-      // altimate_change start — auto-discover MCP servers from external AI tool configs
-      let discoveryResult: { serverNames: string[]; sources: string[] } | null = null
-      try {
-        const { consumeDiscoveryResult } = await import("./discover")
-        discoveryResult = consumeDiscoveryResult()
-      } catch {
-        // Discovery module not loaded — skip
-      }
-      // altimate_change end
 
       await Promise.all(
         Object.entries(config).map(async ([key, mcp]) => {
@@ -198,48 +202,37 @@ export namespace MCP {
             return
           }
 
-          const result = await create(key, mcp).catch((e) => {
-            log.warn("failed to initialize MCP server", { key, error: e instanceof Error ? e.message : String(e) })
-            return undefined
-          })
+          const result = await create(key, mcp).catch(() => undefined)
           if (!result) return
 
           status[key] = result.status
 
           if (result.mcpClient) {
             clients[key] = result.mcpClient
-            if (result.transport) transports[key] = result.transport
           }
         }),
       )
-
-      // altimate_change start — show discovery toast after MCP connections complete
-      if (discoveryResult) {
-        const message = `Discovered ${discoveryResult.serverNames.length} new MCP server(s): ${discoveryResult.serverNames.join(", ")}. Run /discover-and-add-mcps to enable and add them.`
-        Bus.publish(TuiEvent.ToastShow, {
-          title: "MCP Servers Discovered",
-          message,
-          variant: "info",
-          duration: 8000,
-        }).catch(() => {})
-        Telemetry.track({
-          type: "mcp_discovery",
-          timestamp: Date.now(),
-          session_id: Telemetry.getContext().sessionId,
-          server_count: discoveryResult.serverNames.length,
-          server_names: discoveryResult.serverNames,
-          sources: discoveryResult.sources,
-        })
-      }
-      // altimate_change end
-
       return {
         status,
         clients,
-        transports,
       }
     },
     async (state) => {
+      // The MCP SDK only signals the direct child process on close.
+      // Servers like chrome-devtools-mcp spawn grandchild processes
+      // (e.g. Chrome) that the SDK never reaches, leaving them orphaned.
+      // Kill the full descendant tree first so the server exits promptly
+      // and no processes are left behind.
+      for (const client of Object.values(state.clients)) {
+        const pid = (client.transport as any)?.pid
+        if (typeof pid !== "number") continue
+        for (const dpid of await descendants(pid)) {
+          try {
+            process.kill(dpid, "SIGTERM")
+          } catch {}
+        }
+      }
+
       await Promise.all(
         Object.values(state.clients).map((client) =>
           client.close().catch((error) => {
@@ -255,7 +248,7 @@ export namespace MCP {
 
   // Helper function to fetch prompts for a specific client
   async function fetchPromptsForClient(clientName: string, client: Client) {
-    const prompts = await withTimeout(client.listPrompts(), DEFAULT_TIMEOUT).catch((e) => {
+    const prompts = await client.listPrompts().catch((e) => {
       log.error("failed to get prompts", { clientName, error: e.message })
       return undefined
     })
@@ -277,8 +270,8 @@ export namespace MCP {
   }
 
   async function fetchResourcesForClient(clientName: string, client: Client) {
-    const resources = await withTimeout(client.listResources(), DEFAULT_TIMEOUT).catch((e) => {
-      log.error("failed to get resources", { clientName, error: e.message })
+    const resources = await client.listResources().catch((e) => {
+      log.error("failed to get prompts", { clientName, error: e.message })
       return undefined
     })
 
@@ -307,14 +300,12 @@ export namespace MCP {
         error: "unknown error",
       }
       s.status[name] = status
-      Bus.publish(ToolsChanged, { server: name })
       return {
         status,
       }
     }
     if (!result.mcpClient) {
       s.status[name] = result.status
-      Bus.publish(ToolsChanged, { server: name })
       return {
         status: s.status,
       }
@@ -328,9 +319,6 @@ export namespace MCP {
     }
     s.clients[name] = result.mcpClient
     s.status[name] = result.status
-    if (result.transport) s.transports[name] = result.transport
-
-    Bus.publish(ToolsChanged, { server: name })
 
     return {
       status: s.status,
@@ -349,7 +337,6 @@ export namespace MCP {
     log.info("found", { key, type: mcp.type })
     let mcpClient: MCPClient | undefined
     let status: Status | undefined = undefined
-    let connectedTransport: "stdio" | "sse" | "streamable-http" | undefined = undefined
 
     if (mcp.type === "remote") {
       // OAuth is enabled by default for remote servers unless explicitly disabled with oauth: false
@@ -395,43 +382,16 @@ export namespace MCP {
       let lastError: Error | undefined
       const connectTimeout = mcp.timeout ?? DEFAULT_TIMEOUT
       for (const { name, transport } of transports) {
-        const connectStart = Date.now()
         try {
           const client = new Client({
-            name: "altimate",
+            name: "opencode",
             version: Installation.VERSION,
           })
           await withTimeout(client.connect(transport), connectTimeout)
           registerNotificationHandlers(client, key)
           mcpClient = client
-          connectedTransport = name === "SSE" ? "sse" : "streamable-http"
           log.info("connected", { key, transport: name })
           status = { status: "connected" }
-          Telemetry.track({
-            type: "mcp_server_status",
-            timestamp: Date.now(),
-            session_id: Telemetry.getContext().sessionId,
-            server_name: key,
-            transport: connectedTransport,
-            status: "connected",
-            duration_ms: Date.now() - connectStart,
-          })
-          // Census: collect tool and resource counts (fire-and-forget, never block connect)
-          const remoteTransport = name === "SSE" ? "sse" as const : "streamable-http" as const
-          void Promise.all([
-            client.listTools().catch(() => ({ tools: [] })),
-            client.listResources().catch(() => ({ resources: [] })),
-          ]).then(([toolsList, resourcesList]) => {
-            Telemetry.track({
-              type: "mcp_server_census",
-              timestamp: Date.now(),
-              session_id: Telemetry.getContext().sessionId,
-              server_name: key,
-              transport: remoteTransport,
-              tool_count: toolsList.tools.length,
-              resource_count: resourcesList.resources.length,
-            })
-          }).catch(() => {})
           break
         } catch (error) {
           lastError = error instanceof Error ? error : new Error(String(error))
@@ -466,7 +426,7 @@ export namespace MCP {
               // Show toast for needs_auth
               Bus.publish(TuiEvent.ToastShow, {
                 title: "MCP Authentication Required",
-                message: `Server "${key}" requires authentication. Run: altimate mcp auth ${key}`,
+                message: `Server "${key}" requires authentication. Run: opencode mcp auth ${key}`,
                 variant: "warning",
                 duration: 8000,
               }).catch((e) => log.debug("failed to show toast", { error: e }))
@@ -479,16 +439,6 @@ export namespace MCP {
             transport: name,
             url: mcp.url,
             error: lastError.message,
-          })
-          Telemetry.track({
-            type: "mcp_server_status",
-            timestamp: Date.now(),
-            session_id: Telemetry.getContext().sessionId,
-            server_name: key,
-            transport: name === "SSE" ? "sse" : "streamable-http",
-            status: "error",
-            error: lastError.message.slice(0, 500),
-            duration_ms: Date.now() - connectStart,
           })
           status = {
             status: "failed" as const,
@@ -508,7 +458,7 @@ export namespace MCP {
         cwd,
         env: {
           ...process.env,
-          ...(cmd === "altimate" || cmd === "altimate-code" ? { BUN_BE_BUN: "1" } : {}),
+          ...(cmd === "opencode" ? { BUN_BE_BUN: "1" } : {}),
           ...mcp.environment,
         },
       })
@@ -517,43 +467,17 @@ export namespace MCP {
       })
 
       const connectTimeout = mcp.timeout ?? DEFAULT_TIMEOUT
-      const localConnectStart = Date.now()
       try {
         const client = new Client({
-          name: "altimate",
+          name: "opencode",
           version: Installation.VERSION,
         })
         await withTimeout(client.connect(transport), connectTimeout)
         registerNotificationHandlers(client, key)
         mcpClient = client
-        connectedTransport = "stdio"
         status = {
           status: "connected",
         }
-        Telemetry.track({
-          type: "mcp_server_status",
-          timestamp: Date.now(),
-          session_id: Telemetry.getContext().sessionId,
-          server_name: key,
-          transport: "stdio",
-          status: "connected",
-          duration_ms: Date.now() - localConnectStart,
-        })
-        // Census: collect tool and resource counts (fire-and-forget, never block connect)
-        void Promise.all([
-          client.listTools().catch(() => ({ tools: [] })),
-          client.listResources().catch(() => ({ resources: [] })),
-        ]).then(([toolsList, resourcesList]) => {
-          Telemetry.track({
-            type: "mcp_server_census",
-            timestamp: Date.now(),
-            session_id: Telemetry.getContext().sessionId,
-            server_name: key,
-            transport: "stdio",
-            tool_count: toolsList.tools.length,
-            resource_count: resourcesList.resources.length,
-          })
-        }).catch(() => {})
       } catch (error) {
         log.error("local mcp startup failed", {
           key,
@@ -561,20 +485,9 @@ export namespace MCP {
           cwd,
           error: error instanceof Error ? error.message : String(error),
         })
-        const errorMsg = error instanceof Error ? error.message : String(error)
-        Telemetry.track({
-          type: "mcp_server_status",
-          timestamp: Date.now(),
-          session_id: Telemetry.getContext().sessionId,
-          server_name: key,
-          transport: "stdio",
-          status: "error",
-          error: errorMsg.slice(0, 500),
-          duration_ms: Date.now() - localConnectStart,
-        })
         status = {
           status: "failed" as const,
-          error: errorMsg,
+          error: error instanceof Error ? error.message : String(error),
         }
       }
     }
@@ -620,7 +533,6 @@ export namespace MCP {
     return {
       mcpClient,
       status,
-      transport: connectedTransport,
     }
   }
 
@@ -634,13 +546,6 @@ export namespace MCP {
     for (const [key, mcp] of Object.entries(config)) {
       if (!isMcpConfigured(mcp)) continue
       result[key] = s.status[key] ?? { status: "disabled" }
-    }
-
-    // Include dynamically added servers not yet in cached config
-    for (const [key, st] of Object.entries(s.status)) {
-      if (!(key in result)) {
-        result[key] = st
-      }
     }
 
     return result
@@ -686,13 +591,11 @@ export namespace MCP {
         })
       }
       s.clients[name] = result.mcpClient
-      if (result.transport) s.transports[name] = result.transport
     }
   }
 
   export async function disconnect(name: string) {
     const s = await state()
-    const transport = s.transports[name] ?? "stdio"
     const client = s.clients[name]
     if (client) {
       await client.close().catch((error) => {
@@ -700,24 +603,7 @@ export namespace MCP {
       })
       delete s.clients[name]
     }
-    Telemetry.track({
-      type: "mcp_server_status",
-      timestamp: Date.now(),
-      session_id: Telemetry.getContext().sessionId,
-      server_name: name,
-      transport,
-      status: "disconnected",
-    })
-    delete s.transports[name]
     s.status[name] = { status: "disabled" }
-  }
-
-  /** Fully remove a dynamically-added MCP server — disconnects, and purges from runtime state. */
-  export async function remove(name: string) {
-    await disconnect(name)
-    const s = await state()
-    delete s.status[name]
-    Bus.publish(ToolsChanged, { server: name })
   }
 
   export async function tools() {
@@ -748,7 +634,6 @@ export namespace MCP {
       }),
     )
 
-    registeredMcpTools.clear()
     for (const { clientName, client, toolsResult } of toolsResults) {
       if (!toolsResult) continue
       const mcpConfig = config[clientName]
@@ -757,9 +642,7 @@ export namespace MCP {
       for (const mcpTool of toolsResult.tools) {
         const sanitizedClientName = clientName.replace(/[^a-zA-Z0-9_-]/g, "_")
         const sanitizedToolName = mcpTool.name.replace(/[^a-zA-Z0-9_-]/g, "_")
-        const toolName = sanitizedClientName + "_" + sanitizedToolName
-        registeredMcpTools.add(toolName)
-        result[toolName] = await convertMcpTool(mcpTool, client, timeout)
+        result[sanitizedClientName + "_" + sanitizedToolName] = await convertMcpTool(mcpTool, client, timeout)
       }
     }
     return result
@@ -840,7 +723,7 @@ export namespace MCP {
     const client = clientsSnapshot[clientName]
 
     if (!client) {
-      log.warn("client not found for resource", {
+      log.warn("client not found for prompt", {
         clientName: clientName,
       })
       return undefined
@@ -851,7 +734,7 @@ export namespace MCP {
         uri: resourceUri,
       })
       .catch((e) => {
-        log.error("failed to read resource from MCP server", {
+        log.error("failed to get prompt from MCP server", {
           clientName: clientName,
           resourceUri: resourceUri,
           error: e.message,
@@ -923,7 +806,7 @@ export namespace MCP {
     // Try to connect - this will trigger the OAuth flow
     try {
       const client = new Client({
-        name: "altimate",
+        name: "opencode",
         version: Installation.VERSION,
       })
       await client.connect(transport)

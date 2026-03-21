@@ -5,16 +5,9 @@ import { Config } from "../config/config"
 import { Instance } from "../project/instance"
 import { Identifier } from "../id/id"
 import PROMPT_INITIALIZE from "./template/initialize.txt"
-import PROMPT_DISCOVER from "./template/discover.txt"
 import PROMPT_REVIEW from "./template/review.txt"
-import PROMPT_FEEDBACK from "./template/feedback.txt"
-// altimate_change start — configure commands for external AI CLIs
-import PROMPT_CONFIGURE_CLAUDE from "./template/configure-claude.txt"
-import PROMPT_CONFIGURE_CODEX from "./template/configure-codex.txt"
-// altimate_change end
 import { MCP } from "../mcp"
 import { Skill } from "../skill"
-import { Log } from "../util/log"
 
 export namespace Command {
   export const Event = {
@@ -61,13 +54,7 @@ export namespace Command {
 
   export const Default = {
     INIT: "init",
-    DISCOVER: "discover",
     REVIEW: "review",
-    FEEDBACK: "feedback",
-    // altimate_change start
-    CONFIGURE_CLAUDE: "configure-claude",
-    CONFIGURE_CODEX: "configure-codex",
-    // altimate_change end
   } as const
 
   const state = Instance.state(async () => {
@@ -83,15 +70,6 @@ export namespace Command {
         },
         hints: hints(PROMPT_INITIALIZE),
       },
-      [Default.DISCOVER]: {
-        name: Default.DISCOVER,
-        description: "scan data stack and set up connections",
-        source: "command",
-        get template() {
-          return PROMPT_DISCOVER
-        },
-        hints: hints(PROMPT_DISCOVER),
-      },
       [Default.REVIEW]: {
         name: Default.REVIEW,
         description: "review changes [commit|branch|pr], defaults to uncommitted",
@@ -102,35 +80,6 @@ export namespace Command {
         subtask: true,
         hints: hints(PROMPT_REVIEW),
       },
-      [Default.FEEDBACK]: {
-        name: Default.FEEDBACK,
-        description: "submit product feedback as a GitHub issue",
-        source: "command",
-        get template() {
-          return PROMPT_FEEDBACK
-        },
-        hints: hints(PROMPT_FEEDBACK),
-      },
-      // altimate_change start — configure commands for external AI CLIs
-      [Default.CONFIGURE_CLAUDE]: {
-        name: Default.CONFIGURE_CLAUDE,
-        description: "configure /altimate command in Claude Code",
-        source: "command",
-        get template() {
-          return PROMPT_CONFIGURE_CLAUDE
-        },
-        hints: hints(PROMPT_CONFIGURE_CLAUDE),
-      },
-      [Default.CONFIGURE_CODEX]: {
-        name: Default.CONFIGURE_CODEX,
-        description: "configure altimate skill in Codex CLI",
-        source: "command",
-        get template() {
-          return PROMPT_CONFIGURE_CODEX
-        },
-        hints: hints(PROMPT_CONFIGURE_CODEX),
-      },
-      // altimate_change end
     }
 
     for (const [name, command] of Object.entries(cfg.command ?? {})) {
@@ -147,58 +96,46 @@ export namespace Command {
         hints: hints(command.template),
       }
     }
-    // MCP and skill loading must not prevent default commands from being served.
-    // Wrap each in try/catch so init, discover, review are always available.
-    // Note: MCP prompts can overwrite defaults (by name), but skills cannot
-    // (the `if (result[skill.name]) continue` guard preserves defaults over skills).
-    try {
-      for (const [name, prompt] of Object.entries(await MCP.prompts())) {
-        result[name] = {
-          name,
-          source: "mcp",
-          description: prompt.description,
-          get template() {
-            return MCP.getPrompt(
+    for (const [name, prompt] of Object.entries(await MCP.prompts())) {
+      result[name] = {
+        name,
+        source: "mcp",
+        description: prompt.description,
+        get template() {
+          // since a getter can't be async we need to manually return a promise here
+          return new Promise<string>(async (resolve, reject) => {
+            const template = await MCP.getPrompt(
               prompt.client,
               prompt.name,
               prompt.arguments
-                ? Object.fromEntries(prompt.arguments.map((argument, i) => [argument.name, `$${i + 1}`]))
+                ? // substitute each argument with $1, $2, etc.
+                  Object.fromEntries(prompt.arguments?.map((argument, i) => [argument.name, `$${i + 1}`]))
                 : {},
-            ).then((template) => {
-              if (!template) throw new Error(`Failed to load MCP prompt: ${prompt.name}`)
-              return template.messages
+            ).catch(reject)
+            resolve(
+              template?.messages
                 .map((message) => (message.content.type === "text" ? message.content.text : ""))
-                .join("\n")
-            })
-          },
-          hints: prompt.arguments?.map((_, i) => `$${i + 1}`) ?? [],
-        }
+                .join("\n") || "",
+            )
+          })
+        },
+        hints: prompt.arguments?.map((_, i) => `$${i + 1}`) ?? [],
       }
-    } catch (e) {
-      Log.Default.warn("MCP prompt loading failed, continuing with defaults", {
-        error: e instanceof Error ? e.message : String(e),
-      })
     }
 
     // Add skills as invokable commands
-    try {
-      for (const skill of await Skill.all()) {
-        // Skip if a command with this name already exists
-        if (result[skill.name]) continue
-        result[skill.name] = {
-          name: skill.name,
-          description: skill.description,
-          source: "skill",
-          get template() {
-            return skill.content
-          },
-          hints: [],
-        }
+    for (const skill of await Skill.all()) {
+      // Skip if a command with this name already exists
+      if (result[skill.name]) continue
+      result[skill.name] = {
+        name: skill.name,
+        description: skill.description,
+        source: "skill",
+        get template() {
+          return skill.content
+        },
+        hints: [],
       }
-    } catch (e) {
-      Log.Default.warn("Skill loading failed, continuing with defaults", {
-        error: e instanceof Error ? e.message : String(e),
-      })
     }
 
     return result

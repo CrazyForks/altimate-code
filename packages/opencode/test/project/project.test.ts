@@ -3,7 +3,6 @@ import { Project } from "../../src/project/project"
 import { Log } from "../../src/util/log"
 import { $ } from "bun"
 import path from "path"
-import fs from "fs/promises"
 import { tmpdir } from "../fixture/fixture"
 import { Filesystem } from "../../src/util/filesystem"
 import { GlobalBus } from "../../src/bus/global"
@@ -24,7 +23,7 @@ mock.module("../../src/util/git", () => ({
       mode === "rev-list-fail" &&
       cmd.includes("git rev-list") &&
       cmd.includes("--max-parents=0") &&
-      cmd.includes("--all")
+      cmd.includes("HEAD")
     ) {
       return Promise.resolve({
         exitCode: 128,
@@ -101,27 +100,6 @@ describe("Project.fromDirectory", () => {
     expect(fileExists).toBe(true)
   })
 
-  test("should read project id from legacy .git/altimate-code file (backward compat)", async () => {
-    const p = await loadProject()
-    await using tmp = await tmpdir({ git: true })
-
-    // First call creates .git/opencode with the project id
-    const { project: first } = await p.fromDirectory(tmp.path)
-    expect(first.id).not.toBe("global")
-
-    const newFile = path.join(tmp.path, ".git", "opencode")
-    const legacyFile = path.join(tmp.path, ".git", "altimate-code")
-
-    // Move the new file to the legacy location to simulate an old installation
-    const id = await Filesystem.readText(newFile)
-    await fs.unlink(newFile)
-    await fs.writeFile(legacyFile, id)
-
-    // Should still resolve the same project id from the legacy file
-    const { project: second } = await p.fromDirectory(tmp.path)
-    expect(second.id).toBe(first.id)
-  })
-
   test("keeps git vcs when rev-list exits non-zero with empty output", async () => {
     const p = await loadProject()
     await using tmp = await tmpdir()
@@ -191,6 +169,52 @@ describe("Project.fromDirectory with worktrees", () => {
         .cwd(tmp.path)
         .quiet()
         .catch(() => {})
+    }
+  })
+
+  test("worktree should share project ID with main repo", async () => {
+    const p = await loadProject()
+    await using tmp = await tmpdir({ git: true })
+
+    const { project: main } = await p.fromDirectory(tmp.path)
+
+    const worktreePath = path.join(tmp.path, "..", path.basename(tmp.path) + "-wt-shared")
+    try {
+      await $`git worktree add ${worktreePath} -b shared-${Date.now()}`.cwd(tmp.path).quiet()
+
+      const { project: wt } = await p.fromDirectory(worktreePath)
+
+      expect(wt.id).toBe(main.id)
+
+      // Cache should live in the common .git dir, not the worktree's .git file
+      const cache = path.join(tmp.path, ".git", "opencode")
+      const exists = await Filesystem.exists(cache)
+      expect(exists).toBe(true)
+    } finally {
+      await $`git worktree remove ${worktreePath}`
+        .cwd(tmp.path)
+        .quiet()
+        .catch(() => {})
+    }
+  })
+
+  test("separate clones of the same repo should share project ID", async () => {
+    const p = await loadProject()
+    await using tmp = await tmpdir({ git: true })
+
+    // Create a bare remote, push, then clone into a second directory
+    const bare = tmp.path + "-bare"
+    const clone = tmp.path + "-clone"
+    try {
+      await $`git clone --bare ${tmp.path} ${bare}`.quiet()
+      await $`git clone ${bare} ${clone}`.quiet()
+
+      const { project: a } = await p.fromDirectory(tmp.path)
+      const { project: b } = await p.fromDirectory(clone)
+
+      expect(b.id).toBe(a.id)
+    } finally {
+      await $`rm -rf ${bare} ${clone}`.quiet().nothrow()
     }
   })
 

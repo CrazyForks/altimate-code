@@ -78,7 +78,7 @@ export namespace Config {
   export const state = Instance.state(async () => {
     const auth = await Auth.all()
 
-    // Config loading order (low -> high precedence): https://altimate.ai/docs/config#precedence-order
+    // Config loading order (low -> high precedence): https://opencode.ai/docs/config#precedence-order
     // 1) Remote .well-known/opencode (org defaults)
     // 2) Global config (~/.config/opencode/opencode.json{,c})
     // 3) Custom config (OPENCODE_CONFIG)
@@ -99,7 +99,7 @@ export namespace Config {
         const wellknown = (await response.json()) as any
         const remoteConfig = wellknown.config ?? {}
         // Add $schema to prevent load() from trying to write back to a non-existent file
-        if (!remoteConfig.$schema) remoteConfig.$schema = "https://altimate.ai/config.json"
+        if (!remoteConfig.$schema) remoteConfig.$schema = "https://opencode.ai/config.json"
         result = mergeConfigConcatArrays(
           result,
           await load(JSON.stringify(remoteConfig), {
@@ -141,12 +141,8 @@ export namespace Config {
     const deps = []
 
     for (const dir of unique(directories)) {
-      // altimate_change start - support both .altimate-code and .opencode config dirs
-      if (dir.endsWith(".altimate-code") || dir.endsWith(".opencode") || dir === Flag.OPENCODE_CONFIG_DIR) {
-      // altimate_change end
-        // altimate_change start - support altimate-code.json config filename
-        for (const file of ["altimate-code.json", "opencode.jsonc", "opencode.json"]) {
-        // altimate_change end
+      if (dir.endsWith(".opencode") || dir === Flag.OPENCODE_CONFIG_DIR) {
+        for (const file of ["opencode.jsonc", "opencode.json"]) {
           log.debug(`loading config from ${path.join(dir, file)}`)
           result = mergeConfigConcatArrays(result, await loadFile(path.join(dir, file)))
           // to satisfy the type checker
@@ -212,9 +208,7 @@ export namespace Config {
     // which would fail on system directories requiring elevated permissions
     // This way it only loads config file and not skills/plugins/commands
     if (existsSync(managedDir)) {
-      // altimate_change start - support altimate-code.json config filename
-      for (const file of ["altimate-code.json", "opencode.jsonc", "opencode.json"]) {
-      // altimate_change end
+      for (const file of ["opencode.jsonc", "opencode.json"]) {
         result = mergeConfigConcatArrays(result, await loadFile(path.join(managedDir, file)))
       }
     }
@@ -263,24 +257,6 @@ export namespace Config {
     }
 
     result.plugin = deduplicatePlugins(result.plugin ?? [])
-
-    // altimate_change start — auto-discover MCP servers from external AI tool configs
-    if (!Flag.OPENCODE_DISABLE_PROJECT_CONFIG && result.experimental?.auto_mcp_discovery !== false) {
-      const { discoverExternalMcp, setDiscoveryResult } = await import("../mcp/discover")
-      const { servers: externalMcp, sources } = await discoverExternalMcp(Instance.worktree)
-      if (Object.keys(externalMcp).length > 0) {
-        result.mcp ??= {}
-        const added: string[] = []
-        for (const [name, server] of Object.entries(externalMcp)) {
-          if (!(name in result.mcp)) {
-            result.mcp[name] = server
-            added.push(name)
-          }
-        }
-        setDiscoveryResult(added, sources)
-      }
-    }
-    // altimate_change end
 
     return {
       config: result,
@@ -884,9 +860,6 @@ export namespace Config {
       agent_cycle: z.string().optional().default("tab").describe("Next agent"),
       agent_cycle_reverse: z.string().optional().default("shift+tab").describe("Previous agent"),
       variant_cycle: z.string().optional().default("ctrl+t").describe("Cycle model variants"),
-      // altimate_change start - add prompt enhance keybind
-      prompt_enhance: z.string().optional().default("<leader>i").describe("Enhance prompt with AI before sending"),
-      // altimate_change end
       input_clear: z.string().optional().default("ctrl+c").describe("Clear input field"),
       input_paste: z.string().optional().default("ctrl+v").describe("Paste from clipboard"),
       input_submit: z.string().optional().default("return").describe("Submit input"),
@@ -1071,7 +1044,7 @@ export namespace Config {
       command: z
         .record(z.string(), Command)
         .optional()
-        .describe("Command configuration, see https://altimate.ai/docs/commands"),
+        .describe("Command configuration, see https://opencode.ai/docs/commands"),
       skills: Skills.optional().describe("Additional skill folder paths"),
       watcher: z
         .object({
@@ -1138,7 +1111,7 @@ export namespace Config {
         })
         .catchall(Agent)
         .optional()
-        .describe("Agent configuration, see https://altimate.ai/docs/agents"),
+        .describe("Agent configuration, see https://opencode.ai/docs/agents"),
       provider: z
         .record(z.string(), Provider)
         .optional()
@@ -1228,36 +1201,6 @@ export namespace Config {
             .describe("Token buffer for compaction. Leaves enough window to avoid overflow during compaction."),
         })
         .optional(),
-      // altimate_change start - tracing config
-      tracing: z
-        .object({
-          enabled: z
-            .boolean()
-            .optional()
-            .describe("Enable session tracing (default: true). Traces are saved locally and can be viewed with `altimate-code trace`."),
-          dir: z
-            .string()
-            .optional()
-            .describe("Custom directory for trace files (default: ~/.local/share/altimate-code/traces/)"),
-          maxFiles: z
-            .number()
-            .int()
-            .nonnegative()
-            .optional()
-            .describe("Maximum number of trace files to keep. 0 for unlimited. Oldest files are removed when exceeded (default: 100)."),
-          exporters: z
-            .array(
-              z.object({
-                name: z.string().describe("Exporter identifier"),
-                endpoint: z.string().url().describe("HTTP endpoint to POST trace data to"),
-                headers: z.record(z.string(), z.string()).optional().describe("Custom headers (e.g., Authorization)"),
-              }),
-            )
-            .optional()
-            .describe("Additional trace exporters. Each receives the full trace JSON via HTTP POST."),
-        })
-        .optional(),
-      // altimate_change end
       experimental: z
         .object({
           disable_paste_summary: z.boolean().optional(),
@@ -1277,26 +1220,6 @@ export namespace Config {
             .positive()
             .optional()
             .describe("Timeout in milliseconds for model context protocol (MCP) requests"),
-          // altimate_change start - auto-enhance prompt config
-          auto_enhance_prompt: z
-            .boolean()
-            .optional()
-            .describe(
-              "Automatically enhance prompts with AI before sending (default: false). Uses a small model to rewrite rough prompts into clearer versions.",
-            ),
-          // altimate_change end
-          // altimate_change start - env fingerprint skill selection toggle
-          env_fingerprint_skill_selection: z
-            .boolean()
-            .optional()
-            .describe("Use environment fingerprint to select relevant skills once per session (default: false). Set to true to enable LLM-based skill filtering."),
-          // altimate_change end
-          // altimate_change start - auto MCP discovery toggle
-          auto_mcp_discovery: z
-            .boolean()
-            .default(true)
-            .describe("Auto-discover MCP servers from VS Code, Claude Code, Copilot, and Gemini configs at startup. Set to false to disable."),
-          // altimate_change end
         })
         .optional(),
     })
@@ -1313,9 +1236,6 @@ export namespace Config {
       mergeDeep(await loadFile(path.join(Global.Path.config, "config.json"))),
       mergeDeep(await loadFile(path.join(Global.Path.config, "opencode.json"))),
       mergeDeep(await loadFile(path.join(Global.Path.config, "opencode.jsonc"))),
-      // altimate_change start - support altimate-code.json config filename
-      mergeDeep(await loadFile(path.join(Global.Path.config, "altimate-code.json"))),
-      // altimate_change end
     )
 
     const legacy = path.join(Global.Path.config, "config")
@@ -1328,7 +1248,7 @@ export namespace Config {
         .then(async (mod) => {
           const { provider, model, ...rest } = mod.default
           if (provider && model) result.model = `${provider}/${model}`
-          result["$schema"] = "https://altimate.ai/config.json"
+          result["$schema"] = "https://opencode.ai/config.json"
           result = mergeDeep(result, rest)
           await Filesystem.writeJson(path.join(Global.Path.config, "config.json"), result)
           await fs.unlink(legacy)
@@ -1372,8 +1292,8 @@ export namespace Config {
     const parsed = Info.safeParse(normalized)
     if (parsed.success) {
       if (!parsed.data.$schema && isFile) {
-        parsed.data.$schema = "https://altimate.ai/config.json"
-        const updated = original.replace(/^\s*\{/, '{\n  "$schema": "https://altimate.ai/config.json",')
+        parsed.data.$schema = "https://opencode.ai/config.json"
+        const updated = original.replace(/^\s*\{/, '{\n  "$schema": "https://opencode.ai/config.json",')
         await Filesystem.write(options.path, updated).catch(() => {})
       }
       const data = parsed.data
@@ -1429,11 +1349,9 @@ export namespace Config {
   }
 
   function globalConfigFile() {
-    // altimate_change start - support altimate-code.json config filename
-    const candidates = ["altimate-code.json", "opencode.jsonc", "opencode.json", "config.json"].map((file) =>
+    const candidates = ["opencode.jsonc", "opencode.json", "config.json"].map((file) =>
       path.join(Global.Path.config, file),
     )
-    // altimate_change end
     for (const file of candidates) {
       if (existsSync(file)) return file
     }
