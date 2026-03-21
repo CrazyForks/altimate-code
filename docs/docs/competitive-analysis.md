@@ -28,7 +28,7 @@ However, there are **5 critical gaps** that must be addressed to win against the
 | **Maker** | Snowflake |
 | **Launched** | November 2025 (GA Feb 2026) |
 | **Pricing** | Snowsight: Free. CLI: $20/month + Snowflake consumption |
-| **Foundation** | Built on Claude Code architecture |
+| **Foundation** | Built on Claude Code's architecture (same core, Snowflake tools layered on top) |
 | **Users** | 4,400+ since launch |
 | **Models** | Claude Opus 4.6, Sonnet 4.5, GPT 5.2 |
 | **Interfaces** | Snowsight (web) + CLI |
@@ -41,7 +41,10 @@ However, there are **5 critical gaps** that must be addressed to win against the
 - Standalone CLI subscription — first Snowflake product usable without a Snowflake deployment
 - Customer proof: evolv Consulting reported 500+ hours saved (~$100K value) in first 20 days
 - Extensible: custom tools, skills, subagents, hooks, profiles, AGENTS.md
-- Shared skill layer with Claude Code (interoperable skills)
+- Shared skill layer with Claude Code (interoperable skills — skills written for one work in the other)
+- Stateless conversations — cannot access past query results; long sessions lose context
+- Quality depends on prompt quality: "If the business rule is poorly expressed, the code will be perfectly wrong"
+- Usage caps: exceeding included CLI usage makes it unavailable until next billing period
 
 **Key Weaknesses:**
 - Platform lock-in: primarily Snowflake, expanding slowly
