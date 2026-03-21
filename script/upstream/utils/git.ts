@@ -172,7 +172,7 @@ export async function checkout(branch: string): Promise<void> {
 export async function merge(
   ref: string,
 ): Promise<{ success: boolean; conflicts: string[] }> {
-  const result = gitSafe(`merge ${ref} --no-edit`)
+  const result = gitSafe(`merge ${ref} --no-edit --allow-unrelated-histories`)
   if (result !== null) {
     return { success: true, conflicts: [] }
   }
