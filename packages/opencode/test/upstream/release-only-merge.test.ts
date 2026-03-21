@@ -85,7 +85,7 @@ describe("list-versions.ts release-based listing", () => {
   })
 
   test("header says Releases not Versions", () => {
-    expect(listScript).toContain("Upstream OpenCode Releases")
+    expect(listScript).toContain("Upstream Altimate Code Releases")
   })
 
   test("help text mentions only releases", () => {
@@ -147,8 +147,8 @@ describe("config.ts still references upstream repo correctly", () => {
     "utf-8",
   )
 
-  test("upstreamRepo points to anomalyco/opencode", () => {
-    expect(configModule).toContain('"anomalyco/opencode"')
+  test("upstreamRepo points to AltimateAI/altimate-code", () => {
+    expect(configModule).toContain('"AltimateAI/altimate-code"')
   })
 
   test("originRepo points to AltimateAI/altimate-code", () => {

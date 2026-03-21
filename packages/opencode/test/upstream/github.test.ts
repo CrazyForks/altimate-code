@@ -37,7 +37,7 @@ const MOCK_RELEASES = [
     prerelease: false,
     draft: false,
     published_at: "2026-03-13T16:33:18Z",
-    html_url: "https://github.com/anomalyco/opencode/releases/tag/v1.2.26",
+    html_url: "https://github.com/AltimateAI/altimate-code/releases/tag/v1.2.26",
   },
   {
     tag_name: "v1.2.25",
@@ -45,7 +45,7 @@ const MOCK_RELEASES = [
     prerelease: false,
     draft: false,
     published_at: "2026-03-12T23:34:33Z",
-    html_url: "https://github.com/anomalyco/opencode/releases/tag/v1.2.25",
+    html_url: "https://github.com/AltimateAI/altimate-code/releases/tag/v1.2.25",
   },
   {
     tag_name: "v1.2.24-beta.1",
@@ -53,7 +53,7 @@ const MOCK_RELEASES = [
     prerelease: true,
     draft: false,
     published_at: "2026-03-08T10:00:00Z",
-    html_url: "https://github.com/anomalyco/opencode/releases/tag/v1.2.24-beta.1",
+    html_url: "https://github.com/AltimateAI/altimate-code/releases/tag/v1.2.24-beta.1",
   },
   {
     tag_name: "v1.2.24",
@@ -61,7 +61,7 @@ const MOCK_RELEASES = [
     prerelease: false,
     draft: false,
     published_at: "2026-03-09T16:10:00Z",
-    html_url: "https://github.com/anomalyco/opencode/releases/tag/v1.2.24",
+    html_url: "https://github.com/AltimateAI/altimate-code/releases/tag/v1.2.24",
   },
 ]
 
@@ -71,7 +71,7 @@ const MOCK_DRAFT_RELEASE = {
   prerelease: false,
   draft: true,
   published_at: "2026-03-15T00:00:00Z",
-  html_url: "https://github.com/anomalyco/opencode/releases/tag/v1.3.0",
+  html_url: "https://github.com/AltimateAI/altimate-code/releases/tag/v1.3.0",
 }
 
 // ---------------------------------------------------------------------------
@@ -89,7 +89,7 @@ describe("fetchReleases()", () => {
     const stableOnly = MOCK_RELEASES.filter((r) => !r.prerelease && !r.draft)
     mockExecOutput = JSON.stringify(stableOnly)
 
-    const releases = await fetchReleases("anomalyco/opencode")
+    const releases = await fetchReleases("AltimateAI/altimate-code")
     expect(releases).toHaveLength(3)
     expect(releases.every((r) => !r.prerelease && !r.draft)).toBe(true)
   })
@@ -98,7 +98,7 @@ describe("fetchReleases()", () => {
     const nonDraft = MOCK_RELEASES.filter((r) => !r.draft)
     mockExecOutput = JSON.stringify(nonDraft)
 
-    const releases = await fetchReleases("anomalyco/opencode", {
+    const releases = await fetchReleases("AltimateAI/altimate-code", {
       includePrerelease: true,
     })
     expect(releases).toHaveLength(4)
@@ -109,7 +109,7 @@ describe("fetchReleases()", () => {
     const allWithDraft = [...MOCK_RELEASES, MOCK_DRAFT_RELEASE].filter((r) => !r.draft)
     mockExecOutput = JSON.stringify(allWithDraft)
 
-    const releases = await fetchReleases("anomalyco/opencode", {
+    const releases = await fetchReleases("AltimateAI/altimate-code", {
       includePrerelease: true,
     })
     expect(releases.every((r) => !r.draft)).toBe(true)
@@ -118,14 +118,14 @@ describe("fetchReleases()", () => {
   test("returns empty array when no releases exist", async () => {
     mockExecOutput = ""
 
-    const releases = await fetchReleases("anomalyco/opencode")
+    const releases = await fetchReleases("AltimateAI/altimate-code")
     expect(releases).toEqual([])
   })
 
   test("throws on API failure", async () => {
     mockExecShouldThrow = true
 
-    expect(fetchReleases("anomalyco/opencode")).rejects.toThrow(
+    expect(fetchReleases("AltimateAI/altimate-code")).rejects.toThrow(
       "Failed to fetch releases",
     )
   })
@@ -133,21 +133,21 @@ describe("fetchReleases()", () => {
   test("calls gh API with correct repo", async () => {
     mockExecOutput = "[]"
 
-    await fetchReleases("anomalyco/opencode")
-    expect(lastExecCmd).toContain("repos/anomalyco/opencode/releases")
+    await fetchReleases("AltimateAI/altimate-code")
+    expect(lastExecCmd).toContain("repos/AltimateAI/altimate-code/releases")
   })
 
   test("respects limit parameter", async () => {
     mockExecOutput = "[]"
 
-    await fetchReleases("anomalyco/opencode", { limit: 5 })
+    await fetchReleases("AltimateAI/altimate-code", { limit: 5 })
     expect(lastExecCmd).toContain(".[0:5]")
   })
 
   test("pipes paginated output to external jq for slurping", async () => {
     mockExecOutput = "[]"
 
-    await fetchReleases("anomalyco/opencode")
+    await fetchReleases("AltimateAI/altimate-code")
     // Uses --jq '.[]' to unpack pages, then pipes to jq -s for slurping
     expect(lastExecCmd).toContain("--jq '.[]'")
     expect(lastExecCmd).toContain("| jq -s")
@@ -156,7 +156,7 @@ describe("fetchReleases()", () => {
   test("filters before slicing (filter then limit)", async () => {
     mockExecOutput = "[]"
 
-    await fetchReleases("anomalyco/opencode", { limit: 10 })
+    await fetchReleases("AltimateAI/altimate-code", { limit: 10 })
     expect(lastExecCmd).toContain("[.[] | select(")
     expect(lastExecCmd).toMatch(/select\(.*\)\] \| \.\[0:10\]/)
   })
@@ -176,7 +176,7 @@ describe("getRelease()", () => {
   test("returns release for a valid published tag", async () => {
     mockExecOutput = JSON.stringify(MOCK_RELEASES[0])
 
-    const release = await getRelease("anomalyco/opencode", "v1.2.26")
+    const release = await getRelease("AltimateAI/altimate-code", "v1.2.26")
     expect(release).not.toBeNull()
     expect(release!.tag_name).toBe("v1.2.26")
     expect(release!.draft).toBe(false)
@@ -185,28 +185,28 @@ describe("getRelease()", () => {
   test("returns null for a draft release", async () => {
     mockExecOutput = JSON.stringify(MOCK_DRAFT_RELEASE)
 
-    const release = await getRelease("anomalyco/opencode", "v1.3.0")
+    const release = await getRelease("AltimateAI/altimate-code", "v1.3.0")
     expect(release).toBeNull()
   })
 
   test("returns null when tag does not exist", async () => {
     mockExecShouldThrow = true
 
-    const release = await getRelease("anomalyco/opencode", "v99.99.99")
+    const release = await getRelease("AltimateAI/altimate-code", "v99.99.99")
     expect(release).toBeNull()
   })
 
   test("returns null for empty response", async () => {
     mockExecOutput = ""
 
-    const release = await getRelease("anomalyco/opencode", "v1.2.26")
+    const release = await getRelease("AltimateAI/altimate-code", "v1.2.26")
     expect(release).toBeNull()
   })
 
   test("queries the correct tag endpoint", async () => {
     mockExecOutput = JSON.stringify(MOCK_RELEASES[0])
 
-    await getRelease("anomalyco/opencode", "v1.2.26")
+    await getRelease("AltimateAI/altimate-code", "v1.2.26")
     expect(lastExecCmd).toContain("releases/tags/v1.2.26")
   })
 })
@@ -225,7 +225,7 @@ describe("getReleaseTags()", () => {
     const stableOnly = MOCK_RELEASES.filter((r) => !r.prerelease && !r.draft)
     mockExecOutput = JSON.stringify(stableOnly)
 
-    const tags = await getReleaseTags("anomalyco/opencode")
+    const tags = await getReleaseTags("AltimateAI/altimate-code")
     expect(tags).toEqual(["v1.2.26", "v1.2.25", "v1.2.24"])
   })
 
@@ -233,7 +233,7 @@ describe("getReleaseTags()", () => {
     const nonDraft = MOCK_RELEASES.filter((r) => !r.draft)
     mockExecOutput = JSON.stringify(nonDraft)
 
-    const tags = await getReleaseTags("anomalyco/opencode", {
+    const tags = await getReleaseTags("AltimateAI/altimate-code", {
       includePrerelease: true,
     })
     expect(tags).toContain("v1.2.24-beta.1")
@@ -253,7 +253,7 @@ describe("validateRelease()", () => {
   test("valid: true for a published stable release", async () => {
     mockExecOutput = JSON.stringify(MOCK_RELEASES[0])
 
-    const result = await validateRelease("anomalyco/opencode", "v1.2.26")
+    const result = await validateRelease("AltimateAI/altimate-code", "v1.2.26")
     expect(result.valid).toBe(true)
     expect(result.release).toBeDefined()
     expect(result.release!.tag_name).toBe("v1.2.26")
@@ -262,7 +262,7 @@ describe("validateRelease()", () => {
   test("valid: false for a non-existent tag", async () => {
     mockExecShouldThrow = true
 
-    const result = await validateRelease("anomalyco/opencode", "v99.99.99")
+    const result = await validateRelease("AltimateAI/altimate-code", "v99.99.99")
     expect(result.valid).toBe(false)
     expect(result.reason).toContain("not a published GitHub release")
   })
@@ -270,7 +270,7 @@ describe("validateRelease()", () => {
   test("valid: false for a pre-release", async () => {
     mockExecOutput = JSON.stringify(MOCK_RELEASES[2]) // beta
 
-    const result = await validateRelease("anomalyco/opencode", "v1.2.24-beta.1")
+    const result = await validateRelease("AltimateAI/altimate-code", "v1.2.24-beta.1")
     expect(result.valid).toBe(false)
     expect(result.reason).toContain("pre-release")
   })
@@ -279,28 +279,28 @@ describe("validateRelease()", () => {
     mockExecOutput = JSON.stringify(MOCK_DRAFT_RELEASE)
 
     // getRelease returns null for drafts
-    const result = await validateRelease("anomalyco/opencode", "v1.3.0")
+    const result = await validateRelease("AltimateAI/altimate-code", "v1.3.0")
     expect(result.valid).toBe(false)
   })
 
   test("reason includes --include-prerelease hint for pre-releases", async () => {
     mockExecOutput = JSON.stringify(MOCK_RELEASES[2])
 
-    const result = await validateRelease("anomalyco/opencode", "v1.2.24-beta.1")
+    const result = await validateRelease("AltimateAI/altimate-code", "v1.2.24-beta.1")
     expect(result.reason).toContain("--include-prerelease")
   })
 
   test("reason mentions the repo name for non-existent tags", async () => {
     mockExecShouldThrow = true
 
-    const result = await validateRelease("anomalyco/opencode", "vscode-v0.0.5")
-    expect(result.reason).toContain("anomalyco/opencode")
+    const result = await validateRelease("AltimateAI/altimate-code", "vscode-v0.0.5")
+    expect(result.reason).toContain("AltimateAI/altimate-code")
   })
 
   test("valid: true for a pre-release when includePrerelease is true", async () => {
     mockExecOutput = JSON.stringify(MOCK_RELEASES[2]) // beta
 
-    const result = await validateRelease("anomalyco/opencode", "v1.2.24-beta.1", {
+    const result = await validateRelease("AltimateAI/altimate-code", "v1.2.24-beta.1", {
       includePrerelease: true,
     })
     expect(result.valid).toBe(true)
@@ -311,7 +311,7 @@ describe("validateRelease()", () => {
   test("valid: false for a pre-release when includePrerelease is false", async () => {
     mockExecOutput = JSON.stringify(MOCK_RELEASES[2])
 
-    const result = await validateRelease("anomalyco/opencode", "v1.2.24-beta.1", {
+    const result = await validateRelease("AltimateAI/altimate-code", "v1.2.24-beta.1", {
       includePrerelease: false,
     })
     expect(result.valid).toBe(false)

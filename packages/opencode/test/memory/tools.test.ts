@@ -5,7 +5,7 @@ import os from "os"
 
 // Test tool parameter validation, output formatting, and integration
 // These tests verify Zod schemas and tool response structures
-// without requiring the full OpenCode runtime.
+// without requiring the full Altimate Code runtime.
 
 import z from "zod"
 

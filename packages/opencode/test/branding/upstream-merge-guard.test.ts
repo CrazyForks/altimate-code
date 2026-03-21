@@ -206,28 +206,28 @@ describe("OAuth/MCP branding", () => {
   const oauthProviderPath = join(srcDir, "mcp", "oauth-provider.ts")
   const oauthCallbackPath = join(srcDir, "mcp", "oauth-callback.ts")
 
-  test('oauth-provider.ts has client_name: "Altimate Code" not "OpenCode"', () => {
+  test('oauth-provider.ts has client_name: "Altimate Code" not "Altimate Code"', () => {
     const content = readText(oauthProviderPath)
     expect(content).toContain('client_name: "Altimate Code"')
-    expect(content).not.toMatch(/client_name:\s*"OpenCode"/)
+    expect(content).not.toMatch(/client_name:\s*"Altimate Code"/)
   })
 
-  test('oauth-callback.ts HTML titles contain "Altimate Code" not "OpenCode"', () => {
+  test('oauth-callback.ts HTML titles contain "Altimate Code" not "Altimate Code"', () => {
     const content = readText(oauthCallbackPath)
     // All <title> tags should reference Altimate Code
     const titleMatches = content.match(/<title>[^<]+<\/title>/g) ?? []
     expect(titleMatches.length).toBeGreaterThan(0)
     for (const title of titleMatches) {
       expect(title).toContain("Altimate Code")
-      expect(title).not.toContain("OpenCode")
+      expect(title).not.toContain("Altimate Code")
     }
   })
 
-  test("oauth-callback.ts body text references Altimate Code not OpenCode", () => {
+  test("oauth-callback.ts body text references Altimate Code not Altimate Code", () => {
     const content = readText(oauthCallbackPath)
     // User-facing strings mentioning the product
     expect(content).toContain("Altimate Code")
-    // No user-facing "OpenCode" references (excluding internal identifiers)
+    // No user-facing "Altimate Code" references (excluding internal identifiers)
     const lines = content.split("\n")
     for (const line of lines) {
       // Skip import lines and internal identifiers
@@ -244,9 +244,9 @@ describe("OAuth/MCP branding", () => {
 })
 
 // ---------------------------------------------------------------------------
-// 5. No opencode.ai Domain Leaks in src/
+// 5. No altimate.ai Domain Leaks in src/
 // ---------------------------------------------------------------------------
-describe("No opencode.ai domain leaks in src/", () => {
+describe("No altimate.ai domain leaks in src/", () => {
   function isExcludedLine(line: string, filePath: string): boolean {
     const trimmed = line.trim()
     if (trimmed.includes("@opencode-ai/")) return true
@@ -263,7 +263,7 @@ describe("No opencode.ai domain leaks in src/", () => {
     return false
   }
 
-  test("no opencode.ai domain references in any src/ .ts files", async () => {
+  test("no altimate.ai domain references in any src/ .ts files", async () => {
     const violations: string[] = []
     const glob = new Glob("**/*.ts")
     for await (const file of glob.scan({ cwd: srcDir })) {
@@ -281,7 +281,7 @@ describe("No opencode.ai domain leaks in src/", () => {
     expect(violations).toEqual([])
   })
 
-  test("no opencode.ai domain references in any src/ .tsx files", async () => {
+  test("no altimate.ai domain references in any src/ .tsx files", async () => {
     const violations: string[] = []
     const glob = new Glob("**/*.tsx")
     for await (const file of glob.scan({ cwd: srcDir })) {
@@ -308,7 +308,7 @@ describe("TUI branding", () => {
   const sidebarContent = readText(sidebarPath)
 
   test("sidebar shows 'Altimate' not 'Open' as branded name", () => {
-    // The sidebar footer must say "Altimate Code", not "OpenCode"
+    // The sidebar footer must say "Altimate Code", not "Altimate Code"
     expect(sidebarContent).toContain("<b>Altimate</b>")
     expect(sidebarContent).not.toMatch(/<b>Open<\/b>\s*\n\s*<span[^>]*>\s*<b>Code<\/b>/)
   })
