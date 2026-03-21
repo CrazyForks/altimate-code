@@ -157,30 +157,6 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       switch (event.type) {
         case "server.instance.disposed":
           bootstrap()
-          // altimate_change start - smooth streaming: direct path update avoids produce() proxy overhead
-          if (Flag.ALTIMATE_SMOOTH_STREAMING) {
-            const field = event.properties.field as keyof (typeof parts)[number]
-            const existing = parts[result.index][field] as string | undefined
-            setStore(
-              "part",
-              event.properties.messageID,
-              result.index,
-              field as any,
-              ((existing ?? "") + event.properties.delta) as any,
-            )
-          } else {
-            setStore(
-              "part",
-              event.properties.messageID,
-              produce((draft) => {
-                const part = draft[result.index]
-                const field = event.properties.field as keyof typeof part
-                const existing = part[field] as string | undefined
-                ;(part[field] as string) = (existing ?? "") + event.properties.delta
-              }),
-            )
-          }
-          // altimate_change end
           break
         case "permission.replied": {
           const requests = store.permission[event.properties.sessionID]

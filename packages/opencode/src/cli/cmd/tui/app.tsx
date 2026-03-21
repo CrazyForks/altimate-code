@@ -41,8 +41,17 @@ import { writeHeapSnapshot } from "v8"
 import { PromptRefProvider, usePromptRef } from "./context/prompt"
 import { TuiConfigProvider } from "./context/tui-config"
 import { TuiConfig } from "@/config/tui"
+import { Log } from "@/util/log"
 
 // altimate_change start - shared trace viewer server
+import fs from "fs/promises"
+import { Tracer } from "@/altimate/observability/tracing"
+import { renderTraceViewer } from "@/altimate/observability/viewer"
+import { DialogTraceList } from "@tui/component/dialog-trace-list"
+import { UPGRADE_KV_KEY } from "@tui/component/upgrade-indicator-utils"
+
+const fsAsync = fs
+
 let traceViewerServer: ReturnType<typeof Bun.serve> | undefined
 let traceViewerTracesDir: string | undefined
 function getTraceViewerUrl(sessionID: string, tracesDir?: string): string {

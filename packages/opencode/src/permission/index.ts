@@ -87,7 +87,7 @@ export namespace Permission {
         result.push(item.info)
       }
     }
-    return result.sort((a, b) => a.id.localeCompare(b.id))
+    return result.sort((a, b) => (a.id as unknown as string).localeCompare(b.id as unknown as string))
   }
 
   export async function ask(input: {

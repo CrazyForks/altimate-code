@@ -5,37 +5,13 @@ import { Tool } from "./tool"
 import { Skill } from "../skill"
 import { Ripgrep } from "../file/ripgrep"
 import { iife } from "@/util/iife"
-      // altimate_change start - use upstream Skill.get() for exact name lookup
-      const skill = await Skill.get(params.name)
+import os from "os"
+import { Config } from "@/config/config"
+import { Fingerprint } from "@/altimate/fingerprint"
+import { selectSkillsWithLLM } from "@/altimate/skill-selector"
 
-      if (!skill) {
-        const available = await Skill.all().then((s) => s.map((x) => x.name).join(", "))
-        throw new Error(`Skill "${params.name}" not found. Available skills: ${available || "none"}`)
-      }
-      // altimate_change end
+const MAX_DISPLAY_SKILLS = 50
 
-      // altimate_change start — telemetry instrumentation for skill loading
-      try {
-        Telemetry.track({
-          type: "skill_used",
-          timestamp: Date.now(),
-          session_id: ctx.sessionID,
-          message_id: ctx.messageID,
-          skill_name: skill.name,
-          skill_source: classifySkillSource(skill.location),
-          duration_ms: Date.now() - startTime,
-        })
-      } catch {
-        // Telemetry must never break skill loading
-      }
-      // altimate_change end
-  // altimate_change start - use displaySkills for examples
-  const examples = displaySkills
-    .map((skill) => `'${skill.name}'`)
-    .slice(0, 3)
-    .join(", ")
-  const hint = examples.length > 0 ? ` (e.g., ${examples}, ...)` : ""
-  // altimate_change end
 // altimate_change start — classifySkillSource helper for skill telemetry
 function classifySkillSource(location: string): "builtin" | "global" | "project" {
   if (location.includes("node_modules") || location.includes(".altimate/builtin")) return "builtin"
@@ -86,11 +62,13 @@ export const SkillTool = Tool.define("skill", async (ctx) => {
           // altimate_change end
         ].join("\n")
 
-  const examples = list
+  // altimate_change start - use displaySkills for examples
+  const examples = displaySkills
     .map((skill) => `'${skill.name}'`)
     .slice(0, 3)
     .join(", ")
   const hint = examples.length > 0 ? ` (e.g., ${examples}, ...)` : ""
+  // altimate_change end
 
   const parameters = z.object({
     name: z.string().describe(`The name of the skill from available_skills${hint}`),
@@ -144,28 +122,23 @@ export const SkillTool = Tool.define("skill", async (ctx) => {
             return arr
           }).then((f) => f.map((file) => `<file>${file}</file>`).join("\n"))
       // altimate_change end
-      const dir = path.dirname(skill.location)
-      const base = pathToFileURL(dir).href
 
-      const limit = 10
-      const files = await iife(async () => {
-        const arr = []
-        for await (const file of Ripgrep.files({
-          cwd: dir,
-          follow: false,
-          hidden: true,
-          signal: ctx.abort,
-        })) {
-          if (file.includes("SKILL.md")) {
-            continue
-          }
-          arr.push(path.resolve(dir, file))
-          if (arr.length >= limit) {
-            break
-          }
-        }
-        return arr
-      }).then((f) => f.map((file) => `<file>${file}</file>`).join("\n"))
+      // altimate_change start — telemetry instrumentation for skill loading
+      try {
+        const { Telemetry } = await import("@/altimate/telemetry")
+        Telemetry.track({
+          type: "skill_used",
+          timestamp: Date.now(),
+          session_id: ctx.sessionID,
+          message_id: ctx.messageID,
+          skill_name: skill.name,
+          skill_source: classifySkillSource(skill.location),
+          duration_ms: Date.now() - startTime,
+        })
+      } catch {
+        // Telemetry must never break skill loading
+      }
+      // altimate_change end
 
       return {
         title: `Loaded skill: ${skill.name}`,

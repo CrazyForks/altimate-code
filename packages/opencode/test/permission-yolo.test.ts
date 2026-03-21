@@ -255,19 +255,19 @@ describe("yolo mode: edge cases and adversarial scenarios", () => {
       // Simulate what ask() does when it encounters deny
       const result = PermissionNext.evaluate("bash", "DROP TABLE users", rules)
       if (result.action === "deny") {
-        throw new PermissionNext.DeniedError(
-          rules.filter((r) => r.permission === "bash"),
-        )
+        throw new PermissionNext.DeniedError({
+          ruleset: rules.filter((r) => r.permission === "bash"),
+        })
       }
     } catch (e) {
       expect(e).toBeInstanceOf(PermissionNext.DeniedError)
-      expect((e as PermissionNext.DeniedError).message).toContain("deny")
+      expect((e as InstanceType<typeof PermissionNext.DeniedError>).message).toContain("deny")
     }
   })
 
   test("RejectedError and CorrectedError are distinct", () => {
     const rejected = new PermissionNext.RejectedError()
-    const corrected = new PermissionNext.CorrectedError("use a different approach")
+    const corrected = new PermissionNext.CorrectedError({ feedback: "use a different approach" })
 
     expect(rejected.message).toContain("rejected")
     expect(corrected.message).toContain("use a different approach")
@@ -344,7 +344,7 @@ describe("yolo mode E2E: permission ask/reply flow", () => {
         })
 
         const pending = await PermissionNext.list()
-        expect(pending.some((p) => p.id === "per_yolo_e2e")).toBe(true)
+        expect(pending.some((p) => p.id === PermissionID.make("per_yolo_e2e"))).toBe(true)
 
         await PermissionNext.reply({
           requestID: PermissionID.make("per_yolo_e2e"),

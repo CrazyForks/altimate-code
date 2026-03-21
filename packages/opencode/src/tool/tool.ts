@@ -160,7 +160,6 @@ export namespace Tool {
             // Telemetry must never break tool execution
           }
           // altimate_change end
-          const result = await execute(args, ctx)
           // skip truncation for tools that handle it themselves
           if (result.metadata.truncated !== undefined) {
             return result

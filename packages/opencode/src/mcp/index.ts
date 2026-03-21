@@ -24,34 +24,6 @@ import { Bus } from "@/bus"
 import { TuiEvent } from "@/cli/cmd/tui/event"
 import open from "open"
 
-      // altimate_change start — show discovery toast after MCP connections complete
-      if (discoveryResult) {
-        const message = `Discovered ${discoveryResult.serverNames.length} new MCP server(s): ${discoveryResult.serverNames.join(", ")}. Run /discover-and-add-mcps to enable and add them.`
-        Bus.publish(TuiEvent.ToastShow, {
-          title: "MCP Servers Discovered",
-          message,
-          variant: "info",
-          duration: 8000,
-        }).catch(() => {})
-        Telemetry.track({
-          type: "mcp_discovery",
-          timestamp: Date.now(),
-          session_id: Telemetry.getContext().sessionId,
-          server_count: discoveryResult.serverNames.length,
-          server_names: discoveryResult.serverNames,
-          sources: discoveryResult.sources,
-        })
-      }
-      // altimate_change end
-      // altimate_change start — auto-discover MCP servers from external AI tool configs
-      let discoveryResult: { serverNames: string[]; sources: string[] } | null = null
-      try {
-        const { consumeDiscoveryResult } = await import("./discover")
-        discoveryResult = consumeDiscoveryResult()
-      } catch {
-        // Discovery module not loaded — skip
-      }
-      // altimate_change end
 export namespace MCP {
   const log = Log.create({ service: "mcp" })
   const DEFAULT_TIMEOUT = 30_000
@@ -240,6 +212,40 @@ export namespace MCP {
           }
         }),
       )
+
+      // altimate_change start — auto-discover MCP servers from external AI tool configs
+      let discoveryResult: { serverNames: string[]; sources: string[] } | null = null
+      try {
+        const { consumeDiscoveryResult } = await import("./discover")
+        discoveryResult = consumeDiscoveryResult()
+      } catch {
+        // Discovery module not loaded — skip
+      }
+      // altimate_change end
+
+      // altimate_change start — show discovery toast after MCP connections complete
+      if (discoveryResult) {
+        const message = `Discovered ${discoveryResult.serverNames.length} new MCP server(s): ${discoveryResult.serverNames.join(", ")}. Run /discover-and-add-mcps to enable and add them.`
+        Bus.publish(TuiEvent.ToastShow, {
+          title: "MCP Servers Discovered",
+          message,
+          variant: "info",
+          duration: 8000,
+        }).catch(() => {})
+        try {
+          const { Telemetry } = await import("../altimate/telemetry")
+          Telemetry.track({
+            type: "mcp_discovery",
+            timestamp: Date.now(),
+            session_id: Telemetry.getContext().sessionId,
+            server_count: discoveryResult.serverNames.length,
+            server_names: discoveryResult.serverNames,
+            sources: discoveryResult.sources,
+          })
+        } catch {}
+      }
+      // altimate_change end
+
       return {
         status,
         clients,

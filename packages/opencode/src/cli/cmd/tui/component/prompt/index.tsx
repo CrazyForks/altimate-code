@@ -34,6 +34,7 @@ import { useToast } from "../../ui/toast"
 import { useKV } from "../../context/kv"
 import { useTextareaKeybindings } from "../textarea-keybindings"
 import { DialogSkill } from "../dialog-skill"
+import { Log } from "@/util/log"
 // altimate_change start - import prompt enhancement
 import { enhancePrompt, isAutoEnhanceEnabled } from "@/altimate/enhance-prompt"
 let enhancingInProgress = false

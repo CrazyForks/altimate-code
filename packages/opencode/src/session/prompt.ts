@@ -52,6 +52,9 @@ import { decodeDataUrl } from "@/util/data-url"
 import { Fingerprint } from "../altimate/fingerprint"
 import { Config } from "../config/config"
 import { Tracer } from "../altimate/observability/tracing"
+import { Telemetry } from "../altimate/telemetry"
+import { MemoryPrompt } from "../memory"
+import { UNIFIED_INJECTION_BUDGET } from "../memory"
 // altimate_change end
 
 // @ts-ignore
@@ -1904,7 +1907,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     const ESCAPE_SENTINEL = "\x00ESCAPED_DOLLAR_ARGUMENTS\x00"
     let template = withArgs.replaceAll("$$ARGUMENTS", ESCAPE_SENTINEL).replaceAll("$ARGUMENTS", input.arguments).replaceAll(ESCAPE_SENTINEL, "$ARGUMENTS")
     // altimate_change end
-    let template = withArgs.replaceAll("$ARGUMENTS", input.arguments)
 
     // If command doesn't explicitly handle arguments (no $N or $ARGUMENTS placeholders)
     // but user provided arguments, append them to the template

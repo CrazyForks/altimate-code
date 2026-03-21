@@ -5,6 +5,10 @@ import { Config } from "../config/config"
 import { Instance } from "../project/instance"
 import { Identifier } from "../id/id"
 import PROMPT_INITIALIZE from "./template/initialize.txt"
+// altimate_change start — discover and feedback commands
+import PROMPT_DISCOVER from "./template/discover.txt"
+import PROMPT_FEEDBACK from "./template/feedback.txt"
+// altimate_change end
 import PROMPT_REVIEW from "./template/review.txt"
 // altimate_change start — configure commands for external AI CLIs
 import PROMPT_CONFIGURE_CLAUDE from "./template/configure-claude.txt"
@@ -58,8 +62,12 @@ export namespace Command {
 
   export const Default = {
     INIT: "init",
+    // altimate_change start — discover and feedback commands
+    DISCOVER: "discover",
+    // altimate_change end
     REVIEW: "review",
     // altimate_change start
+    FEEDBACK: "feedback",
     CONFIGURE_CLAUDE: "configure-claude",
     CONFIGURE_CODEX: "configure-codex",
     // altimate_change end
@@ -78,6 +86,17 @@ export namespace Command {
         },
         hints: hints(PROMPT_INITIALIZE),
       },
+      // altimate_change start — discover command
+      [Default.DISCOVER]: {
+        name: Default.DISCOVER,
+        description: "scan data stack and set up connections",
+        source: "command",
+        get template() {
+          return PROMPT_DISCOVER
+        },
+        hints: hints(PROMPT_DISCOVER),
+      },
+      // altimate_change end
       // altimate_change start — configure commands for external AI CLIs
       [Default.CONFIGURE_CLAUDE]: {
         name: Default.CONFIGURE_CLAUDE,
@@ -108,6 +127,17 @@ export namespace Command {
         subtask: true,
         hints: hints(PROMPT_REVIEW),
       },
+      // altimate_change start — feedback command
+      [Default.FEEDBACK]: {
+        name: Default.FEEDBACK,
+        description: "submit product feedback as a GitHub issue",
+        source: "command",
+        get template() {
+          return PROMPT_FEEDBACK
+        },
+        hints: hints(PROMPT_FEEDBACK),
+      },
+      // altimate_change end
     }
 
     for (const [name, command] of Object.entries(cfg.command ?? {})) {

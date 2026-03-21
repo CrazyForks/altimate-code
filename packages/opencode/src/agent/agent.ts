@@ -91,6 +91,38 @@ export namespace Agent {
     })
     const user = PermissionNext.fromConfig(cfg.permission ?? {})
 
+    // Safety deny rules that CANNOT be overridden by wildcard allows.
+    // Appended after user config so they always take precedence via last-match-wins.
+    const safetyDenials = PermissionNext.fromConfig({
+      bash: {
+        "DROP DATABASE *": "deny",
+        "DROP SCHEMA *": "deny",
+        "TRUNCATE *": "deny",
+        "drop database *": "deny",
+        "drop schema *": "deny",
+        "truncate *": "deny",
+        "Drop Database *": "deny",
+        "Drop Schema *": "deny",
+        "Truncate *": "deny",
+      },
+      // altimate_change start - SQL write safety denials
+      sql_execute_write: {
+        "DROP DATABASE *": "deny",
+        "DROP SCHEMA *": "deny",
+        "TRUNCATE *": "deny",
+        "drop database *": "deny",
+        "drop schema *": "deny",
+        "truncate *": "deny",
+        "Drop Database *": "deny",
+        "Drop Schema *": "deny",
+        "Truncate *": "deny",
+      },
+      // altimate_change end
+    })
+
+    // Combine user config with safety denials so every agent inherits them
+    const userWithSafety = PermissionNext.merge(user, safetyDenials)
+
     const result: Record<string, Info> = {
       // altimate_change start - 3 modes: builder, analyst, plan
       builder: {

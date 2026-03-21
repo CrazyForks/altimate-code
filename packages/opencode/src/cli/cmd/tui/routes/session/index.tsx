@@ -1037,7 +1037,7 @@ export function Session() {
   const cappedWidth = createMemo(() => {
     const cap = Flag.ALTIMATE_CONTENT_MAX_WIDTH
     if (!cap) return undefined
-    const available = ctx.width
+    const available = contentWidth()
     // +3 accounts for paddingLeft on this box
     const desired = cap + 3
     // On small screens, don't constrain — let it use full available width

@@ -144,19 +144,21 @@ export namespace SessionCompaction {
             observation_mask: mask,
           }
           // altimate_change end
-          part.state.time.compacted = Date.now()
           await Session.updatePart(part)
         }
       }
       log.info("pruned", { count: toPrune.length })
       // altimate_change start — telemetry for pruning
-      Telemetry.track({
-        type: "tool_outputs_pruned",
-        timestamp: Date.now(),
-        session_id: input.sessionID,
-        count: toPrune.length,
-        tokens_pruned: pruned,
-      })
+      try {
+        const { Telemetry } = await import("../altimate/telemetry")
+        Telemetry.track({
+          type: "tool_outputs_pruned",
+          timestamp: Date.now(),
+          session_id: input.sessionID,
+          count: toPrune.length,
+          tokens_pruned: pruned,
+        })
+      } catch {}
       // altimate_change end
     }
   }
@@ -178,13 +180,16 @@ export namespace SessionCompaction {
     input.abort.addEventListener("abort", () => {
       compactionAttempts.delete(input.sessionID)
     }, { once: true })
-    Telemetry.track({
-      type: "compaction_triggered",
-      timestamp: Date.now(),
-      session_id: input.sessionID,
-      trigger: input.auto ? "overflow_detection" : "error_recovery",
-      attempt,
-    })
+    try {
+      const { Telemetry } = await import("../altimate/telemetry")
+      Telemetry.track({
+        type: "compaction_triggered",
+        timestamp: Date.now(),
+        session_id: input.sessionID,
+        trigger: input.auto ? "overflow_detection" : "error_recovery",
+        attempt,
+      })
+    } catch {}
     if (attempt > 3) {
       log.warn("compaction circuit breaker", { sessionID: input.sessionID, attempt })
       return

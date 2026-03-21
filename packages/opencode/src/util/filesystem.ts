@@ -2,7 +2,7 @@ import { chmod, mkdir, readFile, writeFile } from "fs/promises"
 import { createWriteStream, existsSync, statSync } from "fs"
 import { lookup } from "mime-types"
 import { realpathSync } from "fs"
-import { dirname, join, relative, resolve as pathResolve } from "path"
+import { basename, dirname, isAbsolute, join, relative, resolve as pathResolve } from "path"
 import { Readable } from "stream"
 import { pipeline } from "stream/promises"
 import { Glob } from "./glob"
@@ -148,6 +148,56 @@ export namespace Filesystem {
   export function contains(parent: string, child: string) {
     return !relative(parent, child).startsWith("..")
   }
+
+  // altimate_change start — symlink-aware containment check
+  /**
+   * Like `contains()` but resolves symlinks via realpathSync so that a symlink
+   * pointing outside the parent is correctly rejected.
+   * Falls back to lexical `contains()` if resolution fails entirely.
+   */
+  export function containsReal(parent: string, child: string): boolean {
+    let realParent: string
+    try {
+      realParent = realpathSync(parent)
+    } catch {
+      // Parent doesn't exist — fall back to lexical check
+      return contains(parent, child)
+    }
+
+    // Try resolving the child directly (exists on disk)
+    try {
+      const realChild = realpathSync(child)
+      const rel = relative(realParent, realChild)
+      return !isAbsolute(rel) && !rel.startsWith("..")
+    } catch {
+      // Child doesn't exist — walk up to find nearest existing ancestor
+    }
+
+    // SECURITY: If the raw child path contains '..' segments, reject it.
+    const segments = child.split(/[/\\]/)
+    if (segments.includes("..")) return false
+
+    // Walk up the directory tree to find the nearest existing ancestor,
+    // then append the remaining segments.
+    let current = child
+    const trailing: string[] = []
+    while (true) {
+      try {
+        const realAncestor = realpathSync(current)
+        const realChild = trailing.length > 0 ? join(realAncestor, ...trailing) : realAncestor
+        const rel = relative(realParent, realChild)
+        return !isAbsolute(rel) && !rel.startsWith("..")
+      } catch {
+        const parent_ = dirname(current)
+        if (parent_ === current) {
+          return contains(parent, child)
+        }
+        trailing.unshift(basename(current))
+        current = parent_
+      }
+    }
+  }
+  // altimate_change end
 
   export async function findUp(target: string, start: string, stop?: string) {
     let current = start

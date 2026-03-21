@@ -704,12 +704,6 @@ export namespace Config {
           lsp: PermissionRule.optional(),
           doom_loop: PermissionAction.optional(),
           skill: PermissionRule.optional(),
-          // altimate_change start - auto MCP discovery toggle
-          auto_mcp_discovery: z
-            .boolean()
-            .default(true)
-            .describe("Auto-discover MCP servers from VS Code, Claude Code, Copilot, and Gemini configs at startup. Set to false to disable."),
-          // altimate_change end
         })
         .catchall(PermissionRule)
         .or(PermissionAction),
@@ -1289,6 +1283,12 @@ export namespace Config {
             .describe(
               "Automatically enhance prompts with AI before sending (default: false). Uses a small model to rewrite rough prompts into clearer versions.",
             ),
+          // altimate_change end
+          // altimate_change start - auto MCP discovery toggle
+          auto_mcp_discovery: z
+            .boolean()
+            .optional()
+            .describe("Auto-discover MCP servers from VS Code, Claude Code, Copilot, and Gemini configs at startup. Set to false to disable."),
           // altimate_change end
           // altimate_change start - env fingerprint skill selection toggle
           env_fingerprint_skill_selection: z
