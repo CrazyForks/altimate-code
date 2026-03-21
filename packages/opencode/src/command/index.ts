@@ -6,6 +6,10 @@ import { Instance } from "../project/instance"
 import { Identifier } from "../id/id"
 import PROMPT_INITIALIZE from "./template/initialize.txt"
 import PROMPT_REVIEW from "./template/review.txt"
+// altimate_change start — configure commands for external AI CLIs
+import PROMPT_CONFIGURE_CLAUDE from "./template/configure-claude.txt"
+import PROMPT_CONFIGURE_CODEX from "./template/configure-codex.txt"
+// altimate_change end
 import { MCP } from "../mcp"
 import { Skill } from "../skill"
 
@@ -55,6 +59,10 @@ export namespace Command {
   export const Default = {
     INIT: "init",
     REVIEW: "review",
+    // altimate_change start
+    CONFIGURE_CLAUDE: "configure-claude",
+    CONFIGURE_CODEX: "configure-codex",
+    // altimate_change end
   } as const
 
   const state = Instance.state(async () => {
@@ -70,6 +78,26 @@ export namespace Command {
         },
         hints: hints(PROMPT_INITIALIZE),
       },
+      // altimate_change start — configure commands for external AI CLIs
+      [Default.CONFIGURE_CLAUDE]: {
+        name: Default.CONFIGURE_CLAUDE,
+        description: "configure /altimate command in Claude Code",
+        source: "command",
+        get template() {
+          return PROMPT_CONFIGURE_CLAUDE
+        },
+        hints: hints(PROMPT_CONFIGURE_CLAUDE),
+      },
+      [Default.CONFIGURE_CODEX]: {
+        name: Default.CONFIGURE_CODEX,
+        description: "configure altimate skill in Codex CLI",
+        source: "command",
+        get template() {
+          return PROMPT_CONFIGURE_CODEX
+        },
+        hints: hints(PROMPT_CONFIGURE_CODEX),
+      },
+      // altimate_change end
       [Default.REVIEW]: {
         name: Default.REVIEW,
         description: "review changes [commit|branch|pr], defaults to uncommitted",

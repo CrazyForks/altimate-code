@@ -7,6 +7,15 @@ import { iife } from "@/util/iife"
 import { Flag } from "../flag/flag"
 import { Process } from "@/util/process"
 import { buffer } from "node:stream/consumers"
+// altimate_change start — telemetry (lazy import to avoid circular dep with Telemetry → Installation)
+let _telemetryCache: (typeof import("../telemetry"))["Telemetry"] | undefined
+async function getTelemetry() {
+  if (_telemetryCache) return _telemetryCache
+  const { Telemetry } = await import("../telemetry")
+  _telemetryCache = Telemetry
+  return Telemetry
+}
+// altimate_change end
 
 declare global {
   const OPENCODE_VERSION: string
@@ -112,6 +121,12 @@ export namespace Installation {
         name: "bun" as const,
         command: () => text(["bun", "pm", "ls", "-g"]),
       },
+      // altimate_change start — brew formula name
+      {
+        name: "brew" as const,
+        command: () => text(["brew", "list", "--formula", "altimate-code"]),
+      },
+      // altimate_change end
       {
         name: "brew" as const,
         command: () => text(["brew", "list", "--formula", "opencode"]),
@@ -136,6 +151,10 @@ export namespace Installation {
 
     for (const check of checks) {
       const output = await check.command()
+      // altimate_change start — package names for detection
+      const installedName =
+        check.name === "brew" ? "altimate-code" : check.name === "choco" || check.name === "scoop" ? "opencode" : "@altimateai/altimate-code"
+      // altimate_change end
       const installedName =
         check.name === "brew" || check.name === "choco" || check.name === "scoop" ? "opencode" : "opencode-ai"
       if (output.includes(installedName)) {
@@ -153,6 +172,15 @@ export namespace Installation {
     }),
   )
 
+  // altimate_change start — brew formula detection
+  async function getBrewFormula() {
+    const tapFormula = await text(["brew", "list", "--formula", "AltimateAI/tap/altimate-code"])
+    if (tapFormula.includes("altimate-code")) return "AltimateAI/tap/altimate-code"
+    const coreFormula = await text(["brew", "list", "--formula", "altimate-code"])
+    if (coreFormula.includes("altimate-code")) return "altimate-code"
+    return "AltimateAI/tap/altimate-code"
+  }
+  // altimate_change end
   async function getBrewFormula() {
     const tapFormula = await text(["brew", "list", "--formula", "anomalyco/tap/opencode"])
     if (tapFormula.includes("opencode")) return "anomalyco/tap/opencode"
@@ -215,6 +243,43 @@ export namespace Installation {
       default:
         throw new Error(`Unknown method: ${method}`)
     }
+    // altimate_change start — telemetry for upgrade result
+    const telemetryMethod = (["npm", "bun", "brew"].includes(method) ? method : "other") as "npm" | "bun" | "brew" | "other"
+    if (!result || result.code !== 0) {
+      const stderr =
+        method === "choco" ? "not running from an elevated command shell" : result?.stderr.toString("utf8") || ""
+      const T = await getTelemetry()
+      T.track({
+        type: "upgrade_attempted",
+        timestamp: Date.now(),
+        session_id: T.getContext().sessionId || "cli",
+        from_version: VERSION,
+        to_version: target,
+        method: telemetryMethod,
+        status: "error",
+        error: stderr.slice(0, 500),
+      })
+      throw new UpgradeFailedError({
+        stderr: stderr,
+      })
+    }
+    log.info("upgraded", {
+      method,
+      target,
+      stdout: result.stdout.toString(),
+      stderr: result.stderr.toString(),
+    })
+    const T2 = await getTelemetry()
+    T2.track({
+      type: "upgrade_attempted",
+      timestamp: Date.now(),
+      session_id: T2.getContext().sessionId || "cli",
+      from_version: VERSION,
+      to_version: target,
+      method: telemetryMethod,
+      status: "success",
+    })
+    // altimate_change end
     if (!result || result.code !== 0) {
       const stderr =
         method === "choco" ? "not running from an elevated command shell" : result?.stderr.toString("utf8") || ""
@@ -231,6 +296,9 @@ export namespace Installation {
     await Process.text([process.execPath, "--version"], { nothrow: true })
   }
 
+  // altimate_change start — normalize VERSION: strip "v" prefix from CI git tag
+  export const VERSION = typeof OPENCODE_VERSION === "string" ? OPENCODE_VERSION.trim().replace(/^v/, "") : "local"
+  // altimate_change end
   export const VERSION = typeof OPENCODE_VERSION === "string" ? OPENCODE_VERSION : "local"
   export const CHANNEL = typeof OPENCODE_CHANNEL === "string" ? OPENCODE_CHANNEL : "local"
   export const USER_AGENT = `opencode/${CHANNEL}/${VERSION}/${Flag.OPENCODE_CLIENT}`
@@ -247,6 +315,22 @@ export namespace Installation {
         if (!version) throw new Error(`Could not detect version for tap formula: ${formula}`)
         return version
       }
+      // altimate_change start — brew: use GitHub releases API as source of truth
+      // altimate-code is NOT in core homebrew, so formulae.brew.sh will 404.
+      // `brew info --json=v2` returns the LOCAL cached version which can be stale
+      // if the tap hasn't been updated — using it would cause `latest()` to return
+      // the already-installed version, making the upgrade command skip silently.
+      // GitHub releases API is the authoritative source for the actual latest version.
+      return fetch("https://api.github.com/repos/AltimateAI/altimate-code/releases/latest")
+        .then((res) => {
+          if (!res.ok) throw new Error(`GitHub releases API: ${res.status} ${res.statusText}`)
+          return res.json()
+        })
+        .then((data: any) => {
+          if (!data.tag_name) throw new Error("Missing tag_name in GitHub releases response")
+          return data.tag_name.replace(/^v/, "")
+        })
+      // altimate_change end
       return fetch("https://formulae.brew.sh/api/formula/opencode.json")
         .then((res) => {
           if (!res.ok) throw new Error(res.statusText)
@@ -262,6 +346,9 @@ export namespace Installation {
         return reg.endsWith("/") ? reg.slice(0, -1) : reg
       })
       const channel = CHANNEL
+      // altimate_change start — npm package name for version check
+      return fetch(`${registry}/@altimateai/altimate-code/${channel}`)
+      // altimate_change end
       return fetch(`${registry}/opencode-ai/${channel}`)
         .then((res) => {
           if (!res.ok) throw new Error(res.statusText)

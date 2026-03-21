@@ -48,6 +48,11 @@ import { iife } from "@/util/iife"
 import { Shell } from "@/shell/shell"
 import { Truncate } from "@/tool/truncation"
 import { decodeDataUrl } from "@/util/data-url"
+// altimate_change start - import fingerprint for env-based skill selection
+import { Fingerprint } from "../altimate/fingerprint"
+import { Config } from "../config/config"
+import { Tracer } from "../altimate/observability/tracing"
+// altimate_change end
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -294,6 +299,41 @@ export namespace SessionPrompt {
 
     let step = 0
     const session = await Session.get(sessionID)
+    // altimate_change start — session telemetry tracking
+    await Telemetry.init()
+    Telemetry.setContext({ sessionId: sessionID, projectId: Instance.project?.id ?? "" })
+    const sessionStartTime = Date.now()
+    let sessionTotalCost = 0
+    let sessionTotalTokens = 0
+    let toolCallCount = 0
+    let compactionCount = 0
+    let sessionAgentName = ""
+    let sessionHadError = false
+    let emergencySessionEndFired = false
+    const emergencySessionEnd = () => {
+      if (emergencySessionEndFired) return
+      emergencySessionEndFired = true
+      Telemetry.track({
+        type: "session_end",
+        timestamp: Date.now(),
+        session_id: sessionID,
+        total_cost: sessionTotalCost,
+        total_tokens: sessionTotalTokens,
+        tool_call_count: toolCallCount,
+        duration_ms: Date.now() - sessionStartTime,
+      })
+    }
+    process.once("beforeExit", emergencySessionEnd)
+    process.once("exit", emergencySessionEnd)
+    // altimate_change end
+    // altimate_change start - detect environment fingerprint at session start
+    const altCfg = await Config.get()
+    if (altCfg.experimental?.env_fingerprint_skill_selection === true) {
+      await Fingerprint.detect(Instance.directory, Instance.worktree).catch((e) => {
+        log.warn("fingerprint detection failed", { error: e })
+      })
+    }
+    // altimate_change end
     while (true) {
       SessionStatus.set(sessionID, { type: "busy" })
       log.info("loop", { step, sessionID })
@@ -624,10 +664,25 @@ export namespace SessionPrompt {
       }
 
       if (step === 1) {
+        // altimate_change start - reset training session tracking to avoid stale applied counts
+        MemoryPrompt.resetSession()
+        // altimate_change end
         SessionSummary.summarize({
           sessionID: sessionID,
           messageID: lastUser.id,
         })
+        // altimate_change start — session start telemetry
+        sessionAgentName = lastUser.agent
+        Telemetry.track({
+          type: "session_start",
+          timestamp: Date.now(),
+          session_id: sessionID,
+          model_id: model.id,
+          provider_id: model.providerID,
+          agent: lastUser.agent,
+          project_id: Instance.project?.id ?? "",
+        })
+        // altimate_change end
       }
 
       // Ephemerally wrap queued user messages with a reminder to stay on track
@@ -653,6 +708,12 @@ export namespace SessionPrompt {
 
       // Build system prompt, adding structured output instruction if needed
       const skills = await SystemPrompt.skills(agent)
+      // altimate_change start - unified context-aware injection for memory + training
+      const knowledgeInjection = Flag.ALTIMATE_DISABLE_MEMORY ? "" : await MemoryPrompt.inject(
+        UNIFIED_INJECTION_BUDGET,
+        { agent: agent.name, disableTraining: Flag.ALTIMATE_DISABLE_TRAINING },
+      )
+      // altimate_change end
       const system = [
         ...(await SystemPrompt.environment(model)),
         ...(skills ? [skills] : []),
@@ -663,6 +724,20 @@ export namespace SessionPrompt {
         system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
       }
 
+      // altimate_change start - trace system prompt once per loop() call.
+      // The system prompt is functionally identical across steps within a single
+      // loop() invocation (same agent, same environment). Agent switches re-enter
+      // loop() with step reset to 0, so each agent's prompt is traced separately.
+      if (step === 1) {
+        Tracer.active?.logSpan({
+          name: "system-prompt",
+          startTime: Date.now(),
+          endTime: Date.now(),
+          input: { agent: agent.name, step },
+          output: { parts: system.length, content: system.join("\n\n") },
+        })
+      }
+      // altimate_change end
       const result = await processor.process({
         user: lastUser,
         agent,
@@ -709,8 +784,19 @@ export namespace SessionPrompt {
         }
       }
 
+      // altimate_change start — accumulate session metrics
+      sessionTotalCost += processor.message.cost ?? 0
+      const t = processor.message.tokens
+      sessionTotalTokens += (t.input + t.output + t.reasoning + t.cache.read + t.cache.write)
+      const stepParts = await MessageV2.parts(processor.message.id)
+      toolCallCount += stepParts.filter((p) => p.type === "tool").length
+      if (processor.message.error) sessionHadError = true
+      // altimate_change end
       if (result === "stop") break
       if (result === "compact") {
+        // altimate_change start — track compaction count
+        compactionCount++
+        // altimate_change end
         await SessionCompaction.create({
           sessionID,
           agent: lastUser.agent,
@@ -722,6 +808,42 @@ export namespace SessionPrompt {
       continue
     }
     SessionCompaction.prune({ sessionID })
+    // altimate_change start — session end telemetry
+    const outcome = abort.aborted
+      ? "aborted"
+      : sessionHadError
+        ? "error"
+        : sessionTotalCost === 0 && toolCallCount === 0
+          ? "abandoned"
+          : "completed"
+    Telemetry.track({
+      type: "agent_outcome",
+      timestamp: Date.now(),
+      session_id: sessionID,
+      agent: sessionAgentName,
+      tool_calls: toolCallCount,
+      generations: step,
+      duration_ms: Date.now() - sessionStartTime,
+      cost: sessionTotalCost,
+      compactions: compactionCount,
+      outcome,
+    })
+    if (!emergencySessionEndFired) {
+      emergencySessionEndFired = true
+      process.off("beforeExit", emergencySessionEnd)
+      process.off("exit", emergencySessionEnd)
+      Telemetry.track({
+        type: "session_end",
+        timestamp: Date.now(),
+        session_id: sessionID,
+        total_cost: sessionTotalCost,
+        total_tokens: sessionTotalTokens,
+        tool_call_count: toolCallCount,
+        duration_ms: Date.now() - sessionStartTime,
+      })
+    }
+    await Telemetry.shutdown()
+    // altimate_change end
     for await (const item of MessageV2.stream(sessionID)) {
       if (item.info.role === "user") continue
       const queued = state()[sessionID]?.callbacks ?? []
@@ -1778,6 +1900,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       return args[argIndex]
     })
     const usesArgumentsPlaceholder = templateCommand.includes("$ARGUMENTS")
+    // altimate_change start — allow $$ARGUMENTS to produce literal $ARGUMENTS in output
+    const ESCAPE_SENTINEL = "\x00ESCAPED_DOLLAR_ARGUMENTS\x00"
+    let template = withArgs.replaceAll("$$ARGUMENTS", ESCAPE_SENTINEL).replaceAll("$ARGUMENTS", input.arguments).replaceAll(ESCAPE_SENTINEL, "$ARGUMENTS")
+    // altimate_change end
     let template = withArgs.replaceAll("$ARGUMENTS", input.arguments)
 
     // If command doesn't explicitly handle arguments (no $N or $ARGUMENTS placeholders)

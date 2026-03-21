@@ -42,6 +42,58 @@ import { PromptRefProvider, usePromptRef } from "./context/prompt"
 import { TuiConfigProvider } from "./context/tui-config"
 import { TuiConfig } from "@/config/tui"
 
+// altimate_change start - shared trace viewer server
+let traceViewerServer: ReturnType<typeof Bun.serve> | undefined
+let traceViewerTracesDir: string | undefined
+function getTraceViewerUrl(sessionID: string, tracesDir?: string): string {
+  if (!traceViewerServer) {
+    traceViewerTracesDir = Tracer.getTracesDir(tracesDir)
+    traceViewerServer = Bun.serve({
+      port: 0, // random available port
+      hostname: "127.0.0.1",
+      async fetch(req) {
+        const url = new URL(req.url)
+        // Extract session ID from path: /view/<sessionID> or /api/<sessionID>
+        const parts = url.pathname.split("/").filter(Boolean)
+        const action = parts[0] // "view" or "api"
+        const encodedSid = parts[1]
+        if (!encodedSid) return new Response("Usage: /view/<sessionID>", { status: 400 })
+        let sid: string
+        try {
+          sid = decodeURIComponent(encodedSid)
+        } catch {
+          return new Response("Invalid session ID encoding", { status: 400 })
+        }
+
+        const safeId = sid.replace(/[/\\.:]/g, "_")
+        const traceFile = `${traceViewerTracesDir}/${safeId}.json`
+
+        if (action === "api") {
+          try {
+            const content = await fsAsync.readFile(traceFile, "utf-8")
+            return new Response(content, {
+              headers: { "Content-Type": "application/json", "Cache-Control": "no-cache" },
+            })
+          } catch {
+            return new Response("{}", { status: 404 })
+          }
+        }
+
+        // Serve HTML viewer
+        try {
+          const trace = JSON.parse(await fsAsync.readFile(traceFile, "utf-8"))
+          const html = renderTraceViewer(trace, { live: true, apiPath: "/api/" + encodeURIComponent(sid) })
+          return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8" } })
+        } catch {
+          return new Response("Trace not found. Try again after the agent responds.", { status: 404 })
+        }
+      },
+    })
+  }
+  return `http://127.0.0.1:${traceViewerServer.port}/view/${encodeURIComponent(sessionID)}`
+}
+
+// altimate_change end — renderInlineViewer removed, now using renderTraceViewer from viewer.ts
 async function getTerminalBackgroundColor(): Promise<"dark" | "light"> {
   // can't set raw mode if not a TTY
   if (!process.stdin.isTTY) return "dark"
@@ -215,6 +267,38 @@ function App() {
   const exit = useExit()
   const promptRef = usePromptRef()
 
+  // altimate_change start - shared trace viewer helper
+  // Load custom tracing dir from config (same as worker.ts and trace.ts)
+  const [tracesDir, setTracesDir] = createSignal<string | undefined>(undefined)
+  onMount(async () => {
+    try {
+      const { Config } = await import("@/config/config")
+      const cfg = await Config.get()
+      setTracesDir(cfg.tracing?.dir)
+    } catch {
+      // Config failure should not prevent TUI from working
+    }
+  })
+
+  async function openTraceInBrowser(sessionID: string) {
+    try {
+      // Check if trace file exists on disk before opening browser
+      const safeId = sessionID.replace(/[/\\.:]/g, "_")
+      const traceFile = `${Tracer.getTracesDir(tracesDir())}/${safeId}.json`
+      const exists = await fsAsync.access(traceFile).then(() => true).catch(() => false)
+      if (!exists) {
+        toast.show({ variant: "warning", message: "Trace not available yet — send a prompt first", duration: 4000 })
+        return
+      }
+      const url = getTraceViewerUrl(sessionID, tracesDir())
+      await open(url)
+      toast.show({ variant: "info", message: `Trace viewer: ${url}`, duration: 6000 })
+    } catch (err) {
+      Log.Default.error(`Failed to open trace viewer: ${err}`)
+      toast.show({ variant: "warning", message: `Failed to open browser. Trace files: ${Tracer.getTracesDir(tracesDir())}`, duration: 8000 })
+    }
+  }
+  // altimate_change end
   useKeyboard((evt) => {
     if (!Flag.OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT) return
     if (!renderer.getSelection()) return
@@ -593,6 +677,26 @@ function App() {
       onSelect: () => exit(),
       category: "System",
     },
+    // altimate_change start - trace history command
+    {
+      title: "View traces",
+      value: "trace.view",
+      category: "Debug",
+      slash: {
+        name: "trace",
+      },
+      onSelect: (dialog) => {
+        const currentSessionID = route.data.type === "session" ? route.data.sessionID : undefined
+        dialog.replace(() => (
+          <DialogTraceList
+            currentSessionID={currentSessionID}
+            tracesDir={tracesDir()}
+            onSelect={openTraceInBrowser}
+          />
+        ))
+      },
+    },
+    // altimate_change end
     {
       title: "Toggle debug panel",
       category: "System",
@@ -729,6 +833,23 @@ function App() {
     })
   })
 
+  // altimate_change start — branding: altimate upgrade
+  sdk.event.on(Installation.Event.UpdateAvailable.type, (evt) => {
+    kv.set(UPGRADE_KV_KEY, evt.properties.version)
+    toast.show({
+      variant: "info",
+      title: "Update Available",
+      message: `Altimate Code v${evt.properties.version} is available. Run 'altimate upgrade' to update manually.`,
+      duration: 10000,
+    })
+  })
+
+  sdk.event.on(Installation.Event.Updated.type, () => {
+    if (kv.get(UPGRADE_KV_KEY) !== Installation.VERSION) {
+      kv.set(UPGRADE_KV_KEY, Installation.VERSION)
+    }
+  })
+  // altimate_change end
   sdk.event.on(Installation.Event.UpdateAvailable.type, (evt) => {
     toast.show({
       variant: "info",

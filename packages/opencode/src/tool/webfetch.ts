@@ -7,6 +7,9 @@ import { abortAfterAny } from "../util/abort"
 const MAX_RESPONSE_SIZE = 5 * 1024 * 1024 // 5MB
 const DEFAULT_TIMEOUT = 30 * 1000 // 30 seconds
 const MAX_TIMEOUT = 120 * 1000 // 2 minutes
+// altimate_change start — branding: honest bot UA
+const HONEST_UA = "altimate-code/1.0 (+https://github.com/AltimateAI/altimate-code)"
+// altimate_change end
 
 export const WebFetchTool = Tool.define("webfetch", {
   description: DESCRIPTION,

@@ -45,6 +45,9 @@ import { z } from "zod"
 import { LoadAPIKeyError } from "ai"
 import type { AssistantMessage, Event, OpencodeClient, SessionMessageResponse, ToolPart } from "@opencode-ai/sdk/v2"
 import { applyPatch } from "diff"
+// altimate_change start - yolo mode
+import { Flag } from "@/flag/flag"
+// altimate_change end
 
 type ModeOption = { id: string; name: string; description?: string }
 type ModelOption = { modelId: string; name: string }
@@ -188,6 +191,16 @@ export namespace ACP {
           const session = this.sessionManager.tryGet(permission.sessionID)
           if (!session) return
 
+          // altimate_change start - yolo mode: auto-approve without asking ACP client
+          if (Flag.ALTIMATE_CLI_YOLO) {
+            await this.sdk.permission.reply({
+              requestID: permission.id,
+              reply: "once",
+              directory: session.cwd,
+            })
+            return
+          }
+          // altimate_change end
           const prev = this.permissionQueues.get(permission.sessionID) ?? Promise.resolve()
           const next = prev
             .then(async () => {
@@ -520,6 +533,24 @@ export namespace ACP {
     async initialize(params: InitializeRequest): Promise<InitializeResponse> {
       log.info("initialize", { protocolVersion: params.protocolVersion })
 
+      // altimate_change start — branding: altimate auth
+      const authMethod: AuthMethod = {
+        description: "Run `altimate auth login` in the terminal",
+        name: "Login with altimate",
+        id: "altimate-login",
+      }
+
+      // If client supports terminal-auth capability, use that instead.
+      if (params.clientCapabilities?._meta?.["terminal-auth"] === true) {
+        authMethod._meta = {
+          "terminal-auth": {
+            command: "altimate",
+            args: ["auth", "login"],
+            label: "Altimate Code Login",
+          },
+        }
+      }
+      // altimate_change end
       const authMethod: AuthMethod = {
         description: "Run `opencode auth login` in the terminal",
         name: "Login with opencode",

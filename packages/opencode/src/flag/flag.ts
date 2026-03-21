@@ -3,12 +3,33 @@ function truthy(key: string) {
   return value === "true" || value === "1"
 }
 
+// altimate_change start - ALTIMATE_CLI_CLIENT with OPENCODE_CLIENT fallback
+Object.defineProperty(Flag, "ALTIMATE_CLI_CLIENT", {
+  get() {
+    return process.env["ALTIMATE_CLI_CLIENT"] ?? process.env["OPENCODE_CLIENT"] ?? "cli"
+  },
+  enumerable: true,
+  configurable: false,
+})
+// altimate_change end
 function falsy(key: string) {
   const value = process.env[key]?.toLowerCase()
   return value === "false" || value === "0"
 }
 
+// altimate_change start - dual env var support: ALTIMATE_CLI_* (primary) + OPENCODE_* (fallback)
+function altTruthy(altKey: string, openKey: string) {
+  return truthy(altKey) || truthy(openKey)
+}
+
+function altEnv(altKey: string, openKey: string) {
+  return process.env[altKey] ?? process.env[openKey]
+}
+// altimate_change end
 export namespace Flag {
+  // altimate_change start - ALTIMATE_CLI_CLIENT flag with OPENCODE_CLIENT fallback
+  export declare const ALTIMATE_CLI_CLIENT: string
+  // altimate_change end
   export const OPENCODE_AUTO_SHARE = truthy("OPENCODE_AUTO_SHARE")
   export const OPENCODE_GIT_BASH_PATH = process.env["OPENCODE_GIT_BASH_PATH"]
   export const OPENCODE_CONFIG = process.env["OPENCODE_CONFIG"]
@@ -17,6 +38,20 @@ export namespace Flag {
   export const OPENCODE_CONFIG_CONTENT = process.env["OPENCODE_CONFIG_CONTENT"]
   export const OPENCODE_DISABLE_AUTOUPDATE = truthy("OPENCODE_DISABLE_AUTOUPDATE")
   export const OPENCODE_DISABLE_PRUNE = truthy("OPENCODE_DISABLE_PRUNE")
+  // altimate_change start - opt-out for AI Teammate training system
+  export const ALTIMATE_DISABLE_TRAINING = altTruthy("ALTIMATE_DISABLE_TRAINING", "OPENCODE_DISABLE_TRAINING")
+  // altimate_change end
+  // altimate_change start - global opt-out for Altimate Memory
+  export const ALTIMATE_DISABLE_MEMORY = altTruthy("ALTIMATE_DISABLE_MEMORY", "OPENCODE_DISABLE_MEMORY")
+  // altimate_change end
+  // altimate_change start - opt-in for session-end auto-extraction
+  export const ALTIMATE_MEMORY_AUTO_EXTRACT = altTruthy("ALTIMATE_MEMORY_AUTO_EXTRACT", "OPENCODE_MEMORY_AUTO_EXTRACT")
+  // altimate_change end
+  // altimate_change start - yolo mode: auto-approve all permission prompts
+  // Declared here, defined via dynamic getter below (must evaluate at access time
+  // because --yolo CLI flag sets the env var in middleware after module load)
+  export declare const ALTIMATE_CLI_YOLO: boolean
+  // altimate_change end
   export const OPENCODE_DISABLE_TERMINAL_TITLE = truthy("OPENCODE_DISABLE_TERMINAL_TITLE")
   export const OPENCODE_PERMISSION = process.env["OPENCODE_PERMISSION"]
   export const OPENCODE_DISABLE_DEFAULT_PLUGINS = truthy("OPENCODE_DISABLE_DEFAULT_PLUGINS")
@@ -59,6 +94,18 @@ export namespace Flag {
   export const OPENCODE_EXPERIMENTAL_PLAN_MODE = OPENCODE_EXPERIMENTAL || truthy("OPENCODE_EXPERIMENTAL_PLAN_MODE")
   export const OPENCODE_EXPERIMENTAL_WORKSPACES = OPENCODE_EXPERIMENTAL || truthy("OPENCODE_EXPERIMENTAL_WORKSPACES")
   export const OPENCODE_EXPERIMENTAL_MARKDOWN = !falsy("OPENCODE_EXPERIMENTAL_MARKDOWN")
+  // altimate_change start - calm mode: combines smooth streaming + line buffering + width cap
+  // Single flag enables all three optimizations. Individual flags still work for fine-grained control.
+  export const ALTIMATE_CALM_MODE = altTruthy("ALTIMATE_CALM_MODE", "OPENCODE_CALM_MODE")
+  export const ALTIMATE_SMOOTH_STREAMING =
+    ALTIMATE_CALM_MODE || altTruthy("ALTIMATE_SMOOTH_STREAMING", "OPENCODE_SMOOTH_STREAMING")
+  export const ALTIMATE_LINE_STREAMING =
+    ALTIMATE_CALM_MODE || altTruthy("ALTIMATE_LINE_STREAMING", "OPENCODE_LINE_STREAMING")
+  export const ALTIMATE_CONTENT_MAX_WIDTH =
+    number("ALTIMATE_CONTENT_MAX_WIDTH") ??
+    number("OPENCODE_CONTENT_MAX_WIDTH") ??
+    (ALTIMATE_CALM_MODE ? 100 : undefined)
+  // altimate_change end
   export const OPENCODE_MODELS_URL = process.env["OPENCODE_MODELS_URL"]
   export const OPENCODE_MODELS_PATH = process.env["OPENCODE_MODELS_PATH"]
   export const OPENCODE_DISABLE_CHANNEL_DB = truthy("OPENCODE_DISABLE_CHANNEL_DB")
@@ -84,6 +131,22 @@ Object.defineProperty(Flag, "OPENCODE_DISABLE_PROJECT_CONFIG", {
   configurable: false,
 })
 
+// altimate_change start - yolo mode: dynamic getter (set at runtime via --yolo flag)
+// ALTIMATE_CLI_YOLO is authoritative when defined; only falls back to OPENCODE_YOLO when undefined
+Object.defineProperty(Flag, "ALTIMATE_CLI_YOLO", {
+  get() {
+    const alt = process.env["ALTIMATE_CLI_YOLO"]
+    if (alt !== undefined) {
+      const v = alt.toLowerCase()
+      return v === "true" || v === "1"
+    }
+    const oc = process.env["OPENCODE_YOLO"]?.toLowerCase()
+    return oc === "true" || oc === "1"
+  },
+  enumerable: true,
+  configurable: false,
+})
+// altimate_change end
 // Dynamic getter for OPENCODE_TUI_CONFIG
 // This must be evaluated at access time, not module load time,
 // because tests and external tooling may set this env var at runtime
