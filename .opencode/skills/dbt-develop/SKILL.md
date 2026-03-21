@@ -32,7 +32,7 @@ description: Create and modify dbt models — staging, intermediate, marts, incr
 
 Before writing any SQL:
 - Read the task requirements carefully
-- Identify which layer this model belongs to (staging, intermediate, mart)
+- Identify which layer this model belongs to (staging, intermediate, mart — or for Data Vault: staging, raw vault, business vault, mart)
 - Check existing models for naming conventions and patterns
 - **Check dependencies:** If `packages.yml` exists, check for `dbt_packages/` or `package-lock.yml`. Only run `dbt deps` if packages are declared but not yet installed.
 

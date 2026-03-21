@@ -112,10 +112,13 @@ with staged as (
     from {{ ref('stg_erp__customers') }}
 )
 
-select * from staged
+select staged.*
+from staged
 
 {% if is_incremental() %}
-where hub_customer_hk not in (select hub_customer_hk from {{ this }})
+left join {{ this }} as existing
+    on staged.hub_customer_hk = existing.hub_customer_hk
+where existing.hub_customer_hk is null
 {% endif %}
 ```
 
@@ -123,7 +126,56 @@ where hub_customer_hk not in (select hub_customer_hk from {{ this }})
 - Contains: hash key, business key(s), `load_datetime`, `record_source`
 - **No descriptive attributes** — those belong in satellites
 - One row per unique business key, ever
+- Use `LEFT JOIN ... WHERE NULL` (not `NOT IN` — avoids NULL pitfalls and is faster on large tables)
 - Materialization: `incremental` with hash key as `unique_key`
+
+### Multi-Source Hub Loading
+
+A key Data Vault advantage: the same hub can be loaded from multiple sources.
+
+```sql
+-- hub_customer.sql (fed by ERP + CRM)
+{{ config(
+    materialized='incremental',
+    unique_key='hub_customer_hk'
+) }}
+
+with erp_customers as (
+    select hub_customer_hk, customer_number, load_datetime, record_source
+    from {{ ref('stg_erp__customers') }}
+),
+
+crm_customers as (
+    select hub_customer_hk, customer_number, load_datetime, record_source
+    from {{ ref('stg_crm__customers') }}
+),
+
+all_sources as (
+    select * from erp_customers
+    union all
+    select * from crm_customers
+),
+
+deduplicated as (
+    select distinct
+        hub_customer_hk,
+        customer_number,
+        load_datetime,
+        record_source
+    from all_sources
+)
+
+select deduplicated.*
+from deduplicated
+
+{% if is_incremental() %}
+left join {{ this }} as existing
+    on deduplicated.hub_customer_hk = existing.hub_customer_hk
+where existing.hub_customer_hk is null
+{% endif %}
+```
+
+**Key point:** Both sources must hash the same business key (`customer_number`) identically. Use consistent `upper(trim(...))` in all staging models.
 
 ## Link — Relationships
 
@@ -149,10 +201,13 @@ with staged as (
     from {{ ref('stg_erp__orders') }}
 )
 
-select * from staged
+select staged.*
+from staged
 
 {% if is_incremental() %}
-where lnk_order_hk not in (select lnk_order_hk from {{ this }})
+left join {{ this }} as existing
+    on staged.lnk_order_hk = existing.lnk_order_hk
+where existing.lnk_order_hk is null
 {% endif %}
 ```
 
@@ -216,6 +271,108 @@ select * from new_records
 - New row inserted **only when attributes change** (hashdiff comparison)
 - Composite key: parent hash key + `load_datetime`
 - Split satellites by rate of change (e.g., `sat_customer_contact` vs `sat_customer_segment`)
+
+> **Dialect note:** `qualify` (used in satellite queries) works on Snowflake, BigQuery, and Databricks. For PostgreSQL/Redshift, wrap the `qualify` in a subquery with `row_number()` and filter in an outer `WHERE` clause.
+
+### Satellite on a Link
+
+Satellites can also attach to links (not just hubs). The pattern is identical — replace the hub hash key with the link hash key:
+
+```sql
+-- sat_order_details.sql
+{{ config(
+    materialized='incremental',
+    unique_key=['lnk_order_hk', 'load_datetime']
+) }}
+
+with staged as (
+    select
+        lnk_order_hk,
+        sat_order_details_hashdiff,
+        order_amount,
+        order_status,
+        order_date,
+        load_datetime,
+        record_source
+    from {{ ref('stg_erp__orders') }}
+),
+
+{% if is_incremental() %}
+latest as (
+    select
+        lnk_order_hk,
+        sat_order_details_hashdiff
+    from {{ this }}
+    qualify row_number() over (
+        partition by lnk_order_hk
+        order by load_datetime desc
+    ) = 1
+),
+{% endif %}
+
+new_records as (
+    select staged.*
+    from staged
+    {% if is_incremental() %}
+    left join latest
+        on staged.lnk_order_hk = latest.lnk_order_hk
+    where latest.lnk_order_hk is null
+       or staged.sat_order_details_hashdiff != latest.sat_order_details_hashdiff
+    {% endif %}
+)
+
+select * from new_records
+```
+
+### Effectivity Satellite
+
+Tracks when a link relationship is active or inactive (e.g., customer-account assignment periods):
+
+```sql
+-- sat_customer_account_eff.sql
+{{ config(
+    materialized='incremental',
+    unique_key=['lnk_customer_account_hk', 'load_datetime']
+) }}
+
+with staged as (
+    select
+        lnk_customer_account_hk,
+        effective_from,
+        effective_to,  -- NULL = currently active
+        load_datetime,
+        record_source
+    from {{ ref('stg_crm__customer_accounts') }}
+),
+
+{% if is_incremental() %}
+latest as (
+    select
+        lnk_customer_account_hk,
+        effective_from,
+        effective_to
+    from {{ this }}
+    qualify row_number() over (
+        partition by lnk_customer_account_hk
+        order by load_datetime desc
+    ) = 1
+),
+{% endif %}
+
+new_records as (
+    select staged.*
+    from staged
+    {% if is_incremental() %}
+    left join latest
+        on staged.lnk_customer_account_hk = latest.lnk_customer_account_hk
+    where latest.lnk_customer_account_hk is null
+       or staged.effective_from != latest.effective_from
+       or staged.effective_to is distinct from latest.effective_to
+    {% endif %}
+)
+
+select * from new_records
+```
 
 ## Business Vault — Derived Logic
 
@@ -311,6 +468,7 @@ select * from final
 | Link | `lnk_` | `lnk_order`, `lnk_customer_product` |
 | Satellite (on hub) | `sat_` | `sat_customer_details`, `sat_customer_contact` |
 | Satellite (on link) | `sat_` | `sat_order_details` |
+| Effectivity satellite | `sat_` + `_eff` | `sat_customer_account_eff` |
 | Business vault | `bv_` | `bv_customer_lifetime` |
 | Staging | `stg_` | `stg_erp__customers` |
 | Mart | `fct_`/`dim_` | `dim_customers`, `fct_orders` |
@@ -370,12 +528,23 @@ models:
 | Building marts directly on raw vault without business vault | Business vault is where derived logic belongs |
 | One giant satellite per hub | Split by rate of change (contact info vs. preferences vs. status) |
 | Forgetting `record_source` | Essential for tracing data lineage across sources |
+| Using `NOT IN` for incremental dedup | Use `LEFT JOIN ... WHERE NULL` — `NOT IN` fails with NULLs and is slower |
+| Inconsistent hashing across sources | All staging models must cast, trim, and upper-case business keys identically before hashing |
+| Not using `IS DISTINCT FROM` for NULL-safe comparisons | `!=` treats NULL as unknown — use `IS DISTINCT FROM` in hashdiff comparisons where NULLs are possible |
 
 ## dbt Packages for Data Vault
 
-Two popular packages provide macros that automate hub/link/satellite generation:
+**[automate-dv](https://automate-dv.readthedocs.io/)** (formerly dbtvault) provides macros that automate hub/link/satellite generation:
 
-- **[dbtvault](https://dbtvault.readthedocs.io/)** (by Datavault) — `dbt_vault.hub()`, `dbt_vault.link()`, `dbt_vault.sat()`
-- **[automate-dv](https://automate-dv.readthedocs.io/)** (community) — similar macro library
+```sql
+-- Example: hub using automate-dv macro
+{{ automate_dv.hub(
+    src_pk='hub_customer_hk',
+    src_nk='customer_number',
+    src_ldts='load_datetime',
+    src_source='record_source',
+    source_model='stg_erp__customers'
+) }}
+```
 
-These packages reduce boilerplate by generating the incremental + hashdiff logic from YAML config. Consider using them for larger vaults.
+The package reduces boilerplate by generating the incremental + hashdiff + deduplication logic from declarative config. Consider using it for larger vaults with many hubs/links/satellites.
