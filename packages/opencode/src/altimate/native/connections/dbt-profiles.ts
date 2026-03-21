@@ -121,7 +121,7 @@ export async function parseDbtProfiles(
   } catch {
     try {
       // Fall back to `js-yaml`
-      // @ts-expect-error — optional fallback dependency
+      // @ts-ignore — optional fallback dependency
       const jsYaml = await import("js-yaml")
       const jsYamlLib = jsYaml.default || jsYaml
       parseYaml = (content: string) => jsYamlLib.load(content)

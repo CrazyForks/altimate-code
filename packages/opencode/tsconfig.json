@@ -19,5 +19,9 @@
         "namespaceImportPackages": ["effect", "@effect/*"]
       }
     ]
-  }
+  },
+  "exclude": [
+    "src/altimate/native/**",
+    "test/altimate/**"
+  ]
 }
