@@ -49,6 +49,9 @@ However, there are **5 critical gaps** that must be addressed to win against the
 - Cannot handle Snowflake micro-partition design
 - $20/month per user adds up at scale (28-person team = $6,720/year)
 - Expanding beyond Snowflake is a catch-up play, not a native capability
+- Hidden cost risk: Cortex AI functions use token-based billing — a single query processing 1.18B records cost nearly $5,000 in credits. Cost management controls only became GA in March 2026
+- Many Cortex AI features still in preview (not GA), creating production risk
+- "Any data, anywhere" expansion (Feb 2026) is currently limited to dbt + Airflow only
 
 **Notable Quote:** "Generic coding agents don't naturally see or safely operate on the Snowflake context — their context often stops at the repo. That's the gap Cortex Code is built to close."
 
