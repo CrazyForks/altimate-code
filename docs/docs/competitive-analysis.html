@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Competitive Analysis: Altimate Code vs. Cortex Code vs. Genie Code</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 900px; margin: 40px auto; padding: 0 20px; color: #1a1a1a; line-height: 1.6; }
+  h1 { font-size: 28px; border-bottom: 3px solid #2563eb; padding-bottom: 12px; }
+  h2 { font-size: 22px; color: #1e40af; margin-top: 40px; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; }
+  h3 { font-size: 18px; color: #374151; margin-top: 28px; }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14px; }
+  th, td { border: 1px solid #d1d5db; padding: 10px 14px; text-align: left; }
+  th { background: #2563eb; color: white; font-weight: 600; }
+  tr:nth-child(even) { background: #f9fafb; }
+  blockquote { border-left: 4px solid #2563eb; margin: 16px 0; padding: 12px 20px; background: #eff6ff; color: #1e40af; font-style: italic; }
+  .meta { color: #6b7280; font-size: 14px; margin-bottom: 24px; }
+  .gap-tag { display: inline-block; background: #fef3c7; color: #92400e; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; margin-left: 8px; }
+  .gap-tag.high { background: #fee2e2; color: #991b1b; }
+  .gap-tag.medium { background: #fef3c7; color: #92400e; }
+  ul, ol { margin: 8px 0; }
+  li { margin: 4px 0; }
+  strong { color: #111827; }
+  hr { border: none; border-top: 1px solid #e5e7eb; margin: 32px 0; }
+  .persona-card { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin: 16px 0; }
+  .persona-card h4 { margin-top: 0; color: #1e40af; }
+  .narrative { background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 16px 20px; margin: 12px 0; }
+  .action-item { background: #eff6ff; border-left: 4px solid #2563eb; padding: 8px 16px; margin: 8px 0; }
+  @media print { body { max-width: 100%; margin: 20px; } }
+</style>
+</head>
+<body>
+
+<h1>Competitive Analysis: Altimate Code vs. Cortex Code vs. Genie Code</h1>
+<p class="meta"><strong>Last Updated:</strong> March 2026 &nbsp;|&nbsp; <strong>Status:</strong> Internal strategic document<br>
+<strong>Research Sources:</strong> Product pages, documentation, press releases, benchmarks, community discussions, and multi-persona validation</p>
+
+<hr>
+
+<h2>Executive Summary</h2>
+
+<p><strong>Snowflake Cortex Code</strong> (launched Nov 2025, $20/month) and <strong>Databricks Genie Code</strong> (launched March 2026, free with Databricks) are platform-native AI coding agents targeting data engineers within their respective ecosystems. Both are generating significant market buzz.</p>
+
+<p><strong>Altimate Code</strong> has three fundamental advantages they cannot replicate:</p>
+<ol>
+  <li><strong>Multi-warehouse support</strong> — the only tool that works across Snowflake, BigQuery, Databricks, and 7+ other databases simultaneously</li>
+  <li><strong>Deterministic accuracy</strong> — 100% F1 on SQL anti-patterns (0 false positives), 100% edge-match on lineage, powered by Rust parsers (not LLM pattern matching)</li>
+  <li><strong>No vendor lock-in</strong> — open-source, model-agnostic, local-first</li>
+</ol>
+
+<p>However, there are <strong>5 critical gaps</strong> that must be addressed to win against these competitors.</p>
+
+<hr>
+
+<h2>Competitor Deep-Dive</h2>
+
+<h3>Snowflake Cortex Code</h3>
+
+<table>
+  <tr><th>Attribute</th><th>Details</th></tr>
+  <tr><td><strong>Maker</strong></td><td>Snowflake</td></tr>
+  <tr><td><strong>Launched</strong></td><td>November 2025 (GA Feb 2026)</td></tr>
+  <tr><td><strong>Pricing</strong></td><td>Snowsight: Free. CLI: $20/month + Snowflake consumption</td></tr>
+  <tr><td><strong>Foundation</strong></td><td>Built on Claude Code's architecture (same core, Snowflake tools layered on top)</td></tr>
+  <tr><td><strong>Users</strong></td><td>4,400+ since launch</td></tr>
+  <tr><td><strong>Models</strong></td><td>Claude Opus 4.6, Sonnet 4.5, GPT 5.2</td></tr>
+  <tr><td><strong>Interfaces</strong></td><td>Snowsight (web) + CLI</td></tr>
+</table>
+
+<p><strong>Key Strengths:</strong></p>
+<ul>
+  <li>Deep Snowflake context: RBAC, schemas, governance rules, query history, costs — all natively understood</li>
+  <li>ADE-Bench: 65% task completion (vs. 58% for vanilla Claude Code), 50% fewer total calls, 2x fewer file reads, 4x fewer bash commands</li>
+  <li>dbt + Apache Airflow support (GA since Feb 2026)</li>
+  <li>MCP integrations (Jira, GitHub)</li>
+  <li>Standalone CLI subscription — first Snowflake product usable without a Snowflake deployment</li>
+  <li>Customer proof: evolv Consulting reported 500+ hours saved (~$100K value) in first 20 days</li>
+  <li>Extensible: custom tools, skills, subagents, hooks, profiles, AGENTS.md</li>
+  <li>Shared skill layer with Claude Code (interoperable skills)</li>
+</ul>
+
+<p><strong>Key Weaknesses:</strong></p>
+<ul>
+  <li>Platform lock-in: primarily Snowflake, expanding slowly</li>
+  <li>No VS Code extension yet (CLI only for local dev)</li>
+  <li>Cannot handle Snowflake micro-partition design</li>
+  <li>$20/month per user adds up at scale (28-person team = $6,720/year)</li>
+  <li>Hidden cost risk: Cortex AI functions use token-based billing — a single query processing 1.18B records cost nearly $5,000 in credits</li>
+  <li>Many Cortex AI features still in preview (not GA), creating production risk</li>
+  <li>"Any data, anywhere" expansion (Feb 2026) is currently limited to dbt + Airflow only</li>
+</ul>
+
+<blockquote>"Generic coding agents don't naturally see or safely operate on the Snowflake context — their context often stops at the repo. That's the gap Cortex Code is built to close."</blockquote>
+
+<hr>
+
+<h3>Databricks Genie Code</h3>
+
+<table>
+  <tr><th>Attribute</th><th>Details</th></tr>
+  <tr><td><strong>Maker</strong></td><td>Databricks</td></tr>
+  <tr><td><strong>Launched</strong></td><td>March 11, 2026 (replaced Databricks Assistant)</td></tr>
+  <tr><td><strong>Pricing</strong></td><td>Free with Databricks (compute: ~$0.75/DBU)</td></tr>
+  <tr><td><strong>Users</strong></td><td>All Databricks customers</td></tr>
+  <tr><td><strong>Interfaces</strong></td><td>Notebooks, SQL Editor, AI Playground</td></tr>
+</table>
+
+<p><strong>Key Strengths:</strong></p>
+<ul>
+  <li><strong>Proactive monitoring</strong>: Watches Lakeflow pipelines and AI models, triages failures, handles DBR upgrades autonomously — most differentiated capability</li>
+  <li><strong>Persistent memory</strong>: Learns coding preferences, remembers datasets, retains context across sessions</li>
+  <li>Benchmark: 77.1% success rate on real-world data science tasks (vs. 32.1% for leading coding agents with Databricks MCP)</li>
+  <li>Deep Unity Catalog integration for governance</li>
+  <li>Multi-model architecture (routes tasks to best model)</li>
+  <li>Quotient AI acquisition (team that led GitHub Copilot quality improvement)</li>
+  <li>Free for existing Databricks customers</li>
+</ul>
+
+<p><strong>Key Weaknesses:</strong></p>
+<ul>
+  <li><strong>Complete Databricks lock-in</strong>: Useless for teams on Snowflake, BigQuery, or multi-cloud</li>
+  <li>Nondeterministic outputs: different results for same prompt</li>
+  <li>Risk of destructive actions if given full autonomy</li>
+  <li>Cost opacity: no granular monitoring for Genie Code compute spend</li>
+  <li>Scale constraints: 30 tables/views per Genie space, 20 questions/minute per workspace</li>
+  <li>Geographic restrictions on some features</li>
+</ul>
+
+<blockquote>"We're moving from a world where data professionals are assisted by AI to one where AI agents are doing the work." — CEO Ali Ghodsi</blockquote>
+
+<hr>
+
+<h2>Head-to-Head Comparison</h2>
+
+<table>
+  <tr><th>Capability</th><th>Altimate Code</th><th>Cortex Code</th><th>Genie Code</th></tr>
+  <tr><td><strong>Price</strong></td><td>Free (MIT)</td><td>$20/user/month</td><td>Free (compute costs)</td></tr>
+  <tr><td><strong>Warehouses Supported</strong></td><td>10+</td><td>Snowflake (expanding)</td><td>Databricks only</td></tr>
+  <tr><td><strong>SQL Anti-Pattern Detection</strong></td><td>19 rules, 100% F1, 0 false positives</td><td>Via LLM (non-deterministic)</td><td>Via LLM (non-deterministic)</td></tr>
+  <tr><td><strong>Column-Level Lineage</strong></td><td>100% edge-match, deterministic</td><td>LLM-based</td><td>Via Unity Catalog</td></tr>
+  <tr><td><strong>dbt Integration Depth</strong></td><td>12 purpose-built skills, manifest parsing, test gen</td><td>GA support (depth unclear)</td><td>Not primary focus</td></tr>
+  <tr><td><strong>Cross-Dialect SQL Translation</strong></td><td>8+ dialects, deterministic</td><td>No</td><td>No</td></tr>
+  <tr><td><strong>PII Detection</strong></td><td>30+ patterns, 15 categories, deterministic</td><td>Snowflake AI_REDACT function</td><td>No</td></tr>
+  <tr><td><strong>FinOps / Cost Optimization</strong></td><td>Credit analysis, expensive queries, right-sizing</td><td>Snowflake cost context</td><td>No</td></tr>
+  <tr><td><strong>Proactive Monitoring</strong></td><td>No</td><td>No</td><td><strong>Yes (key differentiator)</strong></td></tr>
+  <tr><td><strong>Persistent Memory</strong></td><td>Training system (git-based)</td><td>Session-scoped</td><td><strong>Yes, cross-session</strong></td></tr>
+  <tr><td><strong>Live Warehouse Context</strong></td><td>Schema indexing, metadata</td><td><strong>Deep (RBAC, query history, costs)</strong></td><td><strong>Deep (Unity Catalog)</strong></td></tr>
+  <tr><td><strong>CI/CD Integration</strong></td><td>CLI + JSON output + exit codes</td><td>CLI (extensible)</td><td>No</td></tr>
+  <tr><td><strong>Agent Safety Modes</strong></td><td>Builder/Analyst/Plan</td><td>Three-tier approval, RBAC</td><td>Minimal (destructive risk)</td></tr>
+  <tr><td><strong>Model Agnostic</strong></td><td><strong>Yes (any LLM)</strong></td><td>Claude + GPT 5.2</td><td>Multi-model (Databricks-hosted)</td></tr>
+  <tr><td><strong>Open Source</strong></td><td><strong>Yes (MIT)</strong></td><td>No</td><td>No</td></tr>
+  <tr><td><strong>VS Code Extension</strong></td><td><strong>Yes</strong></td><td>No</td><td>No</td></tr>
+  <tr><td><strong>Orchestrator Support</strong></td><td>No</td><td>Airflow (GA)</td><td>Lakeflow (native)</td></tr>
+  <tr><td><strong>MCP Support</strong></td><td>No</td><td>Yes (Jira, GitHub)</td><td>Yes (Jira, GitHub, etc.)</td></tr>
+</table>
+
+<hr>
+
+<h2>Where Altimate Code Wins (Prove It's Better)</h2>
+
+<h3>1. Multi-Warehouse Is the Killer Differentiator</h3>
+<ul>
+  <li><strong>Reality:</strong> Most data teams are multi-cloud. A team using Snowflake + BigQuery (common) cannot use Cortex Code for BigQuery or Genie Code at all.</li>
+  <li><strong>Positioning:</strong> "Cortex Code is great if you ONLY use Snowflake. Genie Code is great if you ONLY use Databricks. Altimate Code works everywhere."</li>
+  <li><strong>Proof point needed:</strong> Showcase demonstrating a single session working across Snowflake and BigQuery simultaneously.</li>
+</ul>
+
+<h3>2. Deterministic Accuracy Is Non-Negotiable for Production</h3>
+<ul>
+  <li><strong>Reality:</strong> Cortex Code's 65% ADE-Bench and Genie Code's 77.1% benchmark sound impressive until you realize they FAIL 1-in-3 to 1-in-4 tasks.</li>
+  <li><strong>Positioning:</strong> "Our SQL analysis isn't AI-generated guesses — it's deterministic, benchmarked parsing with 100% accuracy and 0 false positives."</li>
+  <li><strong>Proof point needed:</strong> Published benchmark comparison on same datasets.</li>
+</ul>
+
+<h3>3. No Lock-In, No Vendor Risk</h3>
+<ul>
+  <li><strong>Reality:</strong> Cortex Code is Snowflake's play to deepen lock-in. Genie Code makes you entirely dependent on Databricks.</li>
+  <li><strong>Positioning:</strong> "Your data stack will evolve. Your AI tool should evolve with it, not chain you to one vendor."</li>
+</ul>
+
+<h3>4. dbt Is a First-Class Citizen, Not an Add-On</h3>
+<ul>
+  <li><strong>Reality:</strong> Altimate Code has 12 purpose-built dbt skills with manifest parsing, test generation, model scaffolding, and auto-documentation.</li>
+  <li><strong>Positioning:</strong> "We were built for dbt from day one. They bolted it on."</li>
+</ul>
+
+<h3>5. CI/CD Integration</h3>
+<ul>
+  <li><strong>Reality:</strong> Genie Code has zero CI story. Cortex Code's CLI is extensible but new.</li>
+  <li><strong>Positioning:</strong> "Run PII detection and anti-pattern checks on every PR. Automatically."</li>
+</ul>
+
+<h3>6. Cost of Ownership</h3>
+<ul>
+  <li><strong>Reality:</strong> Altimate Code is free. Cortex Code is $20/user/month. Genie Code is "free" but with hidden compute costs.</li>
+  <li><strong>Positioning:</strong> "Enterprise-grade data engineering AI for $0. Plus your choice of LLM."</li>
+</ul>
+
+<hr>
+
+<h2>Critical Gaps to Fill</h2>
+
+<h3>GAP 1: Proactive Monitoring & Alerting <span class="gap-tag high">HIGH PRIORITY</span></h3>
+<p><strong>Who does it better:</strong> Genie Code</p>
+<p><strong>What they do:</strong> Monitors Lakeflow pipelines in the background, triages failures, handles DBR upgrades, investigates anomalies before the team notices.</p>
+<p><strong>Recommendation:</strong></p>
+<ul>
+  <li>Implement background monitoring agent that watches dbt Cloud/Airflow/Dagster job status</li>
+  <li>Auto-triage failures: distinguish transient errors from data issues</li>
+  <li>Generate draft fixes with lineage-aware context</li>
+  <li>Send Slack/Teams alerts with diagnosis and suggested action</li>
+  <li><strong>This single feature could be Altimate Code's biggest competitive differentiator</strong> — because it would work across ALL orchestrators</li>
+</ul>
+
+<h3>GAP 2: Persistent Memory Across Sessions <span class="gap-tag medium">MEDIUM-HIGH</span></h3>
+<p><strong>Who does it better:</strong> Genie Code</p>
+<p><strong>Recommendation:</strong></p>
+<ul>
+  <li>Implement automatic learning from resolved incidents</li>
+  <li>Track frequently used models/tables and proactively offer context</li>
+  <li>Build "institutional knowledge" that accumulates as the team uses the tool</li>
+  <li>Key differentiator: make this git-based so it's transparent and auditable</li>
+</ul>
+
+<h3>GAP 3: MCP (Model Context Protocol) Support <span class="gap-tag high">HIGH PRIORITY</span></h3>
+<p><strong>Who does it better:</strong> Both Cortex Code and Genie Code</p>
+<p><strong>Recommendation:</strong></p>
+<ul>
+  <li>Ship MCP server support (as a client consuming MCP servers)</li>
+  <li>Prioritize: GitHub, Jira, Slack, dbt Cloud API, Airflow API</li>
+  <li>This is table-stakes functionality that competitors already ship</li>
+</ul>
+
+<h3>GAP 4: Orchestrator-Aware Context <span class="gap-tag medium">MEDIUM</span></h3>
+<p><strong>Who does it better:</strong> Cortex Code (Airflow GA), Genie Code (Lakeflow native)</p>
+<p><strong>Recommendation:</strong></p>
+<ul>
+  <li>Add Airflow DAG parsing and awareness</li>
+  <li>Add Dagster graph awareness</li>
+  <li>Integrate with dbt Cloud run history and job metadata</li>
+</ul>
+
+<h3>GAP 5: Data Quality Platform Integration <span class="gap-tag medium">MEDIUM</span></h3>
+<p><strong>Who does it better:</strong> Neither (opportunity)</p>
+<p><strong>Recommendation:</strong></p>
+<ul>
+  <li>Integrate with popular data observability tools (Elementary first)</li>
+  <li>Correlate dbt test failures with column-level lineage to identify root causes</li>
+  <li><strong>This is a greenfield opportunity</strong> — being first here would be a major differentiator</li>
+</ul>
+
+<hr>
+
+<h2>Persona-Validated Insights</h2>
+
+<div class="persona-card">
+  <h4>Senior Data Engineer (IC Practitioner)</h4>
+  <p><strong>Would choose:</strong> Altimate Code</p>
+  <p><strong>Deciding factor:</strong> "I have ONE toolchain for my ENTIRE stack. My dbt project doesn't care which warehouse it's targeting."</p>
+  <p><strong>Top gap:</strong> No live warehouse context</p>
+  <p><strong>What would make it a no-brainer:</strong> Background monitoring + orchestrator awareness + data quality integration</p>
+</div>
+
+<div class="persona-card">
+  <h4>VP of Data / Head of Data Platform (Buyer)</h4>
+  <p><strong>Would choose:</strong> Start with Altimate Code (zero procurement friction), evaluate for 60 days</p>
+  <p><strong>Deciding factor:</strong> FinOps savings potential. "If the tool identifies $400K in Snowflake waste during a 60-day trial, I can justify a $50-100K/year enterprise contract trivially."</p>
+  <p><strong>Top concerns:</strong> Company risk (startup vs. Snowflake/Databricks), no enterprise support SLA, no SSO/SAML</p>
+</div>
+
+<div class="persona-card">
+  <h4>Analytics Engineer (dbt Power User)</h4>
+  <p><strong>Would choose:</strong> Altimate Code</p>
+  <p><strong>Deciding factor:</strong> "The top three features that would save me the most time are ALL in Altimate Code" — auto-generated dbt YAML/tests (4-6 hrs/week), column-level lineage (3-4 hrs/week), SQL anti-pattern detection (2-3 hrs/week)</p>
+  <p><strong>Top gap:</strong> No Semantic Layer awareness (MetricFlow, dbt Semantic Layer, Cube)</p>
+</div>
+
+<div class="persona-card">
+  <h4>Data Platform Engineer (DevOps/Security)</h4>
+  <p><strong>Would choose:</strong> Altimate Code</p>
+  <p><strong>Deciding factor:</strong> "Local-first, model-agnostic means I can point it at a self-hosted LLM behind my VPC. No data leaves the perimeter."</p>
+  <p><strong>Top gaps:</strong> No SOC 2 / compliance certifications, no SCIM provisioning, no IP allowlisting for the web UI</p>
+</div>
+
+<hr>
+
+<h2>Strategic Recommendations</h2>
+
+<h3>Immediate Actions (0-30 days)</h3>
+<div class="action-item">1. Publish a competitive benchmark page comparing deterministic accuracy against LLM-based approaches</div>
+<div class="action-item">2. Create "Why Not Cortex Code" / "Why Not Genie Code" landing pages</div>
+<div class="action-item">3. Build a FinOps ROI calculator</div>
+<div class="action-item">4. Document the security story — data flow diagram showing what stays local vs. what goes to LLM</div>
+
+<h3>Short-Term (1-3 months)</h3>
+<div class="action-item">5. Ship MCP client support — GitHub, Jira, Slack integrations</div>
+<div class="action-item">6. Build proactive monitoring — start with dbt Cloud job monitoring</div>
+<div class="action-item">7. Add Semantic Layer awareness — MetricFlow/dbt Semantic Layer support</div>
+<div class="action-item">8. Create enterprise tier pricing — SSO/SAML, audit logs, support SLA</div>
+
+<h3>Medium-Term (3-6 months)</h3>
+<div class="action-item">9. Implement persistent memory — automatic learning, git-based and auditable</div>
+<div class="action-item">10. Add orchestrator context — Airflow DAG parsing, Dagster graph awareness</div>
+<div class="action-item">11. Integrate data quality platforms — Elementary, Great Expectations, Monte Carlo</div>
+<div class="action-item">12. Pursue SOC 2 Type II</div>
+
+<h3>Long-Term (6-12 months)</h3>
+<div class="action-item">13. Build "Altimate Code for CI" — purpose-built CI/CD product</div>
+<div class="action-item">14. Create a marketplace for community skills and training packs</div>
+<div class="action-item">15. Ship background agents — always-on monitoring across all warehouses</div>
+
+<hr>
+
+<h2>Key Competitive Narratives</h2>
+
+<div class="narrative">
+  <h4>Against Cortex Code</h4>
+  <p>"Cortex Code is a great tool — if Snowflake is the only warehouse you'll ever use. But data teams are multi-cloud. When you need to translate SQL between Snowflake and BigQuery, trace lineage across warehouses, or optimize costs across your entire stack, Cortex Code stops at the Snowflake border. Altimate Code works everywhere, with deterministic accuracy, and costs nothing."</p>
+</div>
+
+<div class="narrative">
+  <h4>Against Genie Code</h4>
+  <p>"Genie Code's proactive monitoring is impressive — inside Databricks. But most data teams don't run everything on Databricks. And Genie Code's outputs are non-deterministic — you can't trust lineage or anti-pattern detection that gives different answers each time. Altimate Code gives you 100% accuracy, works across 10+ databases, and you own the code."</p>
+</div>
+
+<div class="narrative">
+  <h4>Against Both</h4>
+  <p>"Platform vendors want to sell you their AI tool because it deepens lock-in. That's their business model, not your best interest. Altimate Code is open-source, model-agnostic, and works with your entire data stack — not just one vendor's slice of it."</p>
+</div>
+
+<hr>
+
+<h2>Bottom Line</h2>
+<p><strong>Altimate Code already wins on technical merit</strong> for multi-warehouse teams, dbt-heavy workflows, and organizations that value deterministic accuracy and no vendor lock-in.</p>
+<p><strong>To turn this into market dominance</strong>, fill the five gaps above — especially proactive monitoring (Gap 1) and MCP support (Gap 3). These are the features that make platform-native tools feel magical, and they're not inherently tied to a single platform.</p>
+<p><strong>The FinOps story is the fastest path to enterprise revenue</strong> — a VP of Data will pay for a tool that saves $400K in warehouse costs, no questions asked.</p>
+
+</body>
+</html>
