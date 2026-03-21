@@ -211,12 +211,12 @@ export namespace Installation {
           ...process.env,
         }
         if (formula.includes("/")) {
-          const tap = await Process.run(["brew", "tap", "anomalyco/tap"], { env, nothrow: true })
+          const tap = await Process.run(["brew", "tap", "AltimateAI/tap"], { env, nothrow: true })
           if (tap.code !== 0) {
             result = tap
             break
           }
-          const repo = await Process.text(["brew", "--repo", "anomalyco/tap"], { env, nothrow: true })
+          const repo = await Process.text(["brew", "--repo", "AltimateAI/tap"], { env, nothrow: true })
           if (repo.code !== 0) {
             result = repo
             break
