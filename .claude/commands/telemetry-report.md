@@ -15,30 +15,30 @@ Parse the lookback value now. If not provided, use `2h`.
 
 ## Step 1: Preflight
 
-Run this smoke query to verify Azure auth AND App Insights resource access:
+Run this smoke query to verify Azure auth AND Log Analytics workspace access:
 
 ```bash
-az monitor app-insights query --app altimate-code-os --resource-group altimate-code \
-  --analytics-query "customEvents | take 1" --output json
+az monitor log-analytics query --workspace "b511e30e-4b93-4093-98a5-b80fc4718111" \
+  --analytics-query "AppEvents | take 1" --output json
 ```
 
 If this command fails, report the exact error to the user and **STOP** — do not proceed to Step 2.
 
 ---
 
-## Step 2: Query App Insights (6 queries)
+## Step 2: Query Log Analytics (6 queries)
 
-Run all 6 queries using `az monitor app-insights query --app altimate-code-os --resource-group altimate-code --analytics-query "..." --output json`.
+Run all 6 queries using `az monitor log-analytics query --workspace "b511e30e-4b93-4093-98a5-b80fc4718111" --analytics-query "..." --output json`.
 
 Replace `2h` with the lookback value from arguments parsing.
 
 **Q1: Core Failures (threshold: >10)**
 ```kql
-customEvents
-| where timestamp > ago(2h) and name == "core_failure"
-| extend err = tostring(customDimensions.error_message),
-         tool = tostring(customDimensions.tool_name),
-         err_class = tostring(customDimensions.error_class)
+AppEvents
+| where TimeGenerated > ago(2h) and Name == "core_failure"
+| extend err = tostring(Properties.error_message),
+         tool = tostring(Properties.tool_name),
+         err_class = tostring(Properties.error_class)
 | summarize count() by err, tool, err_class
 | where count_ > 10
 | order by count_ desc
@@ -46,31 +46,31 @@ customEvents
 
 **Q2: Provider Errors (threshold: >5)**
 ```kql
-customEvents
-| where timestamp > ago(2h) and name == "provider_error"
-| extend provider = tostring(customDimensions.provider_id),
-         model = tostring(customDimensions.model_id),
-         err_type = tostring(customDimensions.error_type)
+AppEvents
+| where TimeGenerated > ago(2h) and Name == "provider_error"
+| extend provider = tostring(Properties.provider_id),
+         model = tostring(Properties.model_id),
+         err_type = tostring(Properties.error_type)
 | summarize count() by provider, model, err_type
 | where count_ > 5
 ```
 
 **Q3: Application Errors (threshold: >5)**
 ```kql
-customEvents
-| where timestamp > ago(2h) and name == "error"
-| extend err_name = tostring(customDimensions.error_name),
-         context = tostring(customDimensions.context)
+AppEvents
+| where TimeGenerated > ago(2h) and Name == "error"
+| extend err_name = tostring(Properties.error_name),
+         context = tostring(Properties.context)
 | summarize count() by err_name, context
 | where count_ > 5
 ```
 
 **Q4: Agent Failure Rate (threshold: >15% or >10 errors, min 5 sessions)**
 ```kql
-customEvents
-| where timestamp > ago(2h) and name == "agent_outcome"
-| extend outcome = tostring(customDimensions.outcome),
-         agent = tostring(customDimensions.agent)
+AppEvents
+| where TimeGenerated > ago(2h) and Name == "agent_outcome"
+| extend outcome = tostring(Properties.outcome),
+         agent = tostring(Properties.agent)
 | summarize total = count(),
             errors = countif(outcome in ("error", "abandoned", "aborted"))
             by agent
@@ -81,20 +81,20 @@ customEvents
 
 **Q5: Engine Errors (threshold: >2)**
 ```kql
-customEvents
-| where timestamp > ago(2h) and name == "engine_error"
-| extend phase = tostring(customDimensions.phase),
-         err = tostring(customDimensions.error_message)
+AppEvents
+| where TimeGenerated > ago(2h) and Name == "engine_error"
+| extend phase = tostring(Properties.phase),
+         err = tostring(Properties.error_message)
 | summarize count() by phase, err
 | where count_ > 2
 ```
 
 **Q6: SQL Failures (threshold: >5)**
 ```kql
-customEvents
-| where timestamp > ago(2h) and name == "sql_execute_failure"
-| extend err = tostring(customDimensions.error_message),
-         wh_type = tostring(customDimensions.warehouse_type)
+AppEvents
+| where TimeGenerated > ago(2h) and Name == "sql_execute_failure"
+| extend err = tostring(Properties.error_message),
+         wh_type = tostring(Properties.warehouse_type)
 | summarize count() by err, wh_type
 | where count_ > 5
 ```
