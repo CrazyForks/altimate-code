@@ -59,16 +59,28 @@ describe("altimate_core_validate error propagation", () => {
   })
 
   test("surfaces errors when schema provided but table missing from schema", async () => {
-    // Uses real napi handler — schema has 'orders' but SQL references 'users'
-    // The handler completes successfully (no exception) — it reports findings
-    // via data.valid/data.errors, so success=true (the operation itself succeeded).
+    // Mock: dispatcher returns what the real handler produces when SQL references
+    // a table not in the schema — valid=false with error details in data.errors[].
+    // The handler completes normally (success=true), findings live in data fields.
+    Dispatcher.register("altimate_core.validate" as any, async () => ({
+      success: true,
+      data: {
+        valid: false,
+        errors: [{ code: "E001", kind: { type: "TableNotFound" }, message: "Table 'users' not found", suggestions: ["orders"] }],
+        warnings: [],
+      },
+    }))
+
     const { AltimateCoreValidateTool } = await import("../../src/altimate/tools/altimate-core-validate")
     const tool = await AltimateCoreValidateTool.init()
     const result = await tool.execute({ sql: "SELECT * FROM users", schema_context: { orders: { id: "INT" } } }, stubCtx())
 
     expect(result.metadata.success).toBe(true)
     // Validation findings are reported via data fields, not as tool errors
-    expect(result.metadata.valid).toBeDefined()
+    expect(result.metadata.valid).toBe(false)
+    // The finding message is surfaced in metadata.error for telemetry
+    expect(result.metadata.error).toContain("Table 'users' not found")
+    expect(telemetryWouldExtract(result.metadata)).not.toBe("unknown error")
   })
 })
 
@@ -89,12 +101,25 @@ describe("altimate_core_semantics error propagation", () => {
   })
 
   test("surfaces errors when schema provided but table missing from schema", async () => {
+    // Mock: dispatcher returns validation_errors when semantic check can't plan the query.
+    // Handler completes normally (success=true per ok() contract), but validation_errors
+    // in the data signal the engine couldn't analyze. The tool wrapper treats this as failure.
+    Dispatcher.register("altimate_core.semantics" as any, async () => ({
+      success: true,
+      data: {
+        valid: false,
+        issues: [],
+        validation_errors: ["Failed to resolve table 'users' in schema"],
+      },
+    }))
+
     const { AltimateCoreSemanticsTool } = await import("../../src/altimate/tools/altimate-core-semantics")
     const tool = await AltimateCoreSemanticsTool.init()
     const result = await tool.execute({ sql: "SELECT * FROM users", schema_context: { orders: { id: "INT" } } }, stubCtx())
 
-    expect(result.metadata.success).toBe(false)
-    expect(result.metadata.error).toBeDefined()
+    // Handler completed (success=true), but validation_errors are surfaced in metadata.error
+    expect(result.metadata.success).toBe(true)
+    expect(result.metadata.error).toContain("Failed to resolve table")
     expect(telemetryWouldExtract(result.metadata)).not.toBe("unknown error")
   })
 })
@@ -116,12 +141,24 @@ describe("altimate_core_equivalence error propagation", () => {
   })
 
   test("surfaces errors when schema provided but table missing from schema", async () => {
+    // Mock: handler completes normally (success=true per ok() contract), but
+    // validation_errors signal the engine couldn't plan the query.
+    // The equivalence wrapper uses isRealFailure to override success to false.
+    Dispatcher.register("altimate_core.equivalence" as any, async () => ({
+      success: true,
+      data: {
+        equivalent: false,
+        validation_errors: ["Failed to resolve table 'users' in schema"],
+      },
+    }))
+
     const { AltimateCoreEquivalenceTool } = await import("../../src/altimate/tools/altimate-core-equivalence")
     const tool = await AltimateCoreEquivalenceTool.init()
     const result = await tool.execute({ sql1: "SELECT * FROM users", sql2: "SELECT * FROM users", schema_context: { orders: { id: "INT" } } }, stubCtx())
 
+    // Equivalence wrapper overrides success via isRealFailure when validation_errors exist
     expect(result.metadata.success).toBe(false)
-    expect(result.metadata.error).toBeDefined()
+    expect(result.metadata.error).toContain("Failed to resolve table")
     expect(telemetryWouldExtract(result.metadata)).not.toBe("unknown error")
   })
 })
@@ -386,11 +423,20 @@ describe("extractors handle empty message fields", () => {
   beforeEach(() => Dispatcher.reset())
 
   test("validate extractor filters out empty messages", async () => {
+    // Mock: dispatcher returns errors with empty message fields
+    Dispatcher.register("altimate_core.validate" as any, async () => ({
+      success: true,
+      data: {
+        valid: false,
+        errors: [{ code: "E001", kind: { type: "TableNotFound" }, message: "", suggestions: [] }],
+        warnings: [],
+      },
+    }))
+
     const { AltimateCoreValidateTool } = await import("../../src/altimate/tools/altimate-core-validate")
     const tool = await AltimateCoreValidateTool.init()
-    // Schema provided but table missing — real handler returns error with actual message
     const result = await tool.execute({ sql: "SELECT * FROM nonexistent_table", schema_context: { users: { id: "INT" } } }, stubCtx())
-    // The error should never be empty string
+    // The error should never be empty string — .filter(Boolean) removes it
     if (result.metadata.error !== undefined) {
       expect(result.metadata.error).not.toBe("")
     }
