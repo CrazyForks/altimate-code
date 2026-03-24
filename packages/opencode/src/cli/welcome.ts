@@ -3,6 +3,9 @@ import path from "path"
 import os from "os"
 import { Installation } from "../installation"
 import { EOL } from "os"
+// altimate_change start — import Telemetry for first_launch event
+import { Telemetry } from "../altimate/telemetry"
+// altimate_change end
 
 const APP_NAME = "altimate-code"
 const MARKER_FILE = ".installed-version"
@@ -40,6 +43,16 @@ export function showWelcomeBannerIfNeeded(): void {
     const currentVersion = Installation.VERSION
     // altimate_change end
     const isUpgrade = installedVersion === currentVersion && installedVersion !== "local"
+
+    // altimate_change start — track first launch for new user counting (privacy-safe: only version + machine_id)
+    Telemetry.track({
+      type: "first_launch",
+      timestamp: Date.now(),
+      session_id: "",
+      version: installedVersion,
+      is_upgrade: isUpgrade,
+    })
+    // altimate_change end
 
     if (!isUpgrade) return
 

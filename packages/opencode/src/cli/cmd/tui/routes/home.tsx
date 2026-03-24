@@ -38,7 +38,13 @@ export function Home() {
     return Object.values(sync.data.mcp).filter((x) => x.status === "connected").length
   })
 
-  const isFirstTimeUser = createMemo(() => sync.data.session.length === 0)
+  // altimate_change start — fix race condition: don't show beginner UI until sessions loaded
+  const isFirstTimeUser = createMemo(() => {
+    // Don't evaluate until sessions have actually loaded (avoid flash of beginner UI)
+    if (sync.status === "loading" || sync.status === "partial") return false
+    return sync.data.session.length === 0
+  })
+  // altimate_change end
   const tipsHidden = createMemo(() => kv.get("tips_hidden", false))
   const showTips = createMemo(() => {
     // Always show tips — first-time users need guidance the most
