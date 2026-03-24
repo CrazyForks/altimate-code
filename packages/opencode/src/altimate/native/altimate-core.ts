@@ -92,7 +92,7 @@ register("altimate_core.validate", async (params) => {
     const schema = schemaOrEmpty(params.schema_path, params.schema_context)
     const raw = await core.validate(params.sql, schema)
     const data = toData(raw)
-    return ok(data.valid !== false, data)
+    return ok(true, data)
   } catch (e) {
     return fail(e)
   }
@@ -104,7 +104,7 @@ register("altimate_core.lint", async (params) => {
     const schema = schemaOrEmpty(params.schema_path, params.schema_context)
     const raw = core.lint(params.sql, schema)
     const data = toData(raw)
-    return ok(data.clean !== false, data)
+    return ok(true, data)
   } catch (e) {
     return fail(e)
   }
@@ -115,7 +115,7 @@ register("altimate_core.safety", async (params) => {
   try {
     const raw = core.scanSql(params.sql)
     const data = toData(raw)
-    return ok(data.safe !== false, data)
+    return ok(true, data)
   } catch (e) {
     return fail(e)
   }
@@ -147,7 +147,7 @@ register("altimate_core.transpile", async (params) => {
       }
     }
 
-    return ok(data.success !== false, data)
+    return ok(true, data)
   } catch (e) {
     return fail(e)
   }
@@ -159,7 +159,7 @@ register("altimate_core.explain", async (params) => {
     const schema = schemaOrEmpty(params.schema_path, params.schema_context)
     const raw = await core.explain(params.sql, schema)
     const data = toData(raw)
-    return ok(data.valid !== false, data)
+    return ok(true, data)
   } catch (e) {
     return fail(e)
   }
@@ -193,7 +193,7 @@ register("altimate_core.fix", async (params) => {
       params.max_iterations ?? undefined,
     )
     const data = toData(raw)
-    return ok(data.fixed !== false, data)
+    return ok(true, data)
   } catch (e) {
     return fail(e)
   }
@@ -205,7 +205,7 @@ register("altimate_core.policy", async (params) => {
     const schema = schemaOrEmpty(params.schema_path, params.schema_context)
     const raw = await core.checkPolicy(params.sql, schema, params.policy_json)
     const data = toData(raw)
-    return ok(data.allowed !== false, data)
+    return ok(true, data)
   } catch (e) {
     return fail(e)
   }
@@ -217,7 +217,7 @@ register("altimate_core.semantics", async (params) => {
     const schema = schemaOrEmpty(params.schema_path, params.schema_context)
     const raw = await core.checkSemantics(params.sql, schema)
     const data = toData(raw)
-    return ok(data.valid !== false, data)
+    return ok(true, data)
   } catch (e) {
     return fail(e)
   }
@@ -240,7 +240,7 @@ register("altimate_core.equivalence", async (params) => {
     const schema = schemaOrEmpty(params.schema_path, params.schema_context)
     const raw = await core.checkEquivalence(params.sql1, params.sql2, schema)
     const data = toData(raw)
-    return ok(data.equivalent !== false, data)
+    return ok(true, data)
   } catch (e) {
     return fail(e)
   }
@@ -256,7 +256,7 @@ register("altimate_core.migration", async (params) => {
     )
     const raw = core.analyzeMigration(params.new_ddl, schema)
     const data = toData(raw)
-    return ok(data.safe !== false, data)
+    return ok(true, data)
   } catch (e) {
     return fail(e)
   }
@@ -291,7 +291,7 @@ register("altimate_core.correct", async (params) => {
     const schema = schemaOrEmpty(params.schema_path, params.schema_context)
     const raw = await core.correct(params.sql, schema)
     const data = toData(raw)
-    return ok(data.status !== "unfixable", data)
+    return ok(true, data)
   } catch (e) {
     return fail(e)
   }
@@ -337,7 +337,7 @@ register("altimate_core.resolve_term", async (params) => {
     const raw = core.resolveTerm(params.term, schema)
     // Rust returns an array of matches — wrap for consistent object shape
     const matches = Array.isArray(raw) ? JSON.parse(JSON.stringify(raw)) : []
-    return ok(matches.length > 0, { matches })
+    return ok(true, { matches })
   } catch (e) {
     return fail(e)
   }
@@ -374,7 +374,7 @@ register("altimate_core.format", async (params) => {
   try {
     const raw = core.formatSql(params.sql, params.dialect || undefined)
     const data = toData(raw)
-    return ok(data.success !== false, data)
+    return ok(true, data)
   } catch (e) {
     return fail(e)
   }
