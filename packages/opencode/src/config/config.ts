@@ -264,6 +264,24 @@ export namespace Config {
 
     result.plugin = deduplicatePlugins(result.plugin ?? [])
 
+    // altimate_change start — auto-discover MCP servers from external AI tool configs
+    if (!Flag.OPENCODE_DISABLE_PROJECT_CONFIG && result.experimental?.auto_mcp_discovery !== false) {
+      const { discoverExternalMcp, setDiscoveryResult } = await import("../mcp/discover")
+      const { servers: externalMcp, sources } = await discoverExternalMcp(Instance.worktree)
+      if (Object.keys(externalMcp).length > 0) {
+        result.mcp ??= {}
+        const added: string[] = []
+        for (const [name, server] of Object.entries(externalMcp)) {
+          if (!(name in result.mcp)) {
+            result.mcp[name] = server
+            added.push(name)
+          }
+        }
+        setDiscoveryResult(added, sources)
+      }
+    }
+    // altimate_change end
+
     return {
       config: result,
       directories,
@@ -863,6 +881,9 @@ export namespace Config {
       model_cycle_favorite_reverse: z.string().optional().default("none").describe("Previous favorite model"),
       command_list: z.string().optional().default("ctrl+p").describe("List available commands"),
       agent_list: z.string().optional().default("<leader>a").describe("List agents"),
+      // altimate_change start — global keybind to open skills dialog
+      skill_list: z.string().optional().default("ctrl+i").describe("Open skill browser"),
+      // altimate_change end
       agent_cycle: z.string().optional().default("tab").describe("Next agent"),
       agent_cycle_reverse: z.string().optional().default("shift+tab").describe("Previous agent"),
       variant_cycle: z.string().optional().default("ctrl+t").describe("Cycle model variants"),
@@ -1272,6 +1293,12 @@ export namespace Config {
             .boolean()
             .optional()
             .describe("Use environment fingerprint to select relevant skills once per session (default: false). Set to true to enable LLM-based skill filtering."),
+          // altimate_change end
+          // altimate_change start - auto MCP discovery toggle
+          auto_mcp_discovery: z
+            .boolean()
+            .default(true)
+            .describe("Auto-discover MCP servers from VS Code, Claude Code, Copilot, and Gemini configs at startup. Set to false to disable."),
           // altimate_change end
         })
         .optional(),

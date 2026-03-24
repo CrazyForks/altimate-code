@@ -46,6 +46,9 @@ import { GoogleAuth } from "google-auth-library"
 import { ProviderTransform } from "./transform"
 import { Installation } from "../installation"
 import { ModelID, ProviderID } from "./schema"
+// altimate_change start — snowflake cortex account validation
+import { VALID_ACCOUNT_RE } from "../altimate/plugin/snowflake"
+// altimate_change end
 
 const DEFAULT_CHUNK_TIMEOUT = 120_000
 
@@ -670,6 +673,20 @@ export namespace Provider {
         },
       }
     },
+    // altimate_change start — snowflake cortex provider loader
+    "snowflake-cortex": async () => {
+      const auth = await Auth.get("snowflake-cortex")
+      if (auth?.type !== "oauth") return { autoload: false }
+      const account = auth.accountId ?? Env.get("SNOWFLAKE_ACCOUNT")
+      if (!account || !VALID_ACCOUNT_RE.test(account)) return { autoload: false }
+      return {
+        autoload: true,
+        options: {
+          baseURL: `https://${account}.snowflakecomputing.com/api/v2/cortex/v1`,
+        },
+      }
+    },
+    // altimate_change end
   }
 
   export const Model = z
@@ -879,6 +896,83 @@ export namespace Provider {
       }
     }
 
+    // altimate_change start — snowflake cortex provider models
+    function makeSnowflakeModel(
+      id: string,
+      name: string,
+      limits: { context: number; output: number },
+      caps?: { reasoning?: boolean; attachment?: boolean; toolcall?: boolean },
+    ): Model {
+      const m: Model = {
+        id: ModelID.make(id),
+        providerID: ProviderID.snowflakeCortex,
+        api: {
+          id,
+          url: "",
+          npm: "@ai-sdk/openai-compatible",
+        },
+        name,
+        capabilities: {
+          temperature: true,
+          reasoning: caps?.reasoning ?? false,
+          attachment: caps?.attachment ?? false,
+          toolcall: caps?.toolcall ?? true,
+          input: { text: true, audio: false, image: false, video: false, pdf: false },
+          output: { text: true, audio: false, image: false, video: false, pdf: false },
+          interleaved: false,
+        },
+        cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+        limit: { context: limits.context, output: limits.output },
+        status: "active" as const,
+        options: {},
+        headers: {},
+        release_date: "2024-01-01",
+        variants: {},
+      }
+      m.variants = mapValues(ProviderTransform.variants(m), (v) => v)
+      return m
+    }
+
+    database["snowflake-cortex"] = {
+      id: ProviderID.snowflakeCortex,
+      source: "custom",
+      name: "Snowflake Cortex",
+      env: [],
+      options: {},
+      models: {
+        // Claude models — tool calling supported
+        "claude-sonnet-4-6": makeSnowflakeModel("claude-sonnet-4-6", "Claude Sonnet 4.6", { context: 200000, output: 64000 }),
+        "claude-opus-4-6": makeSnowflakeModel("claude-opus-4-6", "Claude Opus 4.6", { context: 200000, output: 32000 }),
+        "claude-sonnet-4-5": makeSnowflakeModel("claude-sonnet-4-5", "Claude Sonnet 4.5", { context: 200000, output: 64000 }),
+        "claude-opus-4-5": makeSnowflakeModel("claude-opus-4-5", "Claude Opus 4.5", { context: 200000, output: 32000 }),
+        "claude-haiku-4-5": makeSnowflakeModel("claude-haiku-4-5", "Claude Haiku 4.5", { context: 200000, output: 16000 }),
+        "claude-4-sonnet": makeSnowflakeModel("claude-4-sonnet", "Claude 4 Sonnet", { context: 200000, output: 64000 }),
+        // claude-4-opus: documented but gated (403 "account not allowed" on tested accounts)
+        "claude-3-7-sonnet": makeSnowflakeModel("claude-3-7-sonnet", "Claude 3.7 Sonnet", { context: 200000, output: 16000 }),
+        "claude-3-5-sonnet": makeSnowflakeModel("claude-3-5-sonnet", "Claude 3.5 Sonnet", { context: 200000, output: 8192 }),
+        // OpenAI models — tool calling supported
+        "openai-gpt-4.1": makeSnowflakeModel("openai-gpt-4.1", "OpenAI GPT-4.1", { context: 1047576, output: 32768 }),
+        "openai-gpt-5": makeSnowflakeModel("openai-gpt-5", "OpenAI GPT-5", { context: 1047576, output: 32768 }),
+        "openai-gpt-5-mini": makeSnowflakeModel("openai-gpt-5-mini", "OpenAI GPT-5 Mini", { context: 1047576, output: 32768 }),
+        "openai-gpt-5-nano": makeSnowflakeModel("openai-gpt-5-nano", "OpenAI GPT-5 Nano", { context: 1047576, output: 32768 }),
+        "openai-gpt-5-chat": makeSnowflakeModel("openai-gpt-5-chat", "OpenAI GPT-5 Chat", { context: 1047576, output: 32768 }),
+        // openai-gpt-oss-120b: documented but returns 500 (not yet stable)
+        // Meta Llama — no tool calling
+        "llama4-maverick": makeSnowflakeModel("llama4-maverick", "Llama 4 Maverick", { context: 1048576, output: 4096 }, { toolcall: false }),
+        "snowflake-llama-3.3-70b": makeSnowflakeModel("snowflake-llama-3.3-70b", "Snowflake Llama 3.3 70B", { context: 128000, output: 4096 }, { toolcall: false }),
+        "llama3.1-70b": makeSnowflakeModel("llama3.1-70b", "Llama 3.1 70B", { context: 128000, output: 4096 }, { toolcall: false }),
+        "llama3.1-405b": makeSnowflakeModel("llama3.1-405b", "Llama 3.1 405B", { context: 128000, output: 4096 }, { toolcall: false }),
+        "llama3.1-8b": makeSnowflakeModel("llama3.1-8b", "Llama 3.1 8B", { context: 128000, output: 4096 }, { toolcall: false }),
+        // Mistral — no tool calling
+        "mistral-large": makeSnowflakeModel("mistral-large", "Mistral Large", { context: 131000, output: 4096 }, { toolcall: false }),
+        "mistral-large2": makeSnowflakeModel("mistral-large2", "Mistral Large 2", { context: 131000, output: 4096 }, { toolcall: false }),
+        "mistral-7b": makeSnowflakeModel("mistral-7b", "Mistral 7B", { context: 32000, output: 4096 }, { toolcall: false }),
+        // DeepSeek — no tool calling
+        "deepseek-r1": makeSnowflakeModel("deepseek-r1", "DeepSeek R1", { context: 64000, output: 32000 }, { reasoning: true, toolcall: false }),
+      },
+    }
+    // altimate_change end
+
     function mergeProvider(providerID: ProviderID, provider: Partial<Info>) {
       const existing = providers[providerID]
       if (existing) {
@@ -977,11 +1071,41 @@ export namespace Provider {
 
     // load env
     const env = Env.all()
+    // altimate_change start — skip github-models/github-copilot auto-enable from machine-scoped GITHUB_TOKEN
+    // In GitHub Codespaces and GitHub Actions, GITHUB_TOKEN is a machine-scoped
+    // token for repo operations, not for model inference. Auto-enabling these
+    // providers leads to immediate rate limiting ("Too Many Requests") and long
+    // retry loops. We detect these environments and skip auto-enable unless the
+    // user has explicitly set a different token.
+    //
+    // Environment detection (official GitHub docs):
+    //   Codespaces: CODESPACES=true, CODESPACE_NAME set
+    //   Actions:    GITHUB_ACTIONS=true, CI=true
+    //
+    // Machine-scoped tokens to ignore: GITHUB_TOKEN and GH_TOKEN (gh CLI alias)
+    const isMachineEnv = env["CODESPACES"] === "true" || env["GITHUB_ACTIONS"] === "true"
+    const machineTokenNames = new Set(["GITHUB_TOKEN", "GH_TOKEN"])
+    const skipGithubProviders = new Set(["github-models", "github-copilot", "github-copilot-enterprise"])
+    // altimate_change end
     for (const [id, provider] of Object.entries(database)) {
       const providerID = ProviderID.make(id)
       if (disabled.has(providerID)) continue
       const apiKey = provider.env.map((item) => env[item]).find(Boolean)
       if (!apiKey) continue
+      // altimate_change start — skip GitHub providers when only machine-scoped tokens exist
+      if (isMachineEnv && skipGithubProviders.has(id)) {
+        // Check if ALL env vars for this provider are machine-scoped tokens
+        const matchedEnvVars = provider.env.filter((item) => env[item])
+        const allMachineScoped = matchedEnvVars.every((item) => machineTokenNames.has(item))
+        if (allMachineScoped) {
+          log.info("skipping provider in machine environment (token is not for model inference)", {
+            providerID,
+            environment: env["CODESPACES"] ? "codespace" : "github-actions",
+          })
+          continue
+        }
+      }
+      // altimate_change end
       mergeProvider(providerID, {
         source: "env",
         key: provider.env.length === 1 ? apiKey : undefined,

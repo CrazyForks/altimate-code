@@ -38,7 +38,7 @@ export const SqlAnalyzeTool = Tool.define("sql_analyze", {
           success: !isRealFailure,
           issueCount: result.issue_count,
           confidence: result.confidence,
-          error: result.error,
+          ...(result.error && { error: result.error }),
         },
         output: formatAnalysis(result),
       }

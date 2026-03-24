@@ -5,6 +5,124 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.9] - 2026-03-23
+
+### Fixed
+
+- **Codespaces support** — skip machine-scoped `GITHUB_TOKEN` that lacks repo access, cap provider retries to prevent infinite loops, fix phantom `/discover-and-add-mcps` command that was missing from builtin commands (#415)
+- **`sql_analyze` reports "unknown error" for successful analyses** — tool returned error status even when analysis completed successfully (AI-5975) (#426)
+- **Remove `semver` dependency from upgrade path** — replaced with zero-dependency version comparison to prevent users getting locked on old versions when `semver` fails to load (#421)
+- **Ship `discover-and-add-mcps` as a builtin command** — moved from `.opencode/command/` config directory to embedded template so it works out of the box (#409)
+
+### Testing
+
+- Comprehensive upgrade decision tests covering version comparison, downgrade prevention, and edge cases (#421)
+- Codespace E2E tests for `GITHUB_TOKEN` filtering, retry caps, and provider initialization (#415)
+
+## [0.5.8] - 2026-03-23
+
+### Fixed
+
+- **dbt commands crash with `SyntaxError: Cannot use import statement`** — bundled `dbt-tools/` was missing `package.json` with `"type": "module"`, causing Node to default to CJS and reject ESM imports. Broken since v0.5.3. (#407)
+- **Publish script idempotency** — re-running `publish.ts` without cleaning `dist/` would crash because the synthesized `dbt-tools/package.json` (no `name`/`version`) polluted the binary glob scan (#407)
+- **Skill builder `ctrl+i` keybind** — ESC navigation and dialog lifecycle fixes in TUI skill management (#386)
+- **Upgrade notification silently skipped** — multiple scenarios where the upgrade check was bypassed (#389)
+- **Phantom `sql_validate` tool** — removed non-existent tool reference from analyst agent permissions, replaced with `altimate_core_validate` (#352)
+- **CI test suite stability** — eliminated 29 pre-existing test failures: added `duckdb` devDependency, fixed native binding contention with retry logic and `beforeAll` connections, increased timeouts for slow bootstrap operations, added `--timeout 30000` to CI workflow (#411)
+
+### Added
+
+- **Recap (renamed from Tracer)** — session recap with loop detection and enhanced viewer (#381)
+- **ESM bundling regression tests** — 9 e2e tests verifying Node can load `altimate-dbt` via symlink, wrapper, and direct invocation paths
+
+### Testing
+
+- 133 new tests across 9 modules: finops role access, tool lookup, config path parsing, ID generation, file ignore/traversal, patch operations, session instructions/messages/summaries, shell utilities (#403)
+- SQL validation adversarial + e2e test suites (#352)
+- Provider error classification — overflow detection and message extraction (#375)
+- Impact analysis DAG traversal and training import parsing (#384)
+- RPC client protocol and `abortAfter`/`abortAfterAny` coverage (#382)
+- Color, signal, and defer utility coverage (#379)
+- MCP config CRUD + Locale utility coverage (#369)
+
+## [0.5.7] - 2026-03-22
+
+### Added
+
+- **Impact analysis tool** — analyze downstream blast radius of dbt model/column changes across the DAG with severity classification (SAFE/LOW/MEDIUM/HIGH) and actionable recommendations (#350)
+- **Training import tool** — bulk import training entries from markdown style guides, glossaries, and playbooks with dry-run preview and capacity management (#350)
+- **CI check command** — `/ci-check` template for pre-merge SQL validation that analyzes changed files, checks dbt integrity, and generates CI-friendly reports (#350)
+- **`--max-turns` budget limit** — CLI option to cap agent steps for CI/enterprise governance (#350)
+- **LM Studio provider** — local Qwen model support via LM Studio (#340)
+- **Improved onboarding** — first-time user hints on home screen, beginner-focused tips, practical quickstart examples (#350)
+- **Expanded `/discover`** — detects additional cloud warehouse credentials (Snowflake, BigQuery, PostgreSQL, Databricks, Redshift) (#350)
+- **Automated test discovery** — `/test-discovery` command for hourly test generation with critic validation (#364, #365, #366, #367)
+
+### Fixed
+
+- Yolo mode now respects explicit deny rules from session config instead of auto-approving everything (#350)
+- Training limits increased from 20→50 entries per kind and 16KB→48KB budget for enterprise teams (#350)
+
+### Testing
+
+- E2E tests for trace viewer with adversarial cases (#353)
+- Bash tool PATH injection tests (#366)
+- `fn()` wrapper and `skillSource` trust classification tests (#367)
+- `AsyncQueue`/`work()` utility and `State.invalidate` coverage (#364)
+
+## [0.5.6] - 2026-03-22
+
+### Added
+
+- **Skill CLI command** — new top-level `altimate-code skill` with `list`, `create`, `test`, `show`, `install`, `remove` subcommands for managing AI agent skills and paired CLI tools (#342)
+- **`.opencode/tools/` auto-discovery** — executables in `.opencode/tools/` (project) and `~/.config/altimate-code/tools/` (global) are automatically prepended to PATH in BashTool and PTY sessions (#342)
+- **TUI skill management** — `/skills` dialog with domain-grouped skill browser, `ctrl+a` action picker (show, edit, test, remove), `ctrl+n` create, `ctrl+i` install from GitHub (#342)
+- **Skill install from GitHub** — `altimate-code skill install owner/repo` clones and installs skills; supports GitHub web URLs, shorthand, local paths, and `--global` flag (#342)
+- **Skill cache invalidation** — `State.invalidate()` and `Skill.invalidate()` with `GET /skill?reload=true` endpoint for cross-thread cache clearing (#342)
+- **Snowflake Cortex AI provider** — use Snowflake Cortex as an AI provider for LLM completions (#349)
+- **Telemetry for skill operations** — `skill_created`, `skill_installed`, `skill_removed` events (#342)
+- **E2E smoke tests** — committed tests for skill lifecycle, git-tracked protection, symlink safety, GitHub URL normalization (#363)
+
+### Fixed
+
+- Symlink traversal protection during skill install — uses `fs.lstat` to skip symlinks and prevent file disclosure from malicious repos (#342)
+- Git-tracked skills cannot be removed via `skill remove` or TUI — prevents accidental deletion of repo-managed skills (#342)
+- GitHub web URLs (e.g., `https://github.com/owner/repo/tree/main/path`) correctly normalized to clonable repo URLs (#342)
+- `.git` suffix stripped from install source to prevent double-append (#342)
+- TUI skill operations use `sdk.directory` + `gitRoot()` instead of `Instance`/`Global` which only exist in the worker thread (#342)
+- TUI install uses async `Bun.spawn` instead of blocking `Bun.spawnSync` to keep UI responsive (#342)
+- Missing `altimate_change` markers in `dialog-skill.tsx` and `skill.ts` (#341, #344)
+
+## [0.5.5] - 2026-03-20
+
+### Added
+
+- Auto-discover MCP servers from external AI tool configs (VS Code, Cursor, GitHub Copilot, Claude Code, Gemini CLI, Claude Desktop) — discovered project-scoped servers are disabled by default and require explicit approval; home-directory configs are auto-enabled (#311)
+- Security FAQ documentation for MCP auto-discovery — covers trust model, security hardening, and how to disable (#346)
+
+### Changed
+
+- `auto_mcp_discovery` now defaults to `true` in config schema via `z.boolean().default(true)` — matches existing runtime behavior (#345)
+
+### Fixed
+
+- Add missing `altimate_change` markers for `experimental` block in `opencode.jsonc` — fixes Marker Guard CI failure on main (#344)
+
+## [0.5.4] - 2026-03-20
+
+### Added
+
+- Show update-available indicator in TUI footer — when a newer version is available, the footer displays `↑ version · altimate upgrade` with responsive layout for narrow terminals (#175)
+- Track per-generation token usage in telemetry — emit `generation` event with flat token fields (`tokens_input`, `tokens_output`, `tokens_reasoning`, `tokens_cache_read`, `tokens_cache_write`) for Azure App Insights compatibility (#336)
+
+### Fixed
+
+- Replace `better-sqlite3` with `bun:sqlite` for schema cache and SQLite driver — fixes `schema_index`, `schema_search`, `schema_cache_status`, and SQLite driver for all users on the released CLI binary (#323)
+- Fix marker guard diff parser bug — context lines now correctly update `altimate_change` marker state, preventing false negatives that allowed marker leaks to pass CI (#338)
+- Extend marker guard CI to run on push-to-main with zero-SHA guard — closes the gap where individual PRs pass but combined state of `main` has missing markers (#338)
+- Add `import.meta.main` guard to `analyze.ts` so test imports don't trigger CLI side effects (#338)
+- Add 21 unit tests for marker diff parser and run them in CI (#338)
+
 ## [0.5.3] - 2026-03-19
 
 ### Fixed

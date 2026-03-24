@@ -83,11 +83,13 @@ jobs:
         run: bun install
 
       - name: Run tests
-        run: bun test
+        run: bun test --timeout 30000
         working-directory: packages/opencode
         # Cloud E2E tests (Snowflake, BigQuery, Databricks) auto-skip when
         # ALTIMATE_CODE_CONN_* env vars are not set. Docker E2E tests auto-skip
         # when Docker is not available. No exclusion needed — skipIf handles it.
+        # --timeout 30000: matches package.json "test" script; prevents 5s default
+        # from cutting off tests that run bun install or bootstrap git instances.
 
   # ---------------------------------------------------------------------------
   # Driver E2E tests — only when driver code changes.
@@ -280,7 +282,6 @@ jobs:
   marker-guard:
     name: Marker Guard
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -300,9 +301,20 @@ jobs:
         run: bun install
         working-directory: script/upstream
 
+      - name: Run marker parser tests
+        run: bun test
+        working-directory: script/upstream
+
       - name: Check for missing altimate_change markers
         run: |
-          if [[ "${{ github.head_ref }}" == merge-upstream-* ]] || [[ "${{ github.head_ref }}" == upstream/merge-* ]]; then
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            if [[ "${{ github.event.before }}" == "0000000000000000000000000000000000000000" ]]; then
+              echo "Initial push (zero-SHA) — skipping marker check"
+              exit 0
+            fi
+            echo "Push to main — running marker check against pre-push state"
+            bun run script/upstream/analyze.ts --markers --base "${{ github.event.before }}" --strict
+          elif [[ "${{ github.head_ref }}" == merge-upstream-* ]] || [[ "${{ github.head_ref }}" == upstream/merge-* ]]; then
             echo "Upstream merge PR detected — running marker check in non-strict mode"
             bun run script/upstream/analyze.ts --markers --base ${{ github.event.pull_request.base.ref }}
           else

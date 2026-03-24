@@ -6,6 +6,7 @@ import { RouteProvider, useRoute } from "@tui/context/route"
 import { Switch, Match, createEffect, untrack, ErrorBoundary, createSignal, onMount, batch, Show, on } from "solid-js"
 import { win32DisableProcessedInput, win32FlushInputBuffer, win32InstallCtrlCGuard } from "./win32"
 import { Installation } from "@/installation"
+import { UPGRADE_KV_KEY } from "./component/upgrade-indicator-utils"
 import { Flag } from "@/flag/flag"
 import { Log } from "@/util/log"
 import { DialogProvider, useDialog } from "@tui/ui/dialog"
@@ -28,18 +29,20 @@ import { Home } from "@tui/routes/home"
 import { Session } from "@tui/routes/session"
 import { PromptHistoryProvider } from "./component/prompt/history"
 import { FrecencyProvider } from "./component/prompt/frecency"
-import { Tracer } from "@/altimate/observability/tracing"
+// altimate_change start — recap: rename imports
+import { Recap } from "@/altimate/observability/tracing"
 import { renderTraceViewer } from "@/altimate/observability/viewer"
-import { DialogTraceList } from "./component/dialog-trace-list"
+import { DialogRecapList } from "./component/dialog-trace-list"
+// altimate_change end
 import fsAsync from "fs/promises"
 
-// altimate_change start - shared trace viewer server
-let traceViewerServer: ReturnType<typeof Bun.serve> | undefined
-let traceViewerTracesDir: string | undefined
-function getTraceViewerUrl(sessionID: string, tracesDir?: string): string {
-  if (!traceViewerServer) {
-    traceViewerTracesDir = Tracer.getTracesDir(tracesDir)
-    traceViewerServer = Bun.serve({
+// altimate_change start — recap: shared recap viewer server
+let recapViewerServer: ReturnType<typeof Bun.serve> | undefined
+let recapViewerTracesDir: string | undefined
+function getRecapViewerUrl(sessionID: string, tracesDir?: string): string {
+  if (!recapViewerServer) {
+    recapViewerTracesDir = Recap.getTracesDir(tracesDir)
+    recapViewerServer = Bun.serve({
       port: 0, // random available port
       hostname: "127.0.0.1",
       async fetch(req) {
@@ -57,7 +60,9 @@ function getTraceViewerUrl(sessionID: string, tracesDir?: string): string {
         }
 
         const safeId = sid.replace(/[/\\.:]/g, "_")
-        const traceFile = `${traceViewerTracesDir}/${safeId}.json`
+        // altimate_change start — recap: use renamed recapViewerTracesDir
+        const traceFile = `${recapViewerTracesDir}/${safeId}.json`
+        // altimate_change end
 
         if (action === "api") {
           try {
@@ -81,10 +86,12 @@ function getTraceViewerUrl(sessionID: string, tracesDir?: string): string {
       },
     })
   }
-  return `http://127.0.0.1:${traceViewerServer.port}/view/${encodeURIComponent(sessionID)}`
+  // altimate_change start — recap: renamed recapViewerServer
+  return `http://127.0.0.1:${recapViewerServer.port}/view/${encodeURIComponent(sessionID)}`
+  // altimate_change end
 }
 
-// altimate_change end — renderInlineViewer removed, now using renderTraceViewer from viewer.ts
+// altimate_change end
 import { PromptStashProvider } from "./component/prompt/stash"
 import { DialogAlert } from "./ui/dialog-alert"
 import { ToastProvider, useToast } from "./ui/toast"
@@ -273,7 +280,7 @@ function App() {
   const exit = useExit()
   const promptRef = usePromptRef()
 
-  // altimate_change start - shared trace viewer helper
+  // altimate_change start — recap: shared recap viewer helper
   // Load custom tracing dir from config (same as worker.ts and trace.ts)
   const [tracesDir, setTracesDir] = createSignal<string | undefined>(undefined)
   onMount(async () => {
@@ -286,24 +293,26 @@ function App() {
     }
   })
 
-  async function openTraceInBrowser(sessionID: string) {
+  // altimate_change start — recap: renamed openTraceInBrowser → openRecapInBrowser
+  async function openRecapInBrowser(sessionID: string) {
     try {
-      // Check if trace file exists on disk before opening browser
+      // Check if recap file exists on disk before opening browser
       const safeId = sessionID.replace(/[/\\.:]/g, "_")
-      const traceFile = `${Tracer.getTracesDir(tracesDir())}/${safeId}.json`
-      const exists = await fsAsync.access(traceFile).then(() => true).catch(() => false)
+      const recapFile = `${Recap.getTracesDir(tracesDir())}/${safeId}.json`
+      const exists = await fsAsync.access(recapFile).then(() => true).catch(() => false)
       if (!exists) {
-        toast.show({ variant: "warning", message: "Trace not available yet — send a prompt first", duration: 4000 })
+        toast.show({ variant: "warning", message: "Recap not available yet — send a prompt first", duration: 4000 })
         return
       }
-      const url = getTraceViewerUrl(sessionID, tracesDir())
+      const url = getRecapViewerUrl(sessionID, tracesDir())
       await open(url)
-      toast.show({ variant: "info", message: `Trace viewer: ${url}`, duration: 6000 })
+      toast.show({ variant: "info", message: `Recap viewer: ${url}`, duration: 6000 })
     } catch (err) {
-      Log.Default.error(`Failed to open trace viewer: ${err}`)
-      toast.show({ variant: "warning", message: `Failed to open browser. Trace files: ${Tracer.getTracesDir(tracesDir())}`, duration: 8000 })
+      Log.Default.error(`Failed to open recap viewer: ${err}`)
+      toast.show({ variant: "warning", message: `Failed to open browser. Recap files: ${Recap.getTracesDir(tracesDir())}`, duration: 8000 })
     }
   }
+  // altimate_change end
   // altimate_change end
 
   useKeyboard((evt) => {
@@ -684,21 +693,22 @@ function App() {
       onSelect: () => exit(),
       category: "System",
     },
-    // altimate_change start - trace history command
+    // altimate_change start — recap: session recap history command
     {
-      title: "View traces",
-      value: "trace.view",
+      title: "View recaps",
+      value: "recap.view",
       category: "Debug",
       slash: {
-        name: "trace",
+        name: "recap",
+        aliases: ["trace"],
       },
       onSelect: (dialog) => {
         const currentSessionID = route.data.type === "session" ? route.data.sessionID : undefined
         dialog.replace(() => (
-          <DialogTraceList
+          <DialogRecapList
             currentSessionID={currentSessionID}
             tracesDir={tracesDir()}
-            onSelect={openTraceInBrowser}
+            onSelect={openRecapInBrowser}
           />
         ))
       },
@@ -842,12 +852,19 @@ function App() {
 
   // altimate_change start — branding: altimate upgrade
   sdk.event.on(Installation.Event.UpdateAvailable.type, (evt) => {
+    kv.set(UPGRADE_KV_KEY, evt.properties.version)
     toast.show({
       variant: "info",
       title: "Update Available",
       message: `Altimate Code v${evt.properties.version} is available. Run 'altimate upgrade' to update manually.`,
       duration: 10000,
     })
+  })
+
+  sdk.event.on(Installation.Event.Updated.type, () => {
+    if (kv.get(UPGRADE_KV_KEY) !== Installation.VERSION) {
+      kv.set(UPGRADE_KV_KEY, Installation.VERSION)
+    }
   })
   // altimate_change end
 

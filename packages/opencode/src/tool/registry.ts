@@ -44,6 +44,7 @@ import { WarehouseTestTool } from "../altimate/tools/warehouse-test"
 import { WarehouseAddTool } from "../altimate/tools/warehouse-add"
 import { WarehouseRemoveTool } from "../altimate/tools/warehouse-remove"
 import { WarehouseDiscoverTool } from "../altimate/tools/warehouse-discover"
+import { McpDiscoverTool } from "../altimate/tools/mcp-discover"
 
 import { DbtManifestTool } from "../altimate/tools/dbt-manifest"
 import { DbtProfilesTool } from "../altimate/tools/dbt-profiles"
@@ -110,6 +111,10 @@ import { MemoryExtractTool } from "../memory/tools/memory-extract"
 import { TrainingSaveTool } from "../altimate/tools/training-save"
 import { TrainingListTool } from "../altimate/tools/training-list"
 import { TrainingRemoveTool } from "../altimate/tools/training-remove"
+// altimate_change end
+// altimate_change start - import impact analysis and training import tools
+import { ImpactAnalysisTool } from "../altimate/tools/impact-analysis"
+import { TrainingImportTool } from "../altimate/tools/training-import"
 // altimate_change end
 
 export namespace ToolRegistry {
@@ -213,6 +218,9 @@ export namespace ToolRegistry {
       WarehouseAddTool,
       WarehouseRemoveTool,
       WarehouseDiscoverTool,
+      // altimate_change start - register MCP discovery tool
+      McpDiscoverTool,
+      // altimate_change end
 
       DbtManifestTool,
       DbtProfilesTool,
@@ -274,7 +282,10 @@ export namespace ToolRegistry {
       ...(!Flag.ALTIMATE_DISABLE_MEMORY ? [MemoryReadTool, MemoryWriteTool, MemoryDeleteTool, MemoryAuditTool, ...(Flag.ALTIMATE_MEMORY_AUTO_EXTRACT ? [MemoryExtractTool] : [])] : []),
       // altimate_change end
       // altimate_change start - register training tools for AI teammate
-      ...(!Flag.ALTIMATE_DISABLE_TRAINING ? [TrainingSaveTool, TrainingListTool, TrainingRemoveTool] : []),
+      ...(!Flag.ALTIMATE_DISABLE_TRAINING ? [TrainingSaveTool, TrainingListTool, TrainingRemoveTool, TrainingImportTool] : []),
+      // altimate_change end
+      // altimate_change start - register impact analysis tool
+      ImpactAnalysisTool,
       // altimate_change end
       ...custom,
     ]

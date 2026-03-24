@@ -15,6 +15,9 @@ import { Installation } from "@/installation"
 import { useKV } from "../context/kv"
 import { useCommandDialog } from "../component/dialog-command"
 import { useLocal } from "../context/local"
+// altimate_change start — upgrade indicator import
+import { UpgradeIndicator } from "../component/upgrade-indicator"
+// altimate_change end
 
 // TODO: what is the best way to do this?
 let once = false
@@ -38,8 +41,7 @@ export function Home() {
   const isFirstTimeUser = createMemo(() => sync.data.session.length === 0)
   const tipsHidden = createMemo(() => kv.get("tips_hidden", false))
   const showTips = createMemo(() => {
-    // Don't show tips for first-time users
-    if (isFirstTimeUser()) return false
+    // Always show tips — first-time users need guidance the most
     return !tipsHidden()
   })
 
@@ -124,9 +126,28 @@ export function Home() {
             workspaceID={route.workspaceID}
           />
         </box>
+        {/* altimate_change start — first-time onboarding hint */}
+        <Show when={isFirstTimeUser()}>
+          <box width="100%" maxWidth={75} paddingTop={1} flexShrink={0}>
+            <text>
+              <span style={{ fg: theme.textMuted }}>Get started: </span>
+              <span style={{ fg: theme.text }}>/connect</span>
+              <span style={{ fg: theme.textMuted }}> to add your API key</span>
+              <span style={{ fg: theme.textMuted }}> · </span>
+              <span style={{ fg: theme.text }}>/discover</span>
+              <span style={{ fg: theme.textMuted }}> to detect your data stack</span>
+              <span style={{ fg: theme.textMuted }}> · </span>
+              <span style={{ fg: theme.text }}>Ctrl+P</span>
+              <span style={{ fg: theme.textMuted }}> for all commands</span>
+            </text>
+          </box>
+        </Show>
+        {/* altimate_change end */}
         <box height={4} minHeight={0} width="100%" maxWidth={75} alignItems="center" paddingTop={3} flexShrink={1}>
           <Show when={showTips()}>
-            <Tips />
+            {/* altimate_change start — pass first-time flag for beginner tips */}
+            <Tips isFirstTime={isFirstTimeUser()} />
+            {/* altimate_change end */}
           </Show>
         </box>
         <box flexGrow={1} minHeight={0} />
@@ -152,7 +173,9 @@ export function Home() {
         </box>
         <box flexGrow={1} />
         <box flexShrink={0}>
-          <text fg={theme.textMuted}>{Installation.VERSION}</text>
+          {/* altimate_change start — upgrade indicator in home footer */}
+          <UpgradeIndicator fallback={<text fg={theme.textMuted}>{Installation.VERSION}</text>} />
+          {/* altimate_change end */}
         </box>
       </box>
     </>
