@@ -24,10 +24,9 @@ export const AltimateCoreValidateTool = Tool.define("altimate_core_validate", {
       })
       const data = (result.data ?? {}) as Record<string, any>
       const error = result.error ?? data.error ?? extractValidationErrors(data)
-      const isRealFailure = !!error
       return {
-        title: isRealFailure ? "Validate: ERROR" : `Validate: ${data.valid ? "VALID" : "INVALID"}`,
-        metadata: { success: !isRealFailure, valid: data.valid, ...(error && { error }) },
+        title: `Validate: ${data.valid ? "VALID" : "INVALID"}`,
+        metadata: { success: result.success, valid: data.valid, ...(error && { error }) },
         output: formatValidate(data),
       }
     } catch (e) {
