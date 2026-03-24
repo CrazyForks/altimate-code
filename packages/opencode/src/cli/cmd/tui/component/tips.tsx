@@ -1,4 +1,4 @@
-import { createMemo, createSignal, For } from "solid-js"
+import { createMemo, For } from "solid-js"
 import { DEFAULT_THEMES, useTheme } from "@tui/context/theme"
 
 const themeCount = Object.keys(DEFAULT_THEMES).length
@@ -50,9 +50,12 @@ const BEGINNER_TIPS = [
 // altimate_change start — first-time user beginner tips with reactive pool
 export function Tips(props: { isFirstTime?: boolean }) {
   const theme = useTheme().theme
+  // Pick random tip index once on mount instead of recalculating randomly when props change
+  // Use useMemo without dependencies so it only evaluates once
+  const tipIndex = Math.random()
   const tip = createMemo(() => {
     const pool = props.isFirstTime ? BEGINNER_TIPS : TIPS
-    return parse(pool[Math.floor(Math.random() * pool.length)])
+    return parse(pool[Math.floor(tipIndex * pool.length)])
   })
 
   return (

@@ -39,10 +39,13 @@ export function showWelcomeBannerIfNeeded(): void {
     // Remove marker first to avoid showing twice even if display fails
     fs.unlinkSync(markerPath)
 
-    // altimate_change start — VERSION is already normalized (no "v" prefix)
-    const currentVersion = Installation.VERSION
+    // altimate_change start — use ~/.altimate/machine-id existence as a proxy for upgrade vs fresh install
+    // Since postinstall.mjs always writes the current version to the marker file, we can't reliably
+    // use installedVersion !== currentVersion for release builds. Instead, if machine-id exists,
+    // they've run the CLI before.
+    const machineIdPath = path.join(os.homedir(), ".altimate", "machine-id")
+    const isUpgrade = fs.existsSync(machineIdPath)
     // altimate_change end
-    const isUpgrade = installedVersion === currentVersion && installedVersion !== "local"
 
     // altimate_change start — track first launch for new user counting (privacy-safe: only version + machine_id)
     Telemetry.track({
@@ -64,7 +67,7 @@ export function showWelcomeBannerIfNeeded(): void {
     const reset = "\x1b[0m"
     const bold = "\x1b[1m"
 
-    const v = `altimate-code v${currentVersion} installed`
+    const v = `altimate-code v${installedVersion} installed`
     const lines = [
       "",
       "  Get started:",

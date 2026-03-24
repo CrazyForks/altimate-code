@@ -41,7 +41,8 @@ export function Home() {
   // altimate_change start — fix race condition: don't show beginner UI until sessions loaded
   const isFirstTimeUser = createMemo(() => {
     // Don't evaluate until sessions have actually loaded (avoid flash of beginner UI)
-    if (sync.status === "loading" || sync.status === "partial") return false
+    // Return undefined to represent "loading" state
+    if (sync.status === "loading" || sync.status === "partial") return undefined
     return sync.data.session.length === 0
   })
   // altimate_change end
@@ -133,7 +134,7 @@ export function Home() {
           />
         </box>
         {/* altimate_change start — first-time onboarding hint */}
-        <Show when={isFirstTimeUser()}>
+        <Show when={isFirstTimeUser() === true}>
           <box width="100%" maxWidth={75} paddingTop={1} flexShrink={0}>
             <text>
               <span style={{ fg: theme.textMuted }}>Get started: </span>
@@ -152,7 +153,7 @@ export function Home() {
         <box height={4} minHeight={0} width="100%" maxWidth={75} alignItems="center" paddingTop={3} flexShrink={1}>
           <Show when={showTips()}>
             {/* altimate_change start — pass first-time flag for beginner tips */}
-            <Tips isFirstTime={isFirstTimeUser()} />
+            <Tips isFirstTime={isFirstTimeUser() === true} />
             {/* altimate_change end */}
           </Show>
         </box>
