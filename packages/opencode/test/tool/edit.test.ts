@@ -226,8 +226,7 @@ describe("tool.edit", () => {
       })
     })
 
-    // altimate_change start — edit now auto-refreshes stale files instead of throwing (#450)
-    test("succeeds when file has been modified since read by auto-refreshing", async () => {
+    test("throws error when file has been modified since read", async () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "file.txt")
       await fs.writeFile(filepath, "original content", "utf-8")
@@ -244,23 +243,21 @@ describe("tool.edit", () => {
           // Simulate external modification
           await fs.writeFile(filepath, "modified externally", "utf-8")
 
-          // Edit should succeed — auto-refreshes the stale read timestamp
+          // Try to edit with the new content
           const edit = await EditTool.init()
-          const result = await edit.execute(
-            {
-              filePath: filepath,
-              oldString: "modified externally",
-              newString: "edited",
-            },
-            ctx,
-          )
-          expect(result.output).toContain("Edit applied successfully")
-          const content = await fs.readFile(filepath, "utf-8")
-          expect(content).toBe("edited")
+          await expect(
+            edit.execute(
+              {
+                filePath: filepath,
+                oldString: "modified externally",
+                newString: "edited",
+              },
+              ctx,
+            ),
+          ).rejects.toThrow("modified since it was last read")
         },
       })
     })
-    // altimate_change end
 
     test("replaces all occurrences with replaceAll option", async () => {
       await using tmp = await tmpdir()

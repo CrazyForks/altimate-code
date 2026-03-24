@@ -86,9 +86,7 @@ export const EditTool = Tool.define("edit", {
       const stats = Filesystem.stat(filePath)
       if (!stats) throw new Error(`File ${filePath} not found`)
       if (stats.isDirectory()) throw new Error(`Path is a directory, not a file: ${filePath}`)
-      // altimate_change start — auto-refresh stale files instead of failing (#450)
-      const { stale } = await FileTime.assertOrRefresh(ctx.sessionID, filePath)
-      // altimate_change end
+      await FileTime.assert(ctx.sessionID, filePath)
       contentOld = await Filesystem.readText(filePath)
 
       const ending = detectLineEnding(contentOld)
