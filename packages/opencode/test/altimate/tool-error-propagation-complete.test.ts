@@ -117,7 +117,7 @@ describeToolErrorPropagation({
   dispatcherMethod: "altimate_core.check",
   importPath: "../../src/altimate/tools/altimate-core-check",
   exportName: "AltimateCoreCheckTool",
-  args: { sql: "SELECT 1" },
+  args: { sql: "SELECT 1", dialect: "snowflake" },
   successResponse: { success: true, data: { validation: { valid: true }, lint: { clean: true }, safety: { safe: true }, pii: { findings: [] } } },
   dataErrorResponse: { success: true, data: { error: "Internal check engine failure" } },
 })
@@ -354,7 +354,7 @@ describe("sql_fix conditional error spread", () => {
     const { SqlFixTool } = await import("../../src/altimate/tools/sql-fix")
     const tool = await SqlFixTool.init()
     const result = await tool.execute(
-      { sql: "SELECT foo FROM t", error_message: "Column 'foo' not found" },
+      { sql: "SELECT foo FROM t", error_message: "Column 'foo' not found", dialect: "snowflake" },
       stubCtx(),
     )
 
@@ -375,7 +375,7 @@ describe("sql_fix conditional error spread", () => {
     const { SqlFixTool } = await import("../../src/altimate/tools/sql-fix")
     const tool = await SqlFixTool.init()
     const result = await tool.execute(
-      { sql: "SELCT", error_message: "syntax error" },
+      { sql: "SELCT", error_message: "syntax error", dialect: "snowflake" },
       stubCtx(),
     )
 
@@ -433,7 +433,7 @@ describe("altimate_core_grade null data guard", () => {
 
     const { AltimateCoreGradeTool } = await import("../../src/altimate/tools/altimate-core-grade")
     const tool = await AltimateCoreGradeTool.init()
-    const result = await tool.execute({ sql: "SELECT 1" }, stubCtx())
+    const result = await tool.execute({ sql: "SELECT 1", dialect: "snowflake" }, stubCtx())
 
     expect(result.metadata.error).toBe("Grading engine unavailable")
     expect(telemetryWouldExtract(result.metadata)).not.toBe("unknown error")
@@ -455,7 +455,7 @@ describe("lineage_check error propagation", () => {
 
     const { LineageCheckTool } = await import("../../src/altimate/tools/lineage-check")
     const tool = await LineageCheckTool.init()
-    const result = await tool.execute({ sql: "SELECT 1" }, stubCtx())
+    const result = await tool.execute({ sql: "SELECT 1", dialect: "snowflake" }, stubCtx())
 
     expect(result.metadata.success).toBe(false)
     expect(result.metadata.error).toBe("Lineage engine not initialized")
@@ -469,7 +469,7 @@ describe("lineage_check error propagation", () => {
 
     const { LineageCheckTool } = await import("../../src/altimate/tools/lineage-check")
     const tool = await LineageCheckTool.init()
-    const result = await tool.execute({ sql: "SELECT 1" }, stubCtx())
+    const result = await tool.execute({ sql: "SELECT 1", dialect: "snowflake" }, stubCtx())
 
     expect(result.metadata.error).toContain("Partial lineage")
   })
@@ -481,7 +481,7 @@ describe("lineage_check error propagation", () => {
 
     const { LineageCheckTool } = await import("../../src/altimate/tools/lineage-check")
     const tool = await LineageCheckTool.init()
-    const result = await tool.execute({ sql: "SELECT 1" }, stubCtx())
+    const result = await tool.execute({ sql: "SELECT 1", dialect: "snowflake" }, stubCtx())
 
     expect(result.metadata.success).toBe(false)
     expect(result.metadata.error).toBe("NAPI crash")
@@ -496,7 +496,7 @@ describe("lineage_check error propagation", () => {
 
     const { LineageCheckTool } = await import("../../src/altimate/tools/lineage-check")
     const tool = await LineageCheckTool.init()
-    const result = await tool.execute({ sql: "SELECT 1" }, stubCtx())
+    const result = await tool.execute({ sql: "SELECT 1", dialect: "snowflake" }, stubCtx())
 
     expect(result.metadata.error).toBe("Engine crashed")
   })
