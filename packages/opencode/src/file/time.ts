@@ -68,4 +68,36 @@ export namespace FileTime {
       )
     }
   }
+
+  /**
+   * Check if a file has been modified since last read. Instead of throwing,
+   * returns whether the file was stale and auto-refreshes the read timestamp
+   * so the caller can re-read contents and proceed.
+   *
+   * Returns:
+   * - { stale: false } if file is up-to-date
+   * - { stale: true } if file was modified externally (timestamp refreshed)
+   *
+   * Still throws if the file was never read in this session.
+   */
+  // altimate_change start — auto-refresh stale files instead of throwing (#450)
+  export async function assertOrRefresh(
+    sessionID: string,
+    filepath: string,
+  ): Promise<{ stale: boolean }> {
+    if (Flag.OPENCODE_DISABLE_FILETIME_CHECK === true) {
+      return { stale: false }
+    }
+
+    const time = get(sessionID, filepath)
+    if (!time) throw new Error(`You must read file ${filepath} before overwriting it. Use the Read tool first`)
+    const mtime = Filesystem.stat(filepath)?.mtime
+    if (mtime && mtime.getTime() > time.getTime() + 50) {
+      log.info("stale file detected, auto-refreshing", { sessionID, filepath })
+      read(sessionID, filepath)
+      return { stale: true }
+    }
+    return { stale: false }
+  }
+  // altimate_change end
 }

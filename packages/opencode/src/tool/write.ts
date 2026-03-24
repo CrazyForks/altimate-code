@@ -28,8 +28,10 @@ export const WriteTool = Tool.define("write", {
     await assertSensitiveWrite(ctx, filepath)
 
     const exists = await Filesystem.exists(filepath)
+    // altimate_change start — auto-refresh stale files instead of failing (#450)
+    if (exists) await FileTime.assertOrRefresh(ctx.sessionID, filepath)
+    // altimate_change end
     const contentOld = exists ? await Filesystem.readText(filepath) : ""
-    if (exists) await FileTime.assert(ctx.sessionID, filepath)
 
     const diff = trimDiff(createTwoFilesPatch(filepath, filepath, contentOld, params.content))
     await ctx.ask({
