@@ -67,7 +67,9 @@ export function showWelcomeBannerIfNeeded(): void {
     const reset = "\x1b[0m"
     const bold = "\x1b[1m"
 
+    // altimate_change start — use installedVersion (from marker) instead of currentVersion for accurate banner
     const v = `altimate-code v${installedVersion} installed`
+    // altimate_change end
     const lines = [
       "",
       "  Get started:",
