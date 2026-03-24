@@ -92,6 +92,48 @@ describe("Command module", () => {
     })
   })
 
+  describe("altimate builtin commands", () => {
+    test("configure-claude, configure-codex, discover-and-add-mcps are present", async () => {
+      await withInstance(async () => {
+        const commands = await Command.list()
+        const names = commands.map((c) => c.name)
+        expect(names).toContain("configure-claude")
+        expect(names).toContain("configure-codex")
+        expect(names).toContain("discover-and-add-mcps")
+      })
+    })
+
+    test("configure-claude has correct metadata", async () => {
+      await withInstance(async () => {
+        const cmd = await Command.get("configure-claude")
+        expect(cmd).toBeDefined()
+        expect(cmd.name).toBe("configure-claude")
+        expect(cmd.source).toBe("command")
+        expect(cmd.description).toBe("configure /altimate command in Claude Code")
+      })
+    })
+
+    test("configure-codex has correct metadata", async () => {
+      await withInstance(async () => {
+        const cmd = await Command.get("configure-codex")
+        expect(cmd).toBeDefined()
+        expect(cmd.name).toBe("configure-codex")
+        expect(cmd.source).toBe("command")
+        expect(cmd.description).toBe("configure altimate skill in Codex CLI")
+      })
+    })
+
+    test("discover-and-add-mcps has correct metadata", async () => {
+      await withInstance(async () => {
+        const cmd = await Command.get("discover-and-add-mcps")
+        expect(cmd).toBeDefined()
+        expect(cmd.name).toBe("discover-and-add-mcps")
+        expect(cmd.source).toBe("command")
+        expect(cmd.description).toBe("discover MCP servers from external AI tool configs and add them")
+      })
+    })
+  })
+
   describe("user-defined commands from config", () => {
     test("config commands are loaded alongside defaults", async () => {
       await using tmp = await tmpdir({
