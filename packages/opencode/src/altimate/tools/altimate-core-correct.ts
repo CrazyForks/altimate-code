@@ -33,10 +33,12 @@ export const AltimateCoreCorrectTool = Tool.define("altimate_core_correct", {
 
 function extractCorrectErrors(data: Record<string, any>): string | undefined {
   if (data.final_validation?.errors?.length > 0) {
-    return data.final_validation.errors.map((e: any) => e.message ?? String(e)).join("; ")
+    const msgs = data.final_validation.errors.map((e: any) => e.message ?? String(e)).filter(Boolean)
+    if (msgs.length > 0) return msgs.join("; ")
   }
   if (Array.isArray(data.errors) && data.errors.length > 0) {
-    return data.errors.map((e: any) => e.message ?? String(e)).join("; ")
+    const msgs = data.errors.map((e: any) => e.message ?? String(e)).filter(Boolean)
+    if (msgs.length > 0) return msgs.join("; ")
   }
   return undefined
 }

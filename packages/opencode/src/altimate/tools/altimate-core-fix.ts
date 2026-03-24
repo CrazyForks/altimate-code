@@ -40,10 +40,12 @@ export const AltimateCoreFixTool = Tool.define("altimate_core_fix", {
 // result.error, but we extract here too in case the handler is updated without setting it.
 function extractFixErrors(data: Record<string, any>): string | undefined {
   if (Array.isArray(data.unfixable_errors) && data.unfixable_errors.length > 0) {
-    return data.unfixable_errors.map((e: any) => e.error?.message ?? e.reason ?? String(e)).join("; ")
+    const msgs = data.unfixable_errors.map((e: any) => e.error?.message ?? e.reason ?? String(e)).filter(Boolean)
+    if (msgs.length > 0) return msgs.join("; ")
   }
   if (Array.isArray(data.errors) && data.errors.length > 0) {
-    return data.errors.map((e: any) => e.message ?? String(e)).join("; ")
+    const msgs = data.errors.map((e: any) => e.message ?? String(e)).filter(Boolean)
+    if (msgs.length > 0) return msgs.join("; ")
   }
   return undefined
 }

@@ -38,7 +38,8 @@ export const AltimateCoreValidateTool = Tool.define("altimate_core_validate", {
 
 function extractValidationErrors(data: Record<string, any>): string | undefined {
   if (Array.isArray(data.errors) && data.errors.length > 0) {
-    return data.errors.map((e: any) => e.message ?? String(e)).join("; ")
+    const msgs = data.errors.map((e: any) => e.message ?? String(e)).filter(Boolean)
+    return msgs.length > 0 ? msgs.join("; ") : undefined
   }
   return undefined
 }

@@ -38,7 +38,8 @@ export const AltimateCoreSemanticsTool = Tool.define("altimate_core_semantics", 
 
 function extractSemanticsErrors(data: Record<string, any>): string | undefined {
   if (Array.isArray(data.validation_errors) && data.validation_errors.length > 0) {
-    return data.validation_errors.join("; ")
+    const msgs = data.validation_errors.filter(Boolean)
+    return msgs.length > 0 ? msgs.join("; ") : undefined
   }
   return undefined
 }

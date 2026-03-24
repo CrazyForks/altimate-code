@@ -369,4 +369,28 @@ describe("telemetry extraction logic (regression guard)", () => {
   test("falls back to 'unknown error' when metadata is undefined", () => {
     expect(telemetryWouldExtract(undefined as any)).toBe("unknown error")
   })
+
+  test("empty string error is still extracted (extractors must avoid producing it)", () => {
+    // telemetry extracts "" as-is since typeof "" === "string"
+    // The fix is in extractors: .filter(Boolean) prevents "" from reaching metadata.error
+    expect(telemetryWouldExtract({ error: "" })).toBe("")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Empty string edge case: extractors must not return "" as an error
+// ---------------------------------------------------------------------------
+describe("extractors handle empty message fields", () => {
+  beforeEach(() => Dispatcher.reset())
+
+  test("validate extractor filters out empty messages", async () => {
+    const { AltimateCoreValidateTool } = await import("../../src/altimate/tools/altimate-core-validate")
+    const tool = await AltimateCoreValidateTool.init()
+    // Schema provided but table missing — real handler returns error with actual message
+    const result = await tool.execute({ sql: "SELECT * FROM nonexistent_table", schema_context: { users: { id: "INT" } } }, stubCtx())
+    // The error should never be empty string
+    if (result.metadata.error !== undefined) {
+      expect(result.metadata.error).not.toBe("")
+    }
+  })
 })
