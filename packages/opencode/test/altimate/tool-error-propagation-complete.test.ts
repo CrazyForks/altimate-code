@@ -433,7 +433,7 @@ describe("altimate_core_grade null data guard", () => {
 
     const { AltimateCoreGradeTool } = await import("../../src/altimate/tools/altimate-core-grade")
     const tool = await AltimateCoreGradeTool.init()
-    const result = await tool.execute({ sql: "SELECT 1", dialect: "snowflake" }, stubCtx())
+    const result = await tool.execute({ sql: "SELECT 1" }, stubCtx())
 
     expect(result.metadata.error).toBe("Grading engine unavailable")
     expect(telemetryWouldExtract(result.metadata)).not.toBe("unknown error")
