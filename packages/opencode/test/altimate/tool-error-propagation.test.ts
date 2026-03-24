@@ -14,7 +14,13 @@ import { describe, expect, test, beforeAll, afterAll, beforeEach } from "bun:tes
 import * as Dispatcher from "../../src/altimate/native/dispatcher"
 
 // Disable telemetry so tests don't need AppInsights
-beforeAll(() => { process.env.ALTIMATE_TELEMETRY_DISABLED = "true" })
+beforeAll(async () => {
+  process.env.ALTIMATE_TELEMETRY_DISABLED = "true"
+  // Trigger the lazy registration hook so it doesn't overwrite mocks later.
+  // The hook loads all real native handlers on first Dispatcher.call().
+  // We trigger it now, then reset() in beforeEach clears them for mock isolation.
+  try { await Dispatcher.call("__trigger_hook__" as any, {} as any) } catch {}
+})
 afterAll(() => { delete process.env.ALTIMATE_TELEMETRY_DISABLED })
 
 // Stub context — tools need a Context object but only use metadata()
@@ -42,37 +48,25 @@ function telemetryWouldExtract(metadata: Record<string, any>): string {
 describe("altimate_core_validate error propagation", () => {
   beforeEach(() => Dispatcher.reset())
 
-  test("surfaces 'Table not found' from data.errors[]", async () => {
-    Dispatcher.register("altimate_core.validate" as any, async () => ({
-      success: false,
-      data: {
-        valid: false,
-        errors: [{ code: "E001", kind: { type: "TableNotFound", table: "users" }, message: "Table 'users' not found", suggestions: [] }],
-        warnings: [],
-        metadata: { complexity: "low", has_aggregation: false, has_subquery: false, join_count: 0, tables_referenced: [] },
-      },
-    }))
-
+  test("returns early with clear error when no schema provided", async () => {
     const { AltimateCoreValidateTool } = await import("../../src/altimate/tools/altimate-core-validate")
     const tool = await AltimateCoreValidateTool.init()
     const result = await tool.execute({ sql: "SELECT * FROM users" }, stubCtx())
 
-    expect(result.metadata.error).toBe("Table 'users' not found")
+    expect(result.metadata.success).toBe(false)
+    expect(result.metadata.error).toContain("No schema provided")
     expect(telemetryWouldExtract(result.metadata)).not.toBe("unknown error")
   })
 
-  test("surfaces dispatcher-level error", async () => {
-    Dispatcher.register("altimate_core.validate" as any, async () => ({
-      success: false,
-      data: { valid: false, errors: [], warnings: [] },
-      error: "Failed to recover Schema type from napi value",
-    }))
-
+  test("surfaces errors when schema provided but table missing from schema", async () => {
+    // Uses real napi handler — schema has 'orders' but SQL references 'users'
     const { AltimateCoreValidateTool } = await import("../../src/altimate/tools/altimate-core-validate")
     const tool = await AltimateCoreValidateTool.init()
-    const result = await tool.execute({ sql: "SELECT 1" }, stubCtx())
+    const result = await tool.execute({ sql: "SELECT * FROM users", schema_context: { orders: { id: "INT" } } }, stubCtx())
 
-    expect(result.metadata.error).toBe("Failed to recover Schema type from napi value")
+    expect(result.metadata.success).toBe(false)
+    expect(result.metadata.error).toBeDefined()
+    expect(telemetryWouldExtract(result.metadata)).not.toBe("unknown error")
   })
 })
 
@@ -82,23 +76,23 @@ describe("altimate_core_validate error propagation", () => {
 describe("altimate_core_semantics error propagation", () => {
   beforeEach(() => Dispatcher.reset())
 
-  test("surfaces 'Table not found' from data.validation_errors[]", async () => {
-    Dispatcher.register("altimate_core.semantics" as any, async () => ({
-      success: false,
-      data: {
-        valid: false,
-        findings: [],
-        passed_checks: [],
-        semantic_score: 0,
-        validation_errors: ["Table 'users' not found"],
-      },
-    }))
-
+  test("returns early with clear error when no schema provided", async () => {
     const { AltimateCoreSemanticsTool } = await import("../../src/altimate/tools/altimate-core-semantics")
     const tool = await AltimateCoreSemanticsTool.init()
     const result = await tool.execute({ sql: "SELECT * FROM users" }, stubCtx())
 
-    expect(result.metadata.error).toBe("Table 'users' not found")
+    expect(result.metadata.success).toBe(false)
+    expect(result.metadata.error).toContain("No schema provided")
+    expect(telemetryWouldExtract(result.metadata)).not.toBe("unknown error")
+  })
+
+  test("surfaces errors when schema provided but table missing from schema", async () => {
+    const { AltimateCoreSemanticsTool } = await import("../../src/altimate/tools/altimate-core-semantics")
+    const tool = await AltimateCoreSemanticsTool.init()
+    const result = await tool.execute({ sql: "SELECT * FROM users", schema_context: { orders: { id: "INT" } } }, stubCtx())
+
+    expect(result.metadata.success).toBe(false)
+    expect(result.metadata.error).toBeDefined()
     expect(telemetryWouldExtract(result.metadata)).not.toBe("unknown error")
   })
 })
@@ -109,26 +103,23 @@ describe("altimate_core_semantics error propagation", () => {
 describe("altimate_core_equivalence error propagation", () => {
   beforeEach(() => Dispatcher.reset())
 
-  test("surfaces validation errors from data.validation_errors[]", async () => {
-    Dispatcher.register("altimate_core.equivalence" as any, async () => ({
-      success: false,
-      data: {
-        equivalent: false,
-        confidence: 0,
-        differences: [],
-        output_compatible: false,
-        validation_errors: [
-          "Query A failed validation: Table 'users' not found",
-          "Query B failed validation: Table 'users' not found",
-        ],
-      },
-    }))
-
+  test("returns early with clear error when no schema provided", async () => {
     const { AltimateCoreEquivalenceTool } = await import("../../src/altimate/tools/altimate-core-equivalence")
     const tool = await AltimateCoreEquivalenceTool.init()
     const result = await tool.execute({ sql1: "SELECT * FROM users", sql2: "SELECT * FROM users" }, stubCtx())
 
-    expect(result.metadata.error).toContain("Table 'users' not found")
+    expect(result.metadata.success).toBe(false)
+    expect(result.metadata.error).toContain("No schema provided")
+    expect(telemetryWouldExtract(result.metadata)).not.toBe("unknown error")
+  })
+
+  test("surfaces errors when schema provided but table missing from schema", async () => {
+    const { AltimateCoreEquivalenceTool } = await import("../../src/altimate/tools/altimate-core-equivalence")
+    const tool = await AltimateCoreEquivalenceTool.init()
+    const result = await tool.execute({ sql1: "SELECT * FROM users", sql2: "SELECT * FROM users", schema_context: { orders: { id: "INT" } } }, stubCtx())
+
+    expect(result.metadata.success).toBe(false)
+    expect(result.metadata.error).toBeDefined()
     expect(telemetryWouldExtract(result.metadata)).not.toBe("unknown error")
   })
 })

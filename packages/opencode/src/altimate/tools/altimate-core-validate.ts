@@ -11,6 +11,11 @@ export const AltimateCoreValidateTool = Tool.define("altimate_core_validate", {
     schema_context: z.record(z.string(), z.any()).optional().describe("Inline schema definition"),
   }),
   async execute(args, ctx) {
+    const noSchema = !args.schema_path && (!args.schema_context || Object.keys(args.schema_context).length === 0)
+    if (noSchema) {
+      const error = "No schema provided. Provide schema_context or schema_path so table/column references can be resolved."
+      return { title: "Validate: NO SCHEMA", metadata: { success: false, valid: false, error }, output: `Error: ${error}` }
+    }
     try {
       const result = await Dispatcher.call("altimate_core.validate", {
         sql: args.sql,
@@ -19,18 +24,10 @@ export const AltimateCoreValidateTool = Tool.define("altimate_core_validate", {
       })
       const data = result.data as Record<string, any>
       const error = result.error ?? data.error ?? extractValidationErrors(data)
-      const noSchema = !args.schema_path && !args.schema_context
-      let output = error ? `Error: ${error}` : formatValidate(data)
-      const hasSchemaErrors = data.errors?.some((e: any) =>
-        e.kind?.type === "TableNotFound" || e.kind?.type === "ColumnNotFound"
-      )
-      if (!data.valid && noSchema && hasSchemaErrors) {
-        output += "\n\nNote: No schema context was provided. Table/column references cannot be resolved without schema_context or schema_path. Provide the database schema for accurate validation."
-      }
       return {
         title: `Validate: ${data.valid ? "VALID" : "INVALID"}`,
         metadata: { success: result.success, valid: data.valid, error },
-        output,
+        output: error ? `Error: ${error}` : formatValidate(data),
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)

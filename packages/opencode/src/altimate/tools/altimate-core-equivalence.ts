@@ -12,6 +12,10 @@ export const AltimateCoreEquivalenceTool = Tool.define("altimate_core_equivalenc
     schema_context: z.record(z.string(), z.any()).optional().describe("Inline schema definition"),
   }),
   async execute(args, ctx) {
+    if (!args.schema_path && (!args.schema_context || Object.keys(args.schema_context).length === 0)) {
+      const error = "No schema provided. Provide schema_context or schema_path so table/column references can be resolved."
+      return { title: "Equivalence: NO SCHEMA", metadata: { success: false, equivalent: false, error }, output: `Error: ${error}` }
+    }
     try {
       const result = await Dispatcher.call("altimate_core.equivalence", {
         sql1: args.sql1,

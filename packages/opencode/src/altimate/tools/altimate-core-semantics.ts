@@ -11,6 +11,10 @@ export const AltimateCoreSemanticsTool = Tool.define("altimate_core_semantics", 
     schema_context: z.record(z.string(), z.any()).optional().describe("Inline schema definition"),
   }),
   async execute(args, ctx) {
+    if (!args.schema_path && (!args.schema_context || Object.keys(args.schema_context).length === 0)) {
+      const error = "No schema provided. Provide schema_context or schema_path so table/column references can be resolved."
+      return { title: "Semantics: NO SCHEMA", metadata: { success: false, valid: false, issue_count: 0, error }, output: `Error: ${error}` }
+    }
     try {
       const result = await Dispatcher.call("altimate_core.semantics", {
         sql: args.sql,
