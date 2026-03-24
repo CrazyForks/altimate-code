@@ -25,7 +25,14 @@ function toData(obj: unknown): Record<string, unknown> {
   return JSON.parse(JSON.stringify(obj)) as Record<string, unknown>
 }
 
-/** Wrap a handler body into the standard AltimateCoreResult envelope. */
+/**
+ * Wrap a handler body into the standard AltimateCoreResult envelope.
+ *
+ * Contract: ok(true, data) means "the operation completed." Semantic results
+ * (e.g., SQL is invalid, queries are not equivalent) live in the data fields,
+ * NOT in the success flag. success=false only when the handler throws (fail()).
+ * This prevents semantic findings from being misreported as tool crashes.
+ */
 function ok(
   success: boolean,
   data: Record<string, unknown>,
