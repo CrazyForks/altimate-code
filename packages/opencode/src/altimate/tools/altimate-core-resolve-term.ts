@@ -17,16 +17,17 @@ export const AltimateCoreResolveTermTool = Tool.define("altimate_core_resolve_te
         schema_path: args.schema_path ?? "",
         schema_context: args.schema_context,
       })
-      const data = result.data as Record<string, any>
+      const data = (result.data ?? {}) as Record<string, any>
       const matchCount = data.matches?.length ?? 0
+      const error = result.error ?? data.error
       return {
         title: `Resolve: ${matchCount} match(es) for "${args.term}"`,
-        metadata: { success: result.success, match_count: matchCount },
+        metadata: { success: result.success, match_count: matchCount, ...(error && { error }) },
         output: formatResolveTerm(data, args.term),
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      return { title: "Resolve: ERROR", metadata: { success: false, match_count: 0 }, output: `Failed: ${msg}` }
+      return { title: "Resolve: ERROR", metadata: { success: false, match_count: 0, error: msg }, output: `Failed: ${msg}` }
     }
   },
 })

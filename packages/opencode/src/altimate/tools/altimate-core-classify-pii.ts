@@ -15,17 +15,18 @@ export const AltimateCoreClassifyPiiTool = Tool.define("altimate_core_classify_p
         schema_path: args.schema_path ?? "",
         schema_context: args.schema_context,
       })
-      const data = result.data as Record<string, any>
+      const data = (result.data ?? {}) as Record<string, any>
       const piiColumns = data.columns ?? data.findings ?? []
       const findingCount = piiColumns.length
+      const error = result.error ?? data.error
       return {
         title: `PII Classification: ${findingCount} finding(s)`,
-        metadata: { success: result.success, finding_count: findingCount },
+        metadata: { success: result.success, finding_count: findingCount, ...(error && { error }) },
         output: formatClassifyPii(data),
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      return { title: "PII Classification: ERROR", metadata: { success: false, finding_count: 0 }, output: `Failed: ${msg}` }
+      return { title: "PII Classification: ERROR", metadata: { success: false, finding_count: 0, error: msg }, output: `Failed: ${msg}` }
     }
   },
 })

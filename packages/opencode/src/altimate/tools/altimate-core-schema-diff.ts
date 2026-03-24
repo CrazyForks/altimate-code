@@ -19,17 +19,18 @@ export const AltimateCoreSchemaDiffTool = Tool.define("altimate_core_schema_diff
         schema1_context: args.schema1_context,
         schema2_context: args.schema2_context,
       })
-      const data = result.data as Record<string, any>
+      const data = (result.data ?? {}) as Record<string, any>
       const changeCount = data.changes?.length ?? 0
       const hasBreaking = data.has_breaking_changes ?? data.has_breaking ?? false
+      const error = result.error ?? data.error
       return {
         title: `Schema Diff: ${changeCount} change(s)${hasBreaking ? " (BREAKING)" : ""}`,
-        metadata: { success: result.success, change_count: changeCount, has_breaking: hasBreaking },
+        metadata: { success: result.success, change_count: changeCount, has_breaking: hasBreaking, ...(error && { error }) },
         output: formatSchemaDiff(data),
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      return { title: "Schema Diff: ERROR", metadata: { success: false, change_count: 0, has_breaking: false }, output: `Failed: ${msg}` }
+      return { title: "Schema Diff: ERROR", metadata: { success: false, change_count: 0, has_breaking: false, error: msg }, output: `Failed: ${msg}` }
     }
   },
 })

@@ -17,17 +17,18 @@ export const AltimateCoreQueryPiiTool = Tool.define("altimate_core_query_pii", {
         schema_path: args.schema_path ?? "",
         schema_context: args.schema_context,
       })
-      const data = result.data as Record<string, any>
+      const data = (result.data ?? {}) as Record<string, any>
       const piiCols = data.pii_columns ?? data.exposures ?? []
       const exposureCount = piiCols.length
+      const error = result.error ?? data.error
       return {
         title: `Query PII: ${exposureCount === 0 ? "CLEAN" : `${exposureCount} exposure(s)`}`,
-        metadata: { success: result.success, exposure_count: exposureCount },
+        metadata: { success: result.success, exposure_count: exposureCount, ...(error && { error }) },
         output: formatQueryPii(data),
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      return { title: "Query PII: ERROR", metadata: { success: false, exposure_count: 0 }, output: `Failed: ${msg}` }
+      return { title: "Query PII: ERROR", metadata: { success: false, exposure_count: 0, error: msg }, output: `Failed: ${msg}` }
     }
   },
 })

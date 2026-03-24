@@ -17,15 +17,16 @@ export const AltimateCoreCheckTool = Tool.define("altimate_core_check", {
         schema_path: args.schema_path ?? "",
         schema_context: args.schema_context,
       })
-      const data = result.data as Record<string, any>
+      const data = (result.data ?? {}) as Record<string, any>
+      const error = result.error ?? data.error
       return {
         title: `Check: ${formatCheckTitle(data)}`,
-        metadata: { success: result.success },
+        metadata: { success: result.success, ...(error && { error }) },
         output: formatCheck(data),
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      return { title: "Check: ERROR", metadata: { success: false }, output: `Failed: ${msg}` }
+      return { title: "Check: ERROR", metadata: { success: false, error: msg }, output: `Failed: ${msg}` }
     }
   },
 })

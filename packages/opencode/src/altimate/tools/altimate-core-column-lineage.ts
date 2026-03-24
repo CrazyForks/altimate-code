@@ -19,16 +19,17 @@ export const AltimateCoreColumnLineageTool = Tool.define("altimate_core_column_l
         schema_path: args.schema_path ?? "",
         schema_context: args.schema_context,
       })
-      const data = result.data as Record<string, any>
+      const data = (result.data ?? {}) as Record<string, any>
       const edgeCount = data.column_lineage?.length ?? 0
+      const error = result.error ?? data.error
       return {
         title: `Column Lineage: ${edgeCount} edge(s)`,
-        metadata: { success: result.success, edge_count: edgeCount },
+        metadata: { success: result.success, edge_count: edgeCount, ...(error && { error }) },
         output: formatColumnLineage(data),
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      return { title: "Column Lineage: ERROR", metadata: { success: false, edge_count: 0 }, output: `Failed: ${msg}` }
+      return { title: "Column Lineage: ERROR", metadata: { success: false, edge_count: 0, error: msg }, output: `Failed: ${msg}` }
     }
   },
 })

@@ -17,16 +17,17 @@ export const AltimateCoreTrackLineageTool = Tool.define("altimate_core_track_lin
         schema_path: args.schema_path ?? "",
         schema_context: args.schema_context,
       })
-      const data = result.data as Record<string, any>
+      const data = (result.data ?? {}) as Record<string, any>
       const edgeCount = data.edges?.length ?? 0
+      const error = result.error ?? data.error
       return {
         title: `Track Lineage: ${edgeCount} edge(s) across ${args.queries.length} queries`,
-        metadata: { success: result.success, edge_count: edgeCount },
+        metadata: { success: result.success, edge_count: edgeCount, ...(error && { error }) },
         output: formatTrackLineage(data),
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      return { title: "Track Lineage: ERROR", metadata: { success: false, edge_count: 0 }, output: `Failed: ${msg}` }
+      return { title: "Track Lineage: ERROR", metadata: { success: false, edge_count: 0, error: msg }, output: `Failed: ${msg}` }
     }
   },
 })

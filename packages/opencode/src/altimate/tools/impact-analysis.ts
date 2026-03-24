@@ -145,7 +145,7 @@ export const ImpactAnalysisTool = Tool.define("impact_analysis", {
       const msg = e instanceof Error ? e.message : String(e)
       return {
         title: "Impact: ERROR",
-        metadata: { success: false },
+        metadata: { success: false, error: msg },
         output: `Failed to analyze impact: ${msg}\n\nEnsure the dbt manifest exists (run \`dbt compile\`) and the dispatcher is running.`,
       }
     }

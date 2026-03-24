@@ -17,16 +17,17 @@ export const AltimateCoreMigrationTool = Tool.define("altimate_core_migration", 
         new_ddl: args.new_ddl,
         dialect: args.dialect ?? "",
       })
-      const data = result.data as Record<string, any>
+      const data = (result.data ?? {}) as Record<string, any>
       const riskCount = data.risks?.length ?? 0
+      const error = result.error ?? data.error
       return {
         title: `Migration: ${riskCount === 0 ? "SAFE" : `${riskCount} risk(s)`}`,
-        metadata: { success: result.success, risk_count: riskCount },
+        metadata: { success: result.success, risk_count: riskCount, ...(error && { error }) },
         output: formatMigration(data),
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      return { title: "Migration: ERROR", metadata: { success: false, risk_count: 0 }, output: `Failed: ${msg}` }
+      return { title: "Migration: ERROR", metadata: { success: false, risk_count: 0, error: msg }, output: `Failed: ${msg}` }
     }
   },
 })

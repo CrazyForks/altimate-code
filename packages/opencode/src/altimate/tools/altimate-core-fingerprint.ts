@@ -15,15 +15,16 @@ export const AltimateCoreFingerprintTool = Tool.define("altimate_core_fingerprin
         schema_path: args.schema_path ?? "",
         schema_context: args.schema_context,
       })
-      const data = result.data as Record<string, any>
+      const data = (result.data ?? {}) as Record<string, any>
+      const error = result.error ?? data.error
       return {
         title: `Fingerprint: ${data.fingerprint?.substring(0, 12) ?? "computed"}...`,
-        metadata: { success: result.success, fingerprint: data.fingerprint },
+        metadata: { success: result.success, fingerprint: data.fingerprint, ...(error && { error }) },
         output: `SHA-256: ${data.fingerprint ?? "unknown"}`,
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      return { title: "Fingerprint: ERROR", metadata: { success: false, fingerprint: null }, output: `Failed: ${msg}` }
+      return { title: "Fingerprint: ERROR", metadata: { success: false, fingerprint: null, error: msg }, output: `Failed: ${msg}` }
     }
   },
 })

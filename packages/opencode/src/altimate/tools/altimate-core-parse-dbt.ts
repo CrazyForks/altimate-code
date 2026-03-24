@@ -13,15 +13,16 @@ export const AltimateCoreParseDbtTool = Tool.define("altimate_core_parse_dbt", {
       const result = await Dispatcher.call("altimate_core.parse_dbt", {
         project_dir: args.project_dir,
       })
-      const data = result.data as Record<string, any>
+      const data = (result.data ?? {}) as Record<string, any>
+      const error = result.error ?? data.error
       return {
         title: `Parse dbt: ${data.models?.length ?? 0} models`,
-        metadata: { success: result.success },
+        metadata: { success: result.success, ...(error && { error }) },
         output: formatParseDbt(data),
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      return { title: "Parse dbt: ERROR", metadata: { success: false }, output: `Failed: ${msg}` }
+      return { title: "Parse dbt: ERROR", metadata: { success: false, error: msg }, output: `Failed: ${msg}` }
     }
   },
 })

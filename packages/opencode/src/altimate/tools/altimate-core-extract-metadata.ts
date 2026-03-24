@@ -15,15 +15,16 @@ export const AltimateCoreExtractMetadataTool = Tool.define("altimate_core_extrac
         sql: args.sql,
         dialect: args.dialect ?? "",
       })
-      const data = result.data as Record<string, any>
+      const data = (result.data ?? {}) as Record<string, any>
+      const error = result.error ?? data.error
       return {
         title: `Metadata: ${data.tables?.length ?? 0} tables, ${data.columns?.length ?? 0} columns`,
-        metadata: { success: result.success },
+        metadata: { success: result.success, ...(error && { error }) },
         output: formatMetadata(data),
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      return { title: "Metadata: ERROR", metadata: { success: false }, output: `Failed: ${msg}` }
+      return { title: "Metadata: ERROR", metadata: { success: false, error: msg }, output: `Failed: ${msg}` }
     }
   },
 })

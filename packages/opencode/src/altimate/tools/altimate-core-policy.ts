@@ -19,15 +19,16 @@ export const AltimateCorePolicyTool = Tool.define("altimate_core_policy", {
         schema_path: args.schema_path ?? "",
         schema_context: args.schema_context,
       })
-      const data = result.data as Record<string, any>
+      const data = (result.data ?? {}) as Record<string, any>
+      const error = result.error ?? data.error
       return {
         title: `Policy: ${data.pass ? "PASS" : "VIOLATIONS FOUND"}`,
-        metadata: { success: result.success, pass: data.pass },
+        metadata: { success: result.success, pass: data.pass, ...(error && { error }) },
         output: formatPolicy(data),
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      return { title: "Policy: ERROR", metadata: { success: false, pass: false }, output: `Failed: ${msg}` }
+      return { title: "Policy: ERROR", metadata: { success: false, pass: false, error: msg }, output: `Failed: ${msg}` }
     }
   },
 })

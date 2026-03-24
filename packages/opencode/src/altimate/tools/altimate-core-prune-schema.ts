@@ -17,15 +17,16 @@ export const AltimateCorePruneSchemaTool = Tool.define("altimate_core_prune_sche
         schema_path: args.schema_path ?? "",
         schema_context: args.schema_context,
       })
-      const data = result.data as Record<string, any>
+      const data = (result.data ?? {}) as Record<string, any>
+      const error = result.error ?? data.error
       return {
         title: "Prune Schema: done",
-        metadata: { success: result.success },
+        metadata: { success: result.success, ...(error && { error }) },
         output: formatPruneSchema(data),
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      return { title: "Prune Schema: ERROR", metadata: { success: false }, output: `Failed: ${msg}` }
+      return { title: "Prune Schema: ERROR", metadata: { success: false, error: msg }, output: `Failed: ${msg}` }
     }
   },
 })

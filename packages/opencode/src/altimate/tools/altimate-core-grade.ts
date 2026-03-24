@@ -17,7 +17,7 @@ export const AltimateCoreGradeTool = Tool.define("altimate_core_grade", {
         schema_path: args.schema_path ?? "",
         schema_context: args.schema_context,
       })
-      const data = result.data as Record<string, any>
+      const data = (result.data ?? {}) as Record<string, any>
       const grade = data.overall_grade ?? data.grade
       const score = data.scores?.overall != null ? Math.round(data.scores.overall * 100) : data.score
       const error = result.error ?? data.error

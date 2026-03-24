@@ -25,7 +25,7 @@ export const SqlFixTool = Tool.define("sql_fix", {
           success: result.success,
           suggestion_count: result.suggestion_count,
           has_fix: !!result.fixed_sql,
-          error: result.error,
+          ...(result.error && { error: result.error }),
         },
         output: formatFix(result),
       }
