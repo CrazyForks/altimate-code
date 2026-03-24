@@ -22,12 +22,12 @@ export const AltimateCoreValidateTool = Tool.define("altimate_core_validate", {
         schema_path: args.schema_path ?? "",
         schema_context: args.schema_context,
       })
-      const data = result.data as Record<string, any>
+      const data = (result.data ?? {}) as Record<string, any>
       const error = result.error ?? data.error ?? extractValidationErrors(data)
       return {
         title: `Validate: ${data.valid ? "VALID" : "INVALID"}`,
-        metadata: { success: result.success, valid: data.valid, error },
-        output: error ? `Error: ${error}` : formatValidate(data),
+        metadata: { success: result.success, valid: data.valid, ...(error && { error }) },
+        output: formatValidate(data),
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)

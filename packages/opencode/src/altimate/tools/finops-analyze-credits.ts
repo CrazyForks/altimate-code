@@ -80,10 +80,11 @@ export const FinopsAnalyzeCreditsTool = Tool.define("finops_analyze_credits", {
       })
 
       if (!result.success) {
+        const error = result.error ?? "Unknown error"
         return {
           title: "Credit Analysis: FAILED",
-          metadata: { success: false, total_credits: 0, error: result.error },
-          output: `Failed to analyze credits: ${result.error ?? "Unknown error"}`,
+          metadata: { success: false, total_credits: 0, error },
+          output: `Failed to analyze credits: ${error}`,
         }
       }
 

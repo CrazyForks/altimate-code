@@ -215,8 +215,13 @@ register("sql.fix", async (params) => {
       fixed_sql: f.fixed_sql ?? f.rewritten_sql,
     }))
 
-    const unfixableError = !result.fixed && Array.isArray(result.unfixable_errors) && result.unfixable_errors.length > 0
-      ? result.unfixable_errors.map((e: any) => e.error?.message ?? e.reason ?? String(e)).join("; ")
+    const unfixableMessages = Array.isArray(result.unfixable_errors)
+      ? result.unfixable_errors
+          .map((e: any) => e.error?.message ?? e.message ?? e.reason ?? String(e))
+          .filter((msg: any) => typeof msg === "string" ? msg.trim().length > 0 : Boolean(msg))
+      : []
+    const unfixableError = !result.fixed && unfixableMessages.length > 0
+      ? unfixableMessages.join("; ")
       : undefined
 
     return {

@@ -28,9 +28,9 @@ export const SqlAnalyzeTool = Tool.define("sql_analyze", {
         schema_context: args.schema_context,
       })
 
-      // The handler sets success=false when issues are found, but finding issues
-      // is not a failure — the analysis completed successfully. Only treat it as
-      // a failure when there's an actual error (e.g. parse failure).
+      // The handler returns success=true when analysis completes (issues are
+      // reported via issues/issue_count). Only treat it as a failure when
+      // there's an actual error (e.g. parse failure).
       const isRealFailure = !!result.error
       return {
         title: `Analyze: ${result.error ? "PARSE ERROR" : `${result.issue_count} issue${result.issue_count !== 1 ? "s" : ""}`} [${result.confidence}]`,

@@ -21,13 +21,13 @@ export const AltimateCoreSemanticsTool = Tool.define("altimate_core_semantics", 
         schema_path: args.schema_path ?? "",
         schema_context: args.schema_context,
       })
-      const data = result.data as Record<string, any>
+      const data = (result.data ?? {}) as Record<string, any>
       const issueCount = data.issues?.length ?? 0
       const error = result.error ?? data.error ?? extractSemanticsErrors(data)
       return {
         title: `Semantics: ${data.valid ? "VALID" : `${issueCount} issues`}`,
-        metadata: { success: result.success, valid: data.valid, issue_count: issueCount, error },
-        output: error ? `Error: ${error}` : formatSemantics(data),
+        metadata: { success: result.success, valid: data.valid, issue_count: issueCount, ...(error && { error }) },
+        output: formatSemantics(data),
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)

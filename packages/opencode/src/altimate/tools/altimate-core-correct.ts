@@ -17,12 +17,12 @@ export const AltimateCoreCorrectTool = Tool.define("altimate_core_correct", {
         schema_path: args.schema_path ?? "",
         schema_context: args.schema_context,
       })
-      const data = result.data as Record<string, any>
+      const data = (result.data ?? {}) as Record<string, any>
       const error = result.error ?? data.error ?? extractCorrectErrors(data)
       return {
         title: `Correct: ${data.success ? "CORRECTED" : "COULD NOT CORRECT"}`,
-        metadata: { success: result.success, iterations: data.iterations, error },
-        output: error ? `Error: ${error}` : formatCorrect(data),
+        metadata: { success: result.success, iterations: data.iterations, ...(error && { error }) },
+        output: formatCorrect(data),
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)

@@ -19,15 +19,15 @@ export const AltimateCoreFixTool = Tool.define("altimate_core_fix", {
         schema_context: args.schema_context,
         max_iterations: args.max_iterations ?? 5,
       })
-      const data = result.data as Record<string, any>
+      const data = (result.data ?? {}) as Record<string, any>
       const error = result.error ?? data.error ?? extractFixErrors(data)
       // post_fix_valid=true with no errors means SQL was already valid (nothing to fix)
       const alreadyValid = data.post_fix_valid && !error
       const success = result.success || alreadyValid
       return {
         title: `Fix: ${alreadyValid ? "ALREADY VALID" : data.fixed ? "FIXED" : "COULD NOT FIX"}`,
-        metadata: { success, fixed: !!data.fixed_sql, error },
-        output: error ? `Error: ${error}` : formatFix(data),
+        metadata: { success, fixed: !!data.fixed_sql, ...(error && { error }) },
+        output: formatFix(data),
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
