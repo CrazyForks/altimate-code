@@ -3,6 +3,17 @@ import { Log } from "../util/log"
 import { Flag } from "../flag/flag"
 import { Filesystem } from "../util/filesystem"
 
+// altimate_change start — typed error for stale file detection (#450)
+export class StaleFileError extends Error {
+  public readonly filePath: string
+  constructor(filePath: string, message: string) {
+    super(message)
+    this.name = "StaleFileError"
+    this.filePath = filePath
+  }
+}
+// altimate_change end
+
 export namespace FileTime {
   const log = Log.create({ service: "file.time" })
   // Per-session read times plus per-file write locks.
@@ -63,9 +74,12 @@ export namespace FileTime {
     const mtime = Filesystem.stat(filepath)?.mtime
     // Allow a 50ms tolerance for Windows NTFS timestamp fuzziness / async flushing
     if (mtime && mtime.getTime() > time.getTime() + 50) {
-      throw new Error(
+      // altimate_change start — use typed StaleFileError (#450)
+      throw new StaleFileError(
+        filepath,
         `File ${filepath} has been modified since it was last read.\nLast modification: ${mtime.toISOString()}\nLast read: ${time.toISOString()}\n\nPlease read the file again before modifying it.`,
       )
+      // altimate_change end
     }
   }
 }

@@ -19,7 +19,8 @@ import type { SessionID, MessageID } from "./schema"
 // altimate_change start — import Telemetry for per-generation token tracking
 import { Telemetry } from "@/altimate/telemetry"
 // altimate_change end
-// altimate_change start — import FileTime and Filesystem for stale file recovery (#450)
+// altimate_change start — import StaleFileError and Filesystem for stale file recovery (#450)
+import { StaleFileError } from "@/file/time"
 import { FileTime } from "@/file/time"
 import { Filesystem } from "@/util/filesystem"
 // altimate_change end
@@ -216,17 +217,24 @@ export namespace SessionProcessor {
                   const match = toolcalls[value.toolCallId]
                   if (match && match.state.status === "running") {
                     // altimate_change start — auto-read stale files so model sees current content (#450)
-                    let errorStr = (value.error as any).toString()
-                    const staleFileMatch =
-                      errorStr.match(/File (.+) has been modified since it was last read/) ??
-                      errorStr.match(/You must read file (.+) before overwriting it/)
-                    if (staleFileMatch) {
-                      const staleFilePath = staleFileMatch[1].trim()
+                    let errorStr = String(value.error ?? "Unknown error")
+                    if (value.error instanceof StaleFileError) {
+                      const staleFilePath = value.error.filePath
                       try {
-                        const freshContent = await Filesystem.readText(staleFilePath)
-                        FileTime.read(input.sessionID, staleFilePath)
-                        errorStr += `\n\nThe file has been auto-re-read. Here is the current content:\n<file path="${staleFilePath}">\n${freshContent}\n</file>`
-                        log.info("stale file auto-re-read", { file: staleFilePath, sessionID: input.sessionID })
+                        const stat = Filesystem.stat(staleFilePath)
+                        const MAX_AUTO_READ_BYTES = 50 * 1024
+                        if (!stat) {
+                          errorStr += "\n\nNote: The file no longer exists on disk."
+                        } else if (Number(stat.size) > MAX_AUTO_READ_BYTES) {
+                          FileTime.read(input.sessionID, staleFilePath)
+                          errorStr += `\n\nThe file has been modified (${Math.round(Number(stat.size) / 1024)}KB). It is too large to include here — please use the Read tool to view it.`
+                        } else {
+                          const freshContent = await Filesystem.readText(staleFilePath)
+                          FileTime.read(input.sessionID, staleFilePath)
+                          const fence = "````"
+                          errorStr += `\n\nThe file has been auto-re-read. Here is the current content:\n\n${fence}\n${freshContent}\n${fence}`
+                          log.info("stale file auto-re-read", { file: staleFilePath, sessionID: input.sessionID })
+                        }
                       } catch (readErr) {
                         log.warn("failed to auto-re-read stale file", { file: staleFilePath, error: readErr })
                       }
