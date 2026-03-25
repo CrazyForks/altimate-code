@@ -43,13 +43,15 @@ export interface ResolvedDbt {
  *
  * Priority:
  *  1. ALTIMATE_DBT_PATH env var (explicit user override)
- *  2. Sibling of configured pythonPath (same venv/bin)
- *  3. Project-local .venv/bin/dbt (uv, pdm, venv, rye, poetry in-project)
- *  4. CONDA_PREFIX/bin/dbt (conda environments)
- *  5. VIRTUAL_ENV/bin/dbt (activated venv)
- *  6. Pyenv real path resolution (follow shims)
- *  7. `which dbt` on current PATH
- *  8. Common known locations (~/.local/bin/dbt for pipx, etc.)
+ *  2. Sibling of ALTIMATE_CODE_PYTHON_PATH (set by vscode-altimate-mcp-server)
+ *  3. Sibling of configured pythonPath (same venv/bin)
+ *  4. Project-local .venv/bin/dbt (uv, pdm, venv, rye, poetry in-project)
+ *  5. CONDA_PREFIX/bin/dbt (conda environments)
+ *  6. ALTIMATE_CODE_VIRTUAL_ENV/bin/dbt (set by vscode-altimate-mcp-server)
+ *  7. VIRTUAL_ENV/bin/dbt (activated venv)
+ *  8. Pyenv real path resolution (follow shims)
+ *  9. `which dbt` on current PATH
+ * 10. Common known locations (~/.local/bin/dbt for pipx, etc.)
  *
  * Each candidate is validated by checking it exists and is executable.
  */
@@ -62,7 +64,14 @@ export function resolveDbt(pythonPath?: string, projectRoot?: string): ResolvedD
     candidates.push({ path: envOverride, source: "ALTIMATE_DBT_PATH env var" })
   }
 
-  // 2. Sibling of configured pythonPath (most common: venv, conda, pyenv real path)
+  // 2. Sibling of ALTIMATE_CODE_PYTHON_PATH (injected by vscode-altimate-mcp-server)
+  const altPython = process.env.ALTIMATE_CODE_PYTHON_PATH
+  if (altPython) {
+    const binDir = dirname(altPython)
+    candidates.push({ path: join(binDir, "dbt"), source: "sibling of ALTIMATE_CODE_PYTHON_PATH", binDir })
+  }
+
+  // 3. Sibling of configured pythonPath (most common: venv, conda, pyenv real path)
   if (pythonPath && existsSync(pythonPath)) {
     const binDir = dirname(pythonPath)
     const siblingDbt = join(binDir, "dbt")
@@ -87,7 +96,7 @@ export function resolveDbt(pythonPath?: string, projectRoot?: string): ResolvedD
     }
   }
 
-  // 4. CONDA_PREFIX (conda/mamba/micromamba — set after `conda activate`)
+  // 5. CONDA_PREFIX (conda/mamba/micromamba — set after `conda activate`)
   const condaPrefix = process.env.CONDA_PREFIX
   if (condaPrefix) {
     candidates.push({
@@ -97,7 +106,17 @@ export function resolveDbt(pythonPath?: string, projectRoot?: string): ResolvedD
     })
   }
 
-  // 5. VIRTUAL_ENV (set by venv/virtualenv activate scripts)
+  // 6. ALTIMATE_CODE_VIRTUAL_ENV (injected by vscode-altimate-mcp-server, avoids conflicts with user's VIRTUAL_ENV)
+  const altVenv = process.env.ALTIMATE_CODE_VIRTUAL_ENV
+  if (altVenv) {
+    candidates.push({
+      path: join(altVenv, "bin", "dbt"),
+      source: `ALTIMATE_CODE_VIRTUAL_ENV (${altVenv})`,
+      binDir: join(altVenv, "bin"),
+    })
+  }
+
+  // 7. VIRTUAL_ENV (set by venv/virtualenv activate scripts)
   const virtualEnv = process.env.VIRTUAL_ENV
   if (virtualEnv) {
     candidates.push({
@@ -110,7 +129,7 @@ export function resolveDbt(pythonPath?: string, projectRoot?: string): ResolvedD
   // Helper: current process env (for subprocess calls that need to inherit it)
   const currentEnv = { ...process.env }
 
-  // 6. Pyenv: resolve through shim to real binary
+  // 8. Pyenv: resolve through shim to real binary
   const pyenvRoot = process.env.PYENV_ROOT ?? join(process.env.HOME ?? "", ".pyenv")
   if (existsSync(join(pyenvRoot, "shims", "dbt"))) {
     try {
@@ -128,7 +147,7 @@ export function resolveDbt(pythonPath?: string, projectRoot?: string): ResolvedD
     }
   }
 
-  // 7. asdf/mise shim resolution
+  // 9. asdf/mise shim resolution
   const asdfDataDir = process.env.ASDF_DATA_DIR ?? join(process.env.HOME ?? "", ".asdf")
   if (existsSync(join(asdfDataDir, "shims", "dbt"))) {
     try {
