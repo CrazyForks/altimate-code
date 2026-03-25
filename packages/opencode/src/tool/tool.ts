@@ -58,7 +58,7 @@ export namespace Tool {
     id: string,
     init: Info<Parameters>["init"] | Awaited<ReturnType<Info<Parameters>["init"]>>,
   ): Info<Parameters> {
-  // altimate_change end
+    // altimate_change end
     return {
       id,
       init: async (initCtx) => {
