@@ -29,7 +29,6 @@ export const ImpactAnalysisTool = Tool.define("impact_analysis", {
     manifest_path: z.string().optional().default("target/manifest.json").describe("Path to dbt manifest.json file"),
     dialect: z.string().optional().default("snowflake").describe("SQL dialect for lineage analysis"),
   }),
-  // @ts-expect-error tsgo TS2719 false positive — identical pattern works in other tools
   async execute(args, ctx) {
     try {
       // Step 1: Parse the dbt manifest to get the full DAG
