@@ -27,7 +27,11 @@ export const AltimateCoreResolveTermTool = Tool.define("altimate_core_resolve_te
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      return { title: "Resolve: ERROR", metadata: { success: false, match_count: 0, error: msg }, output: `Failed: ${msg}` }
+      return {
+        title: "Resolve: ERROR",
+        metadata: { success: false, match_count: 0, error: msg },
+        output: `Failed: ${msg}`,
+      }
     }
   },
 })

@@ -27,7 +27,11 @@ export const AltimateCoreTrackLineageTool = Tool.define("altimate_core_track_lin
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      return { title: "Track Lineage: ERROR", metadata: { success: false, edge_count: 0, error: msg }, output: `Failed: ${msg}` }
+      return {
+        title: "Track Lineage: ERROR",
+        metadata: { success: false, edge_count: 0, error: msg },
+        output: `Failed: ${msg}`,
+      }
     }
   },
 })

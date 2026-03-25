@@ -19,9 +19,13 @@ beforeAll(async () => {
   // Trigger the lazy registration hook so it doesn't overwrite mocks later.
   // The hook loads all real native handlers on first Dispatcher.call().
   // We trigger it now, then reset() in beforeEach clears them for mock isolation.
-  try { await Dispatcher.call("__trigger_hook__" as any, {} as any) } catch {}
+  try {
+    await Dispatcher.call("__trigger_hook__" as any, {} as any)
+  } catch {}
 })
-afterAll(() => { delete process.env.ALTIMATE_TELEMETRY_DISABLED })
+afterAll(() => {
+  delete process.env.ALTIMATE_TELEMETRY_DISABLED
+})
 
 // Stub context — tools need a Context object but only use metadata()
 function stubCtx(): any {
@@ -66,14 +70,24 @@ describe("altimate_core_validate error propagation", () => {
       success: true,
       data: {
         valid: false,
-        errors: [{ code: "E001", kind: { type: "TableNotFound" }, message: "Table 'users' not found", suggestions: ["orders"] }],
+        errors: [
+          {
+            code: "E001",
+            kind: { type: "TableNotFound" },
+            message: "Table 'users' not found",
+            suggestions: ["orders"],
+          },
+        ],
         warnings: [],
       },
     }))
 
     const { AltimateCoreValidateTool } = await import("../../src/altimate/tools/altimate-core-validate")
     const tool = await AltimateCoreValidateTool.init()
-    const result = await tool.execute({ sql: "SELECT * FROM users", schema_context: { orders: { id: "INT" } } }, stubCtx())
+    const result = await tool.execute(
+      { sql: "SELECT * FROM users", schema_context: { orders: { id: "INT" } } },
+      stubCtx(),
+    )
 
     expect(result.metadata.success).toBe(true)
     // Validation findings are reported via data fields, not as tool errors
@@ -115,7 +129,10 @@ describe("altimate_core_semantics error propagation", () => {
 
     const { AltimateCoreSemanticsTool } = await import("../../src/altimate/tools/altimate-core-semantics")
     const tool = await AltimateCoreSemanticsTool.init()
-    const result = await tool.execute({ sql: "SELECT * FROM users", schema_context: { orders: { id: "INT" } } }, stubCtx())
+    const result = await tool.execute(
+      { sql: "SELECT * FROM users", schema_context: { orders: { id: "INT" } } },
+      stubCtx(),
+    )
 
     // Handler completed (success=true), but validation_errors are surfaced in metadata.error
     expect(result.metadata.success).toBe(true)
@@ -154,7 +171,10 @@ describe("altimate_core_equivalence error propagation", () => {
 
     const { AltimateCoreEquivalenceTool } = await import("../../src/altimate/tools/altimate-core-equivalence")
     const tool = await AltimateCoreEquivalenceTool.init()
-    const result = await tool.execute({ sql1: "SELECT * FROM users", sql2: "SELECT * FROM users", schema_context: { orders: { id: "INT" } } }, stubCtx())
+    const result = await tool.execute(
+      { sql1: "SELECT * FROM users", sql2: "SELECT * FROM users", schema_context: { orders: { id: "INT" } } },
+      stubCtx(),
+    )
 
     // Equivalence wrapper overrides success via isRealFailure when validation_errors exist
     expect(result.metadata.success).toBe(false)
@@ -180,10 +200,17 @@ describe("altimate_core_fix error propagation", () => {
         iterations: 1,
         fix_time_ms: 0,
         post_fix_valid: false,
-        unfixable_errors: [{
-          error: { code: "E000", kind: { type: "SyntaxError" }, message: "Syntax error: Expected an SQL statement, found: SELCT", suggestions: [] },
-          reason: "No automatic fix available for E000",
-        }],
+        unfixable_errors: [
+          {
+            error: {
+              code: "E000",
+              kind: { type: "SyntaxError" },
+              message: "Syntax error: Expected an SQL statement, found: SELCT",
+              suggestions: [],
+            },
+            reason: "No automatic fix available for E000",
+          },
+        ],
       },
     }))
 
@@ -209,10 +236,19 @@ describe("altimate_core_correct error propagation", () => {
         original_sql: "SELCT * FORM users",
         status: "unfixable",
         total_time_ms: 1,
-        iterations: [{ iteration: 1, input_sql: "SELCT * FORM users", result: "skipped", validation_errors: ["Syntax error"] }],
+        iterations: [
+          { iteration: 1, input_sql: "SELCT * FORM users", result: "skipped", validation_errors: ["Syntax error"] },
+        ],
         final_validation: {
           valid: false,
-          errors: [{ code: "E000", kind: { type: "SyntaxError" }, message: "Syntax error: Expected an SQL statement, found: SELCT", suggestions: [] }],
+          errors: [
+            {
+              code: "E000",
+              kind: { type: "SyntaxError" },
+              message: "Syntax error: Expected an SQL statement, found: SELCT",
+              suggestions: [],
+            },
+          ],
           warnings: [],
         },
         final_score: { syntax_valid: true, lint_score: 1, safety_score: 1, complexity_score: 1, overall: 1 },
@@ -319,7 +355,9 @@ describe("finops_analyze_credits error propagation", () => {
   })
 
   test("surfaces error on catch path", async () => {
-    Dispatcher.register("finops.analyze_credits" as any, async () => { throw new Error("Connection refused") })
+    Dispatcher.register("finops.analyze_credits" as any, async () => {
+      throw new Error("Connection refused")
+    })
 
     const { FinopsAnalyzeCreditsTool } = await import("../../src/altimate/tools/finops-analyze-credits")
     const tool = await FinopsAnalyzeCreditsTool.init()
@@ -378,7 +416,9 @@ describe("finops_warehouse_advice error propagation", () => {
   })
 
   test("surfaces error on catch path", async () => {
-    Dispatcher.register("finops.warehouse_advice" as any, async () => { throw new Error("Timeout") })
+    Dispatcher.register("finops.warehouse_advice" as any, async () => {
+      throw new Error("Timeout")
+    })
 
     const { FinopsWarehouseAdviceTool } = await import("../../src/altimate/tools/finops-warehouse-advice")
     const tool = await FinopsWarehouseAdviceTool.init()
@@ -435,7 +475,10 @@ describe("extractors handle empty message fields", () => {
 
     const { AltimateCoreValidateTool } = await import("../../src/altimate/tools/altimate-core-validate")
     const tool = await AltimateCoreValidateTool.init()
-    const result = await tool.execute({ sql: "SELECT * FROM nonexistent_table", schema_context: { users: { id: "INT" } } }, stubCtx())
+    const result = await tool.execute(
+      { sql: "SELECT * FROM nonexistent_table", schema_context: { users: { id: "INT" } } },
+      stubCtx(),
+    )
     // The error should never be empty string — .filter(Boolean) removes it
     if (result.metadata.error !== undefined) {
       expect(result.metadata.error).not.toBe("")

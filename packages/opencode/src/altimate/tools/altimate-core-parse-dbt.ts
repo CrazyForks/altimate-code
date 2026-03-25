@@ -3,8 +3,7 @@ import { Tool } from "../../tool/tool"
 import { Dispatcher } from "../native"
 
 export const AltimateCoreParseDbtTool = Tool.define("altimate_core_parse_dbt", {
-  description:
-    "Parse a dbt project directory. Extracts models, sources, tests, and project structure for analysis.",
+  description: "Parse a dbt project directory. Extracts models, sources, tests, and project structure for analysis.",
   parameters: z.object({
     project_dir: z.string().describe("Path to the dbt project directory"),
   }),

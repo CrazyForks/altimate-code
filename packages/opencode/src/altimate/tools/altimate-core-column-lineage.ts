@@ -29,7 +29,11 @@ export const AltimateCoreColumnLineageTool = Tool.define("altimate_core_column_l
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      return { title: "Column Lineage: ERROR", metadata: { success: false, edge_count: 0, error: msg }, output: `Failed: ${msg}` }
+      return {
+        title: "Column Lineage: ERROR",
+        metadata: { success: false, edge_count: 0, error: msg },
+        output: `Failed: ${msg}`,
+      }
     }
   },
 })

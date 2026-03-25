@@ -55,7 +55,14 @@ export const SqlAnalyzeTool = Tool.define("sql_analyze", {
       const msg = e instanceof Error ? e.message : String(e)
       return {
         title: "Analyze: ERROR",
-        metadata: { success: false, issueCount: 0, confidence: "unknown", dialect: args.dialect, has_schema: false, error: msg },
+        metadata: {
+          success: false,
+          issueCount: 0,
+          confidence: "unknown",
+          dialect: args.dialect,
+          has_schema: false,
+          error: msg,
+        },
         output: `Failed to analyze SQL: ${msg}\n\nCheck your connection configuration and try again.`,
       }
     }
@@ -71,7 +78,9 @@ function formatAnalysis(result: SqlAnalyzeResult): string {
     return "No anti-patterns or issues detected."
   }
 
-  const lines: string[] = [`Found ${result.issue_count} issue${result.issue_count !== 1 ? "s" : ""} (confidence: ${result.confidence}):`]
+  const lines: string[] = [
+    `Found ${result.issue_count} issue${result.issue_count !== 1 ? "s" : ""} (confidence: ${result.confidence}):`,
+  ]
   if (result.confidence_factors.length > 0) {
     lines.push(`  Note: ${result.confidence_factors.join("; ")}`)
   }

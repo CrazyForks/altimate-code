@@ -89,11 +89,7 @@ export const FinopsUnusedResourcesTool = Tool.define("finops_unused_resources", 
       return {
         title: `Unused Resources: ${total} found`,
         metadata: { success: true, unused_count: total },
-        output: formatUnusedResources(
-          summary,
-          result.unused_tables as unknown[],
-          result.idle_warehouses as unknown[],
-        ),
+        output: formatUnusedResources(summary, result.unused_tables as unknown[], result.idle_warehouses as unknown[]),
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)

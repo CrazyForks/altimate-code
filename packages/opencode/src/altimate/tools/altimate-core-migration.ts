@@ -27,7 +27,11 @@ export const AltimateCoreMigrationTool = Tool.define("altimate_core_migration", 
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      return { title: "Migration: ERROR", metadata: { success: false, risk_count: 0, error: msg }, output: `Failed: ${msg}` }
+      return {
+        title: "Migration: ERROR",
+        metadata: { success: false, risk_count: 0, error: msg },
+        output: `Failed: ${msg}`,
+      }
     }
   },
 })

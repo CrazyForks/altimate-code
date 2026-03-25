@@ -28,7 +28,11 @@ export const AltimateCoreGradeTool = Tool.define("altimate_core_grade", {
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      return { title: "Grade: ERROR", metadata: { success: false, grade: null, score: null, error: msg }, output: `Failed: ${msg}` }
+      return {
+        title: "Grade: ERROR",
+        metadata: { success: false, grade: null, score: null, error: msg },
+        output: `Failed: ${msg}`,
+      }
     }
   },
 })

@@ -48,8 +48,8 @@ export namespace Telemetry {
         // No nested objects: Azure App Insights custom measures must be top-level numbers.
         tokens_input: number
         tokens_output: number
-        tokens_reasoning?: number   // only for reasoning models
-        tokens_cache_read?: number  // only when a cached prompt was reused
+        tokens_reasoning?: number // only for reasoning models
+        tokens_cache_read?: number // only when a cached prompt was reused
         tokens_cache_write?: number // only when a new cache entry was written
       }
     | {
@@ -401,14 +401,7 @@ export namespace Telemetry {
         session_id: string
         tool_name: string
         tool_category: string
-        error_class:
-          | "parse_error"
-          | "connection"
-          | "timeout"
-          | "validation"
-          | "internal"
-          | "permission"
-          | "unknown"
+        error_class: "parse_error" | "connection" | "timeout" | "validation" | "internal" | "permission" | "unknown"
         error_message: string
         input_signature: string
         masked_args?: string
@@ -428,7 +421,7 @@ export namespace Telemetry {
         dialect?: string
         duration_ms: number
       }
-    // altimate_change end
+  // altimate_change end
 
   const ERROR_PATTERNS: Array<{
     class: Telemetry.Event & { type: "core_failure" } extends { error_class: infer C } ? C : never
@@ -491,20 +484,40 @@ export namespace Telemetry {
 
   // Mirrors altimate-sdk (Rust) SENSITIVE_KEYS — keep in sync.
   const SENSITIVE_KEYS: string[] = [
-    "key", "api_key", "apikey", "apiKey", "token", "access_token", "refresh_token",
-    "secret", "secret_key", "password", "passwd", "pwd",
-    "credential", "credentials", "authorization", "auth",
-    "signature", "sig", "private_key", "connection_string",
+    "key",
+    "api_key",
+    "apikey",
+    "apiKey",
+    "token",
+    "access_token",
+    "refresh_token",
+    "secret",
+    "secret_key",
+    "password",
+    "passwd",
+    "pwd",
+    "credential",
+    "credentials",
+    "authorization",
+    "auth",
+    "signature",
+    "sig",
+    "private_key",
+    "connection_string",
     // camelCase variants not caught by prefix/suffix matching
-    "authtoken", "accesstoken", "refreshtoken", "bearertoken", "jwttoken",
-    "jwtsecret", "clientsecret", "appsecret",
+    "authtoken",
+    "accesstoken",
+    "refreshtoken",
+    "bearertoken",
+    "jwttoken",
+    "jwtsecret",
+    "clientsecret",
+    "appsecret",
   ]
 
   function isSensitiveKey(key: string): boolean {
     const lower = key.toLowerCase()
-    return SENSITIVE_KEYS.some(
-      (k) => lower === k || lower.endsWith(`_${k}`) || lower.startsWith(`${k}_`),
-    )
+    return SENSITIVE_KEYS.some((k) => lower === k || lower.endsWith(`_${k}`) || lower.startsWith(`${k}_`))
   }
 
   export function maskString(s: string): string {
@@ -689,7 +702,7 @@ export namespace Telemetry {
       // before Instance.provide()). Treat config failures as "not disabled" —
       // the env var check above is the early-init escape hatch.
       try {
-        const userConfig = await Config.get() as any
+        const userConfig = (await Config.get()) as any
         if (userConfig.telemetry?.disabled) {
           buffer = []
           return

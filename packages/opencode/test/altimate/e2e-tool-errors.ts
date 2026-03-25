@@ -51,7 +51,9 @@ async function check(
 
     if (expect.metadataErrorContains) {
       if (!result.metadata.error?.includes(expect.metadataErrorContains)) {
-        errors.push(`metadata.error should contain "${expect.metadataErrorContains}" but got: ${JSON.stringify(result.metadata.error)}`)
+        errors.push(
+          `metadata.error should contain "${expect.metadataErrorContains}" but got: ${JSON.stringify(result.metadata.error)}`,
+        )
       }
     }
     if (expect.metadataErrorUndefined) {
@@ -95,15 +97,33 @@ async function check(
 // Create a temp schema file for schema_path testing
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-schema-"))
 const schemaJsonPath = path.join(tmpDir, "schema.json")
-fs.writeFileSync(schemaJsonPath, JSON.stringify({
-  tables: {
-    users: { columns: [{ name: "id", type: "INTEGER" }, { name: "name", type: "VARCHAR" }, { name: "email", type: "VARCHAR" }] },
-    orders: { columns: [{ name: "id", type: "INTEGER" }, { name: "user_id", type: "INTEGER" }, { name: "total", type: "DECIMAL" }, { name: "created_at", type: "TIMESTAMP" }] },
-  },
-}))
+fs.writeFileSync(
+  schemaJsonPath,
+  JSON.stringify({
+    tables: {
+      users: {
+        columns: [
+          { name: "id", type: "INTEGER" },
+          { name: "name", type: "VARCHAR" },
+          { name: "email", type: "VARCHAR" },
+        ],
+      },
+      orders: {
+        columns: [
+          { name: "id", type: "INTEGER" },
+          { name: "user_id", type: "INTEGER" },
+          { name: "total", type: "DECIMAL" },
+          { name: "created_at", type: "TIMESTAMP" },
+        ],
+      },
+    },
+  }),
+)
 
 const schemaYamlPath = path.join(tmpDir, "schema.yaml")
-fs.writeFileSync(schemaYamlPath, `tables:
+fs.writeFileSync(
+  schemaYamlPath,
+  `tables:
   users:
     columns:
       - name: id
@@ -120,7 +140,8 @@ fs.writeFileSync(schemaYamlPath, `tables:
         type: INTEGER
       - name: total
         type: DECIMAL
-`)
+`,
+)
 
 const testSql = "SELECT u.id, u.name, o.total FROM users u JOIN orders o ON u.id = o.user_id WHERE o.total > 100"
 const badSql = "SELCT * FORM users"
@@ -132,7 +153,11 @@ const flatSchema = {
 
 async function main() {
   // Force lazy registration
-  await Dispatcher.call("altimate_core.validate" as any, { sql: "SELECT 1", schema_path: "", schema_context: undefined })
+  await Dispatcher.call("altimate_core.validate" as any, {
+    sql: "SELECT 1",
+    schema_path: "",
+    schema_context: undefined,
+  })
 
   console.log("\n" + "=".repeat(70))
   console.log("E2E TOOL ERROR PROPAGATION TESTS")
@@ -146,29 +171,53 @@ async function main() {
   const { AltimateCoreValidateTool } = await import("../../src/altimate/tools/altimate-core-validate")
   const validateTool = await AltimateCoreValidateTool.init()
 
-  await check("validate: no schema → early return with 'No schema provided'", async () => {
-    return validateTool.execute({ sql: testSql }, stubCtx())
-  }, { metadataSuccess: false, metadataErrorContains: "No schema provided", noUnknownError: true })
+  await check(
+    "validate: no schema → early return with 'No schema provided'",
+    async () => {
+      return validateTool.execute({ sql: testSql }, stubCtx())
+    },
+    { metadataSuccess: false, metadataErrorContains: "No schema provided", noUnknownError: true },
+  )
 
-  await check("validate: with schema_context (flat) → success", async () => {
-    return validateTool.execute({ sql: testSql, schema_context: flatSchema }, stubCtx())
-  }, { metadataSuccess: true })
+  await check(
+    "validate: with schema_context (flat) → success",
+    async () => {
+      return validateTool.execute({ sql: testSql, schema_context: flatSchema }, stubCtx())
+    },
+    { metadataSuccess: true },
+  )
 
-  await check("validate: with schema_path (JSON file) → success", async () => {
-    return validateTool.execute({ sql: testSql, schema_path: schemaJsonPath }, stubCtx())
-  }, { metadataSuccess: true })
+  await check(
+    "validate: with schema_path (JSON file) → success",
+    async () => {
+      return validateTool.execute({ sql: testSql, schema_path: schemaJsonPath }, stubCtx())
+    },
+    { metadataSuccess: true },
+  )
 
-  await check("validate: with schema_path (YAML file) → success", async () => {
-    return validateTool.execute({ sql: testSql, schema_path: schemaYamlPath }, stubCtx())
-  }, { metadataSuccess: true })
+  await check(
+    "validate: with schema_path (YAML file) → success",
+    async () => {
+      return validateTool.execute({ sql: testSql, schema_path: schemaYamlPath }, stubCtx())
+    },
+    { metadataSuccess: true },
+  )
 
-  await check("validate: with schema_path (nonexistent file) → error", async () => {
-    return validateTool.execute({ sql: testSql, schema_path: "/tmp/nonexistent-schema-abc123.json" }, stubCtx())
-  }, { metadataSuccess: false, noUnknownError: true })
+  await check(
+    "validate: with schema_path (nonexistent file) → error",
+    async () => {
+      return validateTool.execute({ sql: testSql, schema_path: "/tmp/nonexistent-schema-abc123.json" }, stubCtx())
+    },
+    { metadataSuccess: false, noUnknownError: true },
+  )
 
-  await check("validate: syntax error SQL with schema → error propagated", async () => {
-    return validateTool.execute({ sql: badSql, schema_context: flatSchema }, stubCtx())
-  }, { metadataSuccess: true, metadataErrorContains: "Syntax error", noUnknownError: true })
+  await check(
+    "validate: syntax error SQL with schema → error propagated",
+    async () => {
+      return validateTool.execute({ sql: badSql, schema_context: flatSchema }, stubCtx())
+    },
+    { metadataSuccess: true, metadataErrorContains: "Syntax error", noUnknownError: true },
+  )
 
   // =========================================================================
   // 2. altimate_core_semantics
@@ -178,17 +227,29 @@ async function main() {
   const { AltimateCoreSemanticsTool } = await import("../../src/altimate/tools/altimate-core-semantics")
   const semanticsTool = await AltimateCoreSemanticsTool.init()
 
-  await check("semantics: no schema → early return with 'No schema provided'", async () => {
-    return semanticsTool.execute({ sql: testSql }, stubCtx())
-  }, { metadataSuccess: false, metadataErrorContains: "No schema provided", noUnknownError: true })
+  await check(
+    "semantics: no schema → early return with 'No schema provided'",
+    async () => {
+      return semanticsTool.execute({ sql: testSql }, stubCtx())
+    },
+    { metadataSuccess: false, metadataErrorContains: "No schema provided", noUnknownError: true },
+  )
 
-  await check("semantics: with schema_context → runs (may find issues)", async () => {
-    return semanticsTool.execute({ sql: testSql, schema_context: flatSchema }, stubCtx())
-  }, { noUnknownError: true })
+  await check(
+    "semantics: with schema_context → runs (may find issues)",
+    async () => {
+      return semanticsTool.execute({ sql: testSql, schema_context: flatSchema }, stubCtx())
+    },
+    { noUnknownError: true },
+  )
 
-  await check("semantics: with schema_path → runs", async () => {
-    return semanticsTool.execute({ sql: testSql, schema_path: schemaJsonPath }, stubCtx())
-  }, { noUnknownError: true })
+  await check(
+    "semantics: with schema_path → runs",
+    async () => {
+      return semanticsTool.execute({ sql: testSql, schema_path: schemaJsonPath }, stubCtx())
+    },
+    { noUnknownError: true },
+  )
 
   // =========================================================================
   // 3. altimate_core_equivalence
@@ -200,17 +261,29 @@ async function main() {
 
   const sql2 = "SELECT u.id, u.name, o.total FROM users u INNER JOIN orders o ON u.id = o.user_id WHERE o.total > 100"
 
-  await check("equivalence: no schema → early return with 'No schema provided'", async () => {
-    return equivTool.execute({ sql1: testSql, sql2 }, stubCtx())
-  }, { metadataSuccess: false, metadataErrorContains: "No schema provided", noUnknownError: true })
+  await check(
+    "equivalence: no schema → early return with 'No schema provided'",
+    async () => {
+      return equivTool.execute({ sql1: testSql, sql2 }, stubCtx())
+    },
+    { metadataSuccess: false, metadataErrorContains: "No schema provided", noUnknownError: true },
+  )
 
-  await check("equivalence: with schema_context → runs", async () => {
-    return equivTool.execute({ sql1: testSql, sql2, schema_context: flatSchema }, stubCtx())
-  }, { noUnknownError: true })
+  await check(
+    "equivalence: with schema_context → runs",
+    async () => {
+      return equivTool.execute({ sql1: testSql, sql2, schema_context: flatSchema }, stubCtx())
+    },
+    { noUnknownError: true },
+  )
 
-  await check("equivalence: with schema_path → runs", async () => {
-    return equivTool.execute({ sql1: testSql, sql2, schema_path: schemaJsonPath }, stubCtx())
-  }, { noUnknownError: true })
+  await check(
+    "equivalence: with schema_path → runs",
+    async () => {
+      return equivTool.execute({ sql1: testSql, sql2, schema_path: schemaJsonPath }, stubCtx())
+    },
+    { noUnknownError: true },
+  )
 
   // =========================================================================
   // 4. altimate_core_fix
@@ -220,13 +293,21 @@ async function main() {
   const { AltimateCoreFixTool } = await import("../../src/altimate/tools/altimate-core-fix")
   const fixTool = await AltimateCoreFixTool.init()
 
-  await check("fix: unfixable syntax error → error propagated", async () => {
-    return fixTool.execute({ sql: badSql }, stubCtx())
-  }, { metadataSuccess: true, noUnknownError: true })
+  await check(
+    "fix: unfixable syntax error → error propagated",
+    async () => {
+      return fixTool.execute({ sql: badSql }, stubCtx())
+    },
+    { metadataSuccess: true, noUnknownError: true },
+  )
 
-  await check("fix: valid SQL → success (already valid)", async () => {
-    return fixTool.execute({ sql: "SELECT 1", schema_context: flatSchema }, stubCtx())
-  }, { metadataSuccess: true })
+  await check(
+    "fix: valid SQL → success (already valid)",
+    async () => {
+      return fixTool.execute({ sql: "SELECT 1", schema_context: flatSchema }, stubCtx())
+    },
+    { metadataSuccess: true },
+  )
 
   // =========================================================================
   // 5. altimate_core_correct
@@ -236,9 +317,13 @@ async function main() {
   const { AltimateCoreCorrectTool } = await import("../../src/altimate/tools/altimate-core-correct")
   const correctTool = await AltimateCoreCorrectTool.init()
 
-  await check("correct: unfixable syntax error → error propagated", async () => {
-    return correctTool.execute({ sql: badSql }, stubCtx())
-  }, { metadataSuccess: true, noUnknownError: true })
+  await check(
+    "correct: unfixable syntax error → error propagated",
+    async () => {
+      return correctTool.execute({ sql: badSql }, stubCtx())
+    },
+    { metadataSuccess: true, noUnknownError: true },
+  )
 
   // =========================================================================
   // 6. sql_analyze
@@ -248,23 +333,38 @@ async function main() {
   const { SqlAnalyzeTool } = await import("../../src/altimate/tools/sql-analyze")
   const analyzeTool = await SqlAnalyzeTool.init()
 
-  await check("analyze: no schema → lint issues found (partial success)", async () => {
-    return analyzeTool.execute({ sql: testSql, dialect: "snowflake" }, stubCtx())
-  }, { noUnknownError: true })
+  await check(
+    "analyze: no schema → lint issues found (partial success)",
+    async () => {
+      return analyzeTool.execute({ sql: testSql, dialect: "snowflake" }, stubCtx())
+    },
+    { noUnknownError: true },
+  )
 
-  await check("analyze: with schema_context → richer analysis", async () => {
-    const result = await analyzeTool.execute({ sql: testSql, dialect: "snowflake", schema_context: flatSchema }, stubCtx())
-    // With schema, should get more issues (semantic + lint)
-    const issueCount = result.metadata.issueCount ?? 0
-    if (issueCount <= 1) {
-      console.log(`        NOTE: only ${issueCount} issues with schema (expected > 1 for semantic analysis)`)
-    }
-    return result
-  }, { noUnknownError: true })
+  await check(
+    "analyze: with schema_context → richer analysis",
+    async () => {
+      const result = await analyzeTool.execute(
+        { sql: testSql, dialect: "snowflake", schema_context: flatSchema },
+        stubCtx(),
+      )
+      // With schema, should get more issues (semantic + lint)
+      const issueCount = result.metadata.issueCount ?? 0
+      if (issueCount <= 1) {
+        console.log(`        NOTE: only ${issueCount} issues with schema (expected > 1 for semantic analysis)`)
+      }
+      return result
+    },
+    { noUnknownError: true },
+  )
 
-  await check("analyze: with schema_path → richer analysis", async () => {
-    return analyzeTool.execute({ sql: testSql, dialect: "snowflake", schema_path: schemaJsonPath }, stubCtx())
-  }, { noUnknownError: true })
+  await check(
+    "analyze: with schema_path → richer analysis",
+    async () => {
+      return analyzeTool.execute({ sql: testSql, dialect: "snowflake", schema_path: schemaJsonPath }, stubCtx())
+    },
+    { noUnknownError: true },
+  )
 
   // =========================================================================
   // 7. sql_explain
@@ -274,9 +374,13 @@ async function main() {
   const { SqlExplainTool } = await import("../../src/altimate/tools/sql-explain")
   const explainTool = await SqlExplainTool.init()
 
-  await check("explain: no warehouse → error propagated (not 'unknown error')", async () => {
-    return explainTool.execute({ sql: testSql, analyze: false }, stubCtx())
-  }, { metadataSuccess: false, noUnknownError: true })
+  await check(
+    "explain: no warehouse → error propagated (not 'unknown error')",
+    async () => {
+      return explainTool.execute({ sql: testSql, analyze: false }, stubCtx())
+    },
+    { metadataSuccess: false, noUnknownError: true },
+  )
 
   // =========================================================================
   // 8. finops_query_history
@@ -286,9 +390,13 @@ async function main() {
   const { FinopsQueryHistoryTool } = await import("../../src/altimate/tools/finops-query-history")
   const queryHistTool = await FinopsQueryHistoryTool.init()
 
-  await check("query_history: no warehouse → error propagated", async () => {
-    return queryHistTool.execute({ warehouse: "nonexistent", days: 7, limit: 10 }, stubCtx())
-  }, { metadataSuccess: false, noUnknownError: true })
+  await check(
+    "query_history: no warehouse → error propagated",
+    async () => {
+      return queryHistTool.execute({ warehouse: "nonexistent", days: 7, limit: 10 }, stubCtx())
+    },
+    { metadataSuccess: false, noUnknownError: true },
+  )
 
   // =========================================================================
   // 9. finops_expensive_queries
@@ -298,9 +406,13 @@ async function main() {
   const { FinopsExpensiveQueriesTool } = await import("../../src/altimate/tools/finops-expensive-queries")
   const expensiveTool = await FinopsExpensiveQueriesTool.init()
 
-  await check("expensive_queries: no warehouse → error propagated", async () => {
-    return expensiveTool.execute({ warehouse: "nonexistent", days: 7, limit: 20 }, stubCtx())
-  }, { metadataSuccess: false, noUnknownError: true })
+  await check(
+    "expensive_queries: no warehouse → error propagated",
+    async () => {
+      return expensiveTool.execute({ warehouse: "nonexistent", days: 7, limit: 20 }, stubCtx())
+    },
+    { metadataSuccess: false, noUnknownError: true },
+  )
 
   // =========================================================================
   // 10. finops_analyze_credits
@@ -310,9 +422,13 @@ async function main() {
   const { FinopsAnalyzeCreditsTool } = await import("../../src/altimate/tools/finops-analyze-credits")
   const creditsTool = await FinopsAnalyzeCreditsTool.init()
 
-  await check("analyze_credits: no warehouse → error propagated", async () => {
-    return creditsTool.execute({ warehouse: "nonexistent", days: 30, limit: 50 }, stubCtx())
-  }, { metadataSuccess: false, noUnknownError: true })
+  await check(
+    "analyze_credits: no warehouse → error propagated",
+    async () => {
+      return creditsTool.execute({ warehouse: "nonexistent", days: 30, limit: 50 }, stubCtx())
+    },
+    { metadataSuccess: false, noUnknownError: true },
+  )
 
   // =========================================================================
   // 11. finops_unused_resources
@@ -322,9 +438,13 @@ async function main() {
   const { FinopsUnusedResourcesTool } = await import("../../src/altimate/tools/finops-unused-resources")
   const unusedTool = await FinopsUnusedResourcesTool.init()
 
-  await check("unused_resources: no warehouse → error propagated", async () => {
-    return unusedTool.execute({ warehouse: "nonexistent", days: 30, limit: 50 }, stubCtx())
-  }, { metadataSuccess: false, noUnknownError: true })
+  await check(
+    "unused_resources: no warehouse → error propagated",
+    async () => {
+      return unusedTool.execute({ warehouse: "nonexistent", days: 30, limit: 50 }, stubCtx())
+    },
+    { metadataSuccess: false, noUnknownError: true },
+  )
 
   // =========================================================================
   // 12. finops_warehouse_advice
@@ -334,42 +454,76 @@ async function main() {
   const { FinopsWarehouseAdviceTool } = await import("../../src/altimate/tools/finops-warehouse-advice")
   const adviceTool = await FinopsWarehouseAdviceTool.init()
 
-  await check("warehouse_advice: no warehouse → error propagated", async () => {
-    return adviceTool.execute({ warehouse: "nonexistent", days: 14 }, stubCtx())
-  }, { metadataSuccess: false, noUnknownError: true })
+  await check(
+    "warehouse_advice: no warehouse → error propagated",
+    async () => {
+      return adviceTool.execute({ warehouse: "nonexistent", days: 14 }, stubCtx())
+    },
+    { metadataSuccess: false, noUnknownError: true },
+  )
 
   // =========================================================================
   // Schema resolution edge cases
   // =========================================================================
   console.log("\n--- schema resolution edge cases ---")
 
-  await check("schema_path: empty string → treated as no schema", async () => {
-    return validateTool.execute({ sql: testSql, schema_path: "" }, stubCtx())
-  }, { metadataSuccess: false, metadataErrorContains: "No schema provided", noUnknownError: true })
+  await check(
+    "schema_path: empty string → treated as no schema",
+    async () => {
+      return validateTool.execute({ sql: testSql, schema_path: "" }, stubCtx())
+    },
+    { metadataSuccess: false, metadataErrorContains: "No schema provided", noUnknownError: true },
+  )
 
-  await check("schema_context: empty object → treated as no schema", async () => {
-    return validateTool.execute({ sql: testSql, schema_context: {} }, stubCtx())
-  }, { metadataSuccess: false, metadataErrorContains: "No schema provided", noUnknownError: true })
+  await check(
+    "schema_context: empty object → treated as no schema",
+    async () => {
+      return validateTool.execute({ sql: testSql, schema_context: {} }, stubCtx())
+    },
+    { metadataSuccess: false, metadataErrorContains: "No schema provided", noUnknownError: true },
+  )
 
-  await check("schema_context: array format → works", async () => {
-    return validateTool.execute({
-      sql: "SELECT id FROM users",
-      schema_context: {
-        users: [{ name: "id", type: "INTEGER" }, { name: "name", type: "VARCHAR" }],
-      },
-    }, stubCtx())
-  }, { metadataSuccess: true })
-
-  await check("schema_context: SchemaDefinition format → works", async () => {
-    return validateTool.execute({
-      sql: "SELECT id FROM users",
-      schema_context: {
-        tables: {
-          users: { columns: [{ name: "id", type: "INTEGER" }, { name: "name", type: "VARCHAR" }] },
+  await check(
+    "schema_context: array format → works",
+    async () => {
+      return validateTool.execute(
+        {
+          sql: "SELECT id FROM users",
+          schema_context: {
+            users: [
+              { name: "id", type: "INTEGER" },
+              { name: "name", type: "VARCHAR" },
+            ],
+          },
         },
-      },
-    }, stubCtx())
-  }, { metadataSuccess: true })
+        stubCtx(),
+      )
+    },
+    { metadataSuccess: true },
+  )
+
+  await check(
+    "schema_context: SchemaDefinition format → works",
+    async () => {
+      return validateTool.execute(
+        {
+          sql: "SELECT id FROM users",
+          schema_context: {
+            tables: {
+              users: {
+                columns: [
+                  { name: "id", type: "INTEGER" },
+                  { name: "name", type: "VARCHAR" },
+                ],
+              },
+            },
+          },
+        },
+        stubCtx(),
+      )
+    },
+    { metadataSuccess: true },
+  )
 
   // =========================================================================
   // Summary

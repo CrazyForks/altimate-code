@@ -14,8 +14,13 @@ export const AltimateCoreSemanticsTool = Tool.define("altimate_core_semantics", 
   async execute(args, ctx) {
     const hasSchema = !!(args.schema_path || (args.schema_context && Object.keys(args.schema_context).length > 0))
     if (!hasSchema) {
-      const error = "No schema provided. Provide schema_context or schema_path so table/column references can be resolved."
-      return { title: "Semantics: NO SCHEMA", metadata: { success: false, valid: false, issue_count: 0, has_schema: false, error }, output: `Error: ${error}` }
+      const error =
+        "No schema provided. Provide schema_context or schema_path so table/column references can be resolved."
+      return {
+        title: "Semantics: NO SCHEMA",
+        metadata: { success: false, valid: false, issue_count: 0, has_schema: false, error },
+        output: `Error: ${error}`,
+      }
     }
     try {
       const result = await Dispatcher.call("altimate_core.semantics", {
@@ -47,7 +52,11 @@ export const AltimateCoreSemanticsTool = Tool.define("altimate_core_semantics", 
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      return { title: "Semantics: ERROR", metadata: { success: false, valid: false, issue_count: 0, has_schema: hasSchema, error: msg }, output: `Failed: ${msg}` }
+      return {
+        title: "Semantics: ERROR",
+        metadata: { success: false, valid: false, issue_count: 0, has_schema: hasSchema, error: msg },
+        output: `Failed: ${msg}`,
+      }
     }
   },
 })
@@ -55,7 +64,7 @@ export const AltimateCoreSemanticsTool = Tool.define("altimate_core_semantics", 
 function extractSemanticsErrors(data: Record<string, any>): string | undefined {
   if (Array.isArray(data.validation_errors) && data.validation_errors.length > 0) {
     const msgs = data.validation_errors
-      .map((e: any) => (typeof e === "string" ? e : e.message ?? String(e)))
+      .map((e: any) => (typeof e === "string" ? e : (e.message ?? String(e))))
       .filter(Boolean)
     return msgs.length > 0 ? msgs.join("; ") : undefined
   }

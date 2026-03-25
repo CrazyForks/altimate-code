@@ -20,10 +20,14 @@ beforeAll(async () => {
   // Import native/index.ts to set the lazy registration hook, then consume it.
   // This prevents the hook from firing during tool.execute() and overwriting mocks.
   await import("../../src/altimate/native/index")
-  try { await Dispatcher.call("__trigger_hook__" as any, {} as any) } catch {}
+  try {
+    await Dispatcher.call("__trigger_hook__" as any, {} as any)
+  } catch {}
   Dispatcher.reset()
 })
-afterAll(() => { delete process.env.ALTIMATE_TELEMETRY_DISABLED })
+afterAll(() => {
+  delete process.env.ALTIMATE_TELEMETRY_DISABLED
+})
 
 function stubCtx(): any {
   return {
@@ -118,7 +122,10 @@ describeToolErrorPropagation({
   importPath: "../../src/altimate/tools/altimate-core-check",
   exportName: "AltimateCoreCheckTool",
   args: { sql: "SELECT 1", dialect: "snowflake" },
-  successResponse: { success: true, data: { validation: { valid: true }, lint: { clean: true }, safety: { safe: true }, pii: { findings: [] } } },
+  successResponse: {
+    success: true,
+    data: { validation: { valid: true }, lint: { clean: true }, safety: { safe: true }, pii: { findings: [] } },
+  },
   dataErrorResponse: { success: true, data: { error: "Internal check engine failure" } },
 })
 
@@ -326,7 +333,12 @@ describe("impact_analysis catch error propagation", () => {
     const { ImpactAnalysisTool } = await import("../../src/altimate/tools/impact-analysis")
     const tool = await ImpactAnalysisTool.init()
     const result = await tool.execute(
-      { model: "stg_orders", change_type: "remove" as const, manifest_path: "target/manifest.json", dialect: "snowflake" },
+      {
+        model: "stg_orders",
+        change_type: "remove" as const,
+        manifest_path: "target/manifest.json",
+        dialect: "snowflake",
+      },
       stubCtx(),
     )
 
@@ -374,10 +386,7 @@ describe("sql_fix conditional error spread", () => {
 
     const { SqlFixTool } = await import("../../src/altimate/tools/sql-fix")
     const tool = await SqlFixTool.init()
-    const result = await tool.execute(
-      { sql: "SELCT", error_message: "syntax error", dialect: "snowflake" },
-      stubCtx(),
-    )
+    const result = await tool.execute({ sql: "SELCT", error_message: "syntax error", dialect: "snowflake" }, stubCtx())
 
     expect(result.metadata.error).toBe("Parse failure")
   })

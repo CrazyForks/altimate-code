@@ -24,7 +24,11 @@ export const AltimateCoreFingerprintTool = Tool.define("altimate_core_fingerprin
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      return { title: "Fingerprint: ERROR", metadata: { success: false, fingerprint: null, error: msg }, output: `Failed: ${msg}` }
+      return {
+        title: "Fingerprint: ERROR",
+        metadata: { success: false, fingerprint: null, error: msg },
+        output: `Failed: ${msg}`,
+      }
     }
   },
 })

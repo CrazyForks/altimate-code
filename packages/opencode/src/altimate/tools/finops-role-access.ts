@@ -98,8 +98,7 @@ function formatUserRoles(assignments: unknown[]): string {
 }
 
 export const FinopsRoleGrantsTool = Tool.define("finops_role_grants", {
-  description:
-    "Query RBAC grants — see what permissions are granted to roles and on which objects. Snowflake only.",
+  description: "Query RBAC grants — see what permissions are granted to roles and on which objects. Snowflake only.",
   parameters: z.object({
     warehouse: z.string().describe("Warehouse connection name"),
     role: z.string().optional().describe("Filter to grants for a specific role"),

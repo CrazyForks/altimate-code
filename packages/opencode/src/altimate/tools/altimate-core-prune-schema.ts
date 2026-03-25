@@ -35,7 +35,9 @@ function formatPruneSchema(data: Record<string, any>): string {
   if (data.error) return `Error: ${data.error}`
   const lines: string[] = []
   if (data.tables_pruned != null) {
-    lines.push(`Pruned ${data.tables_pruned} of ${data.total_tables} tables to ${data.relevant_tables?.length ?? "?"} relevant.`)
+    lines.push(
+      `Pruned ${data.tables_pruned} of ${data.total_tables} tables to ${data.relevant_tables?.length ?? "?"} relevant.`,
+    )
   }
   if (data.relevant_tables?.length) {
     lines.push(`Relevant tables: ${data.relevant_tables.join(", ")}`)

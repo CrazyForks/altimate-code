@@ -28,7 +28,11 @@ export const AltimateCoreQueryPiiTool = Tool.define("altimate_core_query_pii", {
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      return { title: "Query PII: ERROR", metadata: { success: false, exposure_count: 0, error: msg }, output: `Failed: ${msg}` }
+      return {
+        title: "Query PII: ERROR",
+        metadata: { success: false, exposure_count: 0, error: msg },
+        output: `Failed: ${msg}`,
+      }
     }
   },
 })

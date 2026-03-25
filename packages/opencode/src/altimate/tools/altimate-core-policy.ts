@@ -42,7 +42,11 @@ export const AltimateCorePolicyTool = Tool.define("altimate_core_policy", {
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      return { title: "Policy: ERROR", metadata: { success: false, pass: false, has_schema: hasSchema, error: msg }, output: `Failed: ${msg}` }
+      return {
+        title: "Policy: ERROR",
+        metadata: { success: false, pass: false, has_schema: hasSchema, error: msg },
+        output: `Failed: ${msg}`,
+      }
     }
   },
 })

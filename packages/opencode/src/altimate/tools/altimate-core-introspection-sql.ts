@@ -26,7 +26,11 @@ export const AltimateCoreIntrospectionSqlTool = Tool.define("altimate_core_intro
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      return { title: "Introspection SQL: ERROR", metadata: { success: false, db_type: args.db_type, error: msg }, output: `Failed: ${msg}` }
+      return {
+        title: "Introspection SQL: ERROR",
+        metadata: { success: false, db_type: args.db_type, error: msg },
+        output: `Failed: ${msg}`,
+      }
     }
   },
 })

@@ -35,19 +35,13 @@ describe("Telemetry.aggregateFindings", () => {
   })
 
   test("handles single finding", () => {
-    const findings: Telemetry.Finding[] = [
-      { category: "syntax_error" },
-    ]
+    const findings: Telemetry.Finding[] = [{ category: "syntax_error" }]
     const result = Telemetry.aggregateFindings(findings)
     expect(result).toEqual({ syntax_error: 1 })
   })
 
   test("handles all same category", () => {
-    const findings: Telemetry.Finding[] = [
-      { category: "lint" },
-      { category: "lint" },
-      { category: "lint" },
-    ]
+    const findings: Telemetry.Finding[] = [{ category: "lint" }, { category: "lint" }, { category: "lint" }]
     const result = Telemetry.aggregateFindings(findings)
     expect(result).toEqual({ lint: 3 })
   })
@@ -58,11 +52,7 @@ describe("Telemetry.aggregateFindings", () => {
 // ---------------------------------------------------------------------------
 describe("sql_quality event shape", () => {
   test("by_category serializes to valid JSON string", () => {
-    const findings: Telemetry.Finding[] = [
-      { category: "lint" },
-      { category: "lint" },
-      { category: "safety" },
-    ]
+    const findings: Telemetry.Finding[] = [{ category: "lint" }, { category: "lint" }, { category: "safety" }]
     const by_category = Telemetry.aggregateFindings(findings)
     const json = JSON.stringify(by_category)
 
@@ -71,12 +61,7 @@ describe("sql_quality event shape", () => {
   })
 
   test("aggregated counts match finding_count", () => {
-    const findings: Telemetry.Finding[] = [
-      { category: "a" },
-      { category: "b" },
-      { category: "c" },
-      { category: "a" },
-    ]
+    const findings: Telemetry.Finding[] = [{ category: "a" }, { category: "b" }, { category: "c" }, { category: "a" }]
     const by_category = Telemetry.aggregateFindings(findings)
     const total = Object.values(by_category).reduce((a, b) => a + b, 0)
     expect(total).toBe(findings.length)
@@ -90,8 +75,22 @@ describe("tool finding extraction patterns", () => {
   test("sql_analyze issues use rule for lint, fall back to type otherwise", () => {
     // Lint issues have rule (e.g. "select_star"), semantic/safety don't
     const issues = [
-      { type: "lint", rule: "select_star", severity: "warning", message: "...", recommendation: "...", confidence: "high" },
-      { type: "lint", rule: "filter_has_func", severity: "warning", message: "...", recommendation: "...", confidence: "high" },
+      {
+        type: "lint",
+        rule: "select_star",
+        severity: "warning",
+        message: "...",
+        recommendation: "...",
+        confidence: "high",
+      },
+      {
+        type: "lint",
+        rule: "filter_has_func",
+        severity: "warning",
+        message: "...",
+        recommendation: "...",
+        confidence: "high",
+      },
       { type: "semantic", severity: "warning", message: "...", recommendation: "...", confidence: "medium" },
       { type: "safety", severity: "high", message: "...", recommendation: "...", confidence: "high" },
     ]
@@ -203,7 +202,13 @@ describe("tool finding extraction patterns", () => {
   test("check tool aggregates validation, lint, safety, and pii findings", () => {
     const data = {
       validation: { valid: false, errors: [{ message: "syntax error" }] },
-      lint: { clean: false, findings: [{ rule: "select_star", severity: "warning", message: "..." }, { rule: "filter_has_func", severity: "warning", message: "..." }] },
+      lint: {
+        clean: false,
+        findings: [
+          { rule: "select_star", severity: "warning", message: "..." },
+          { rule: "filter_has_func", severity: "warning", message: "..." },
+        ],
+      },
       safety: { safe: false, threats: [{ type: "sql_injection", severity: "high", description: "..." }] },
       pii: { findings: [{ column: "email", category: "email", confidence: "high" }] },
     }
@@ -266,9 +271,7 @@ describe("tool finding extraction patterns", () => {
         { type: "cartesian_product", severity: "error", message: "..." },
         { type: "select_star", severity: "warning", message: "..." },
       ],
-      suggestions: [
-        { type: "cte_elimination", impact: "high", description: "..." },
-      ],
+      suggestions: [{ type: "cte_elimination", impact: "high", description: "..." }],
     }
     const findings: Telemetry.Finding[] = [
       ...result.anti_patterns.map((ap) => ({ category: ap.type ?? "anti_pattern" })),

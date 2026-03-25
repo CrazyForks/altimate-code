@@ -17,9 +17,7 @@ export const SqlOptimizeTool = Tool.define("sql_optimize", {
     schema_context: z
       .record(z.string(), z.any())
       .optional()
-      .describe(
-        'Optional schema mapping for full optimization. Format: {"table_name": {"col_name": "TYPE", ...}}',
-      ),
+      .describe('Optional schema mapping for full optimization. Format: {"table_name": {"col_name": "TYPE", ...}}'),
   }),
   async execute(args, ctx) {
     try {
@@ -57,7 +55,16 @@ export const SqlOptimizeTool = Tool.define("sql_optimize", {
       const msg = e instanceof Error ? e.message : String(e)
       return {
         title: "Optimize: ERROR",
-        metadata: { success: false, suggestionCount: 0, antiPatternCount: 0, hasOptimizedSql: false, confidence: "unknown", has_schema: false, dialect: args.dialect, error: msg },
+        metadata: {
+          success: false,
+          suggestionCount: 0,
+          antiPatternCount: 0,
+          hasOptimizedSql: false,
+          confidence: "unknown",
+          has_schema: false,
+          dialect: args.dialect,
+          error: msg,
+        },
         output: `Failed to optimize SQL: ${msg}\n\nCheck your connection configuration and try again.`,
       }
     }

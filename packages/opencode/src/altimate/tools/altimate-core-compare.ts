@@ -27,7 +27,11 @@ export const AltimateCoreCompareTool = Tool.define("altimate_core_compare", {
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      return { title: "Compare: ERROR", metadata: { success: false, difference_count: 0, error: msg }, output: `Failed: ${msg}` }
+      return {
+        title: "Compare: ERROR",
+        metadata: { success: false, difference_count: 0, error: msg },
+        output: `Failed: ${msg}`,
+      }
     }
   },
 })

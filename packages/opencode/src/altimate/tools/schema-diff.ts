@@ -54,7 +54,15 @@ export const SchemaDiffTool = Tool.define("schema_diff", {
       const msg = e instanceof Error ? e.message : String(e)
       return {
         title: "Schema Diff: ERROR",
-        metadata: { success: false, changeCount: 0, breakingCount: 0, hasBreakingChanges: false, has_schema: false, dialect: args.dialect, error: msg },
+        metadata: {
+          success: false,
+          changeCount: 0,
+          breakingCount: 0,
+          hasBreakingChanges: false,
+          has_schema: false,
+          dialect: args.dialect,
+          error: msg,
+        },
         output: `Failed to diff schema: ${msg}\n\nCheck your connection configuration and try again.`,
       }
     }
@@ -86,16 +94,16 @@ function formatSchemaDiff(result: SchemaDiffResult): string {
   const lines: string[] = []
   const summary = result.summary
 
-  lines.push(
-    `Schema comparison: ${summary.old_column_count ?? "?"} → ${summary.new_column_count ?? "?"} columns`,
-  )
+  lines.push(`Schema comparison: ${summary.old_column_count ?? "?"} → ${summary.new_column_count ?? "?"} columns`)
 
   if (result.has_breaking_changes) {
     lines.push("⚠ BREAKING CHANGES DETECTED")
   }
 
   lines.push("")
-  lines.push(`  Dropped: ${summary.dropped ?? 0} | Added: ${summary.added ?? 0} | Type Changed: ${summary.type_changed ?? 0} | Renamed: ${summary.renamed ?? 0}`)
+  lines.push(
+    `  Dropped: ${summary.dropped ?? 0} | Added: ${summary.added ?? 0} | Type Changed: ${summary.type_changed ?? 0} | Renamed: ${summary.renamed ?? 0}`,
+  )
   lines.push("")
 
   // Group by severity

@@ -45,7 +45,9 @@ export const SchemaDetectPiiTool = Tool.define("schema_detect_pii", {
 
 function formatPii(result: PiiDetectResult): string {
   const lines: string[] = []
-  lines.push(`Scanned ${result.columns_scanned} columns, found ${result.finding_count} potential PII columns in ${result.tables_with_pii} tables.`)
+  lines.push(
+    `Scanned ${result.columns_scanned} columns, found ${result.finding_count} potential PII columns in ${result.tables_with_pii} tables.`,
+  )
   lines.push("")
 
   lines.push("=== By Category ===")

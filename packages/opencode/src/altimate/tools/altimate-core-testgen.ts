@@ -28,7 +28,11 @@ export const AltimateCoreTestgenTool = Tool.define("altimate_core_testgen", {
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      return { title: "TestGen: ERROR", metadata: { success: false, test_count: 0, error: msg }, output: `Failed: ${msg}` }
+      return {
+        title: "TestGen: ERROR",
+        metadata: { success: false, test_count: 0, error: msg },
+        output: `Failed: ${msg}`,
+      }
     }
   },
 })

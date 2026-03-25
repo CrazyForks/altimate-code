@@ -29,7 +29,11 @@ export const AltimateCoreCompleteTool = Tool.define("altimate_core_complete", {
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      return { title: "Complete: ERROR", metadata: { success: false, suggestion_count: 0, error: msg }, output: `Failed: ${msg}` }
+      return {
+        title: "Complete: ERROR",
+        metadata: { success: false, suggestion_count: 0, error: msg },
+        output: `Failed: ${msg}`,
+      }
     }
   },
 })

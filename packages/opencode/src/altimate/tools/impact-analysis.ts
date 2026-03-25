@@ -20,26 +20,14 @@ export const ImpactAnalysisTool = Tool.define("impact_analysis", {
     '- impact_analysis({ manifest_path: "target/manifest.json", model: "dim_customers", change_type: "retype" })',
   ].join("\n"),
   parameters: z.object({
-    model: z
-      .string()
-      .describe("dbt model name to analyze impact for (e.g., 'stg_orders', 'dim_customers')"),
+    model: z.string().describe("dbt model name to analyze impact for (e.g., 'stg_orders', 'dim_customers')"),
     column: z
       .string()
       .optional()
       .describe("Specific column to trace impact for. If omitted, analyzes model-level impact."),
-    change_type: z
-      .enum(["remove", "rename", "retype", "add", "modify"])
-      .describe("Type of change being considered"),
-    manifest_path: z
-      .string()
-      .optional()
-      .default("target/manifest.json")
-      .describe("Path to dbt manifest.json file"),
-    dialect: z
-      .string()
-      .optional()
-      .default("snowflake")
-      .describe("SQL dialect for lineage analysis"),
+    change_type: z.enum(["remove", "rename", "retype", "add", "modify"]).describe("Type of change being considered"),
+    manifest_path: z.string().optional().default("target/manifest.json").describe("Path to dbt manifest.json file"),
+    dialect: z.string().optional().default("snowflake").describe("SQL dialect for lineage analysis"),
   }),
   // @ts-expect-error tsgo TS2719 false positive — identical pattern works in other tools
   async execute(args, ctx) {
@@ -122,13 +110,7 @@ export const ImpactAnalysisTool = Tool.define("impact_analysis", {
 
       const totalAffected = downstream.length
       const severity =
-        totalAffected === 0
-          ? "SAFE"
-          : totalAffected <= 3
-            ? "LOW"
-            : totalAffected <= 10
-              ? "MEDIUM"
-              : "HIGH"
+        totalAffected === 0 ? "SAFE" : totalAffected <= 3 ? "LOW" : totalAffected <= 10 ? "MEDIUM" : "HIGH"
 
       // altimate_change start — sql quality findings for telemetry
       const findings: Telemetry.Finding[] = []

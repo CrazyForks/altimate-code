@@ -26,7 +26,11 @@ export const AltimateCoreClassifyPiiTool = Tool.define("altimate_core_classify_p
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      return { title: "PII Classification: ERROR", metadata: { success: false, finding_count: 0, error: msg }, output: `Failed: ${msg}` }
+      return {
+        title: "PII Classification: ERROR",
+        metadata: { success: false, finding_count: 0, error: msg },
+        output: `Failed: ${msg}`,
+      }
     }
   },
 })

@@ -16,9 +16,7 @@ export const SqlRewriteTool = Tool.define("sql_rewrite", {
     schema_context: z
       .record(z.string(), z.any())
       .optional()
-      .describe(
-        'Optional schema mapping for SELECT * expansion. Format: {"table_name": {"col_name": "TYPE", ...}}',
-      ),
+      .describe('Optional schema mapping for SELECT * expansion. Format: {"table_name": {"col_name": "TYPE", ...}}'),
   }),
   async execute(args, ctx) {
     try {

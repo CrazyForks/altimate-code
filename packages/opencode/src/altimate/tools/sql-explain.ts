@@ -9,7 +9,11 @@ export const SqlExplainTool = Tool.define("sql_explain", {
   parameters: z.object({
     sql: z.string().describe("SQL query to explain"),
     warehouse: z.string().optional().describe("Warehouse connection name"),
-    analyze: z.boolean().optional().default(false).describe("Run EXPLAIN ANALYZE (actually executes the query, slower but more accurate)"),
+    analyze: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe("Run EXPLAIN ANALYZE (actually executes the query, slower but more accurate)"),
   }),
   async execute(args, ctx) {
     try {

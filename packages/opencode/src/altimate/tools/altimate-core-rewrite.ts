@@ -28,7 +28,11 @@ export const AltimateCoreRewriteTool = Tool.define("altimate_core_rewrite", {
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      return { title: "Rewrite: ERROR", metadata: { success: false, rewrite_count: 0, error: msg }, output: `Failed: ${msg}` }
+      return {
+        title: "Rewrite: ERROR",
+        metadata: { success: false, rewrite_count: 0, error: msg },
+        output: `Failed: ${msg}`,
+      }
     }
   },
 })

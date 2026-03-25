@@ -40,7 +40,11 @@ export const AltimateCoreCorrectTool = Tool.define("altimate_core_correct", {
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      return { title: "Correct: ERROR", metadata: { success: false, iterations: 0, has_schema: hasSchema, error: msg }, output: `Failed: ${msg}` }
+      return {
+        title: "Correct: ERROR",
+        metadata: { success: false, iterations: 0, has_schema: hasSchema, error: msg },
+        output: `Failed: ${msg}`,
+      }
     }
   },
 })

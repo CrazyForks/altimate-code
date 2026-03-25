@@ -15,8 +15,13 @@ export const AltimateCoreEquivalenceTool = Tool.define("altimate_core_equivalenc
   async execute(args, ctx) {
     const hasSchema = !!(args.schema_path || (args.schema_context && Object.keys(args.schema_context).length > 0))
     if (!hasSchema) {
-      const error = "No schema provided. Provide schema_context or schema_path so table/column references can be resolved."
-      return { title: "Equivalence: NO SCHEMA", metadata: { success: false, equivalent: false, has_schema: false, error }, output: `Error: ${error}` }
+      const error =
+        "No schema provided. Provide schema_context or schema_path so table/column references can be resolved."
+      return {
+        title: "Equivalence: NO SCHEMA",
+        metadata: { success: false, equivalent: false, has_schema: false, error },
+        output: `Error: ${error}`,
+      }
     }
     try {
       const result = await Dispatcher.call("altimate_core.equivalence", {
@@ -51,7 +56,11 @@ export const AltimateCoreEquivalenceTool = Tool.define("altimate_core_equivalenc
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      return { title: "Equivalence: ERROR", metadata: { success: false, equivalent: false, has_schema: hasSchema, error: msg }, output: `Failed: ${msg}` }
+      return {
+        title: "Equivalence: ERROR",
+        metadata: { success: false, equivalent: false, has_schema: hasSchema, error: msg },
+        output: `Failed: ${msg}`,
+      }
     }
   },
 })
@@ -59,7 +68,7 @@ export const AltimateCoreEquivalenceTool = Tool.define("altimate_core_equivalenc
 function extractEquivalenceErrors(data: Record<string, any>): string | undefined {
   if (Array.isArray(data.validation_errors) && data.validation_errors.length > 0) {
     const msgs = data.validation_errors
-      .map((e: any) => (typeof e === "string" ? e : e.message ?? String(e)))
+      .map((e: any) => (typeof e === "string" ? e : (e.message ?? String(e))))
       .filter(Boolean)
     return msgs.length > 0 ? msgs.join("; ") : undefined
   }

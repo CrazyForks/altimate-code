@@ -4,7 +4,8 @@ import { Dispatcher } from "../native"
 import type { SchemaCacheStatusResult } from "../native/types"
 
 export const SchemaCacheStatusTool = Tool.define("schema_cache_status", {
-  description: "Show status of the local schema cache — which warehouses are indexed, how many tables/columns, when last refreshed.",
+  description:
+    "Show status of the local schema cache — which warehouses are indexed, how many tables/columns, when last refreshed.",
   parameters: z.object({}),
   async execute(args, ctx) {
     try {
@@ -45,9 +46,7 @@ function formatStatus(result: SchemaCacheStatusResult): string {
     lines.push("----------|------|---------|--------|---------|-------------")
     for (const w of result.warehouses) {
       const indexed = w.last_indexed ? new Date(w.last_indexed).toLocaleString() : "never"
-      lines.push(
-        `${w.name} | ${w.type} | ${w.schemas_count} | ${w.tables_count} | ${w.columns_count} | ${indexed}`,
-      )
+      lines.push(`${w.name} | ${w.type} | ${w.schemas_count} | ${w.tables_count} | ${w.columns_count} | ${indexed}`)
     }
   }
 
