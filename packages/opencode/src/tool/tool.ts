@@ -11,8 +11,10 @@ import { Telemetry } from "../altimate/telemetry"
 export namespace Tool {
   interface Metadata {
     [key: string]: any
+    // altimate_change start — standard error field for telemetry extraction
     /** Standard error field — set by tools on failure so telemetry can extract it. */
     error?: string
+    // altimate_change end
   }
 
   export interface InitContext {
@@ -51,10 +53,12 @@ export namespace Tool {
   export type InferParameters<T extends Info> = T extends Info<infer P> ? z.infer<P> : never
   export type InferMetadata<T extends Info> = T extends Info<any, infer M> ? M : never
 
+  // altimate_change start — simplify define() signature, Result generic was unused
   export function define<Parameters extends z.ZodType>(
     id: string,
     init: Info<Parameters>["init"] | Awaited<ReturnType<Info<Parameters>["init"]>>,
   ): Info<Parameters> {
+  // altimate_change end
     return {
       id,
       init: async (initCtx) => {
@@ -140,10 +144,7 @@ export namespace Tool {
               })
             }
             if (isSoftFailure) {
-              const errorMsg =
-                typeof result.metadata?.error === "string"
-                  ? result.metadata.error
-                  : "unknown error"
+              const errorMsg = typeof result.metadata?.error === "string" ? result.metadata.error : "unknown error"
               const maskedErrorMsg = Telemetry.maskString(errorMsg).slice(0, 500)
               Telemetry.track({
                 type: "core_failure",
