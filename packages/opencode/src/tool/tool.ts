@@ -145,9 +145,10 @@ export namespace Tool {
             }
             if (isSoftFailure) {
               // prettier-ignore
-              const errorMsg = typeof result.metadata?.error === "string"
-                ? result.metadata.error
-                : "unknown error"
+              const errorMsg =
+                typeof result.metadata?.error === "string"
+                  ? result.metadata.error
+                  : "unknown error"
               const maskedErrorMsg = Telemetry.maskString(errorMsg).slice(0, 500)
               Telemetry.track({
                 type: "core_failure",
