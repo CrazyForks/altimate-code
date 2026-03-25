@@ -45,13 +45,14 @@ export interface ResolvedDbt {
  *  1. ALTIMATE_DBT_PATH env var (explicit user override)
  *  2. Sibling of ALTIMATE_CODE_PYTHON_PATH (set by vscode-altimate-mcp-server)
  *  3. Sibling of configured pythonPath (same venv/bin)
- *  4. Project-local .venv/bin/dbt (uv, pdm, venv, rye, poetry in-project)
- *  5. CONDA_PREFIX/bin/dbt (conda environments)
- *  6. ALTIMATE_CODE_VIRTUAL_ENV/bin/dbt (set by vscode-altimate-mcp-server)
+ *  4. ALTIMATE_CODE_VIRTUAL_ENV/bin/dbt (set by vscode-altimate-mcp-server)
+ *  5. Project-local .venv/bin/dbt (uv, pdm, venv, rye, poetry in-project)
+ *  6. CONDA_PREFIX/bin/dbt (conda environments)
  *  7. VIRTUAL_ENV/bin/dbt (activated venv)
  *  8. Pyenv real path resolution (follow shims)
- *  9. `which dbt` on current PATH
- * 10. Common known locations (~/.local/bin/dbt for pipx, etc.)
+ *  9. asdf/mise shim resolution
+ * 10. `which dbt` on current PATH
+ * 11. Common known locations (~/.local/bin/dbt for pipx, etc.)
  *
  * Each candidate is validated by checking it exists and is executable.
  */
@@ -88,31 +89,35 @@ export function resolveDbt(pythonPath?: string, projectRoot?: string): ResolvedD
     } catch {}
   }
 
-  // 3. Project-local .venv/bin/dbt (uv, pdm, venv, poetry in-project, rye)
-  if (projectRoot) {
-    for (const venvDir of [".venv", "venv", "env"]) {
-      const localDbt = join(projectRoot, venvDir, "bin", "dbt")
-      candidates.push({ path: localDbt, source: `${venvDir}/ in project root`, binDir: join(projectRoot, venvDir, "bin") })
-    }
-  }
-
-  // 5. CONDA_PREFIX (conda/mamba/micromamba — set after `conda activate`)
-  const condaPrefix = process.env.CONDA_PREFIX
-  if (condaPrefix) {
-    candidates.push({
-      path: join(condaPrefix, "bin", "dbt"),
-      source: `CONDA_PREFIX (${condaPrefix})`,
-      binDir: join(condaPrefix, "bin"),
-    })
-  }
-
-  // 6. ALTIMATE_CODE_VIRTUAL_ENV (injected by vscode-altimate-mcp-server, avoids conflicts with user's VIRTUAL_ENV)
+  // 4. ALTIMATE_CODE_VIRTUAL_ENV (injected by vscode-altimate-mcp-server, avoids conflicts with user's VIRTUAL_ENV)
   const altVenv = process.env.ALTIMATE_CODE_VIRTUAL_ENV
   if (altVenv) {
     candidates.push({
       path: join(altVenv, "bin", "dbt"),
       source: `ALTIMATE_CODE_VIRTUAL_ENV (${altVenv})`,
       binDir: join(altVenv, "bin"),
+    })
+  }
+
+  // 5. Project-local .venv/bin/dbt (uv, pdm, venv, poetry in-project, rye)
+  if (projectRoot) {
+    for (const venvDir of [".venv", "venv", "env"]) {
+      const localDbt = join(projectRoot, venvDir, "bin", "dbt")
+      candidates.push({
+        path: localDbt,
+        source: `${venvDir}/ in project root`,
+        binDir: join(projectRoot, venvDir, "bin"),
+      })
+    }
+  }
+
+  // 6. CONDA_PREFIX (conda/mamba/micromamba — set after `conda activate`)
+  const condaPrefix = process.env.CONDA_PREFIX
+  if (condaPrefix) {
+    candidates.push({
+      path: join(condaPrefix, "bin", "dbt"),
+      source: `CONDA_PREFIX (${condaPrefix})`,
+      binDir: join(condaPrefix, "bin"),
     })
   }
 
@@ -162,7 +167,7 @@ export function resolveDbt(pythonPath?: string, projectRoot?: string): ResolvedD
     } catch {}
   }
 
-  // 8. `which dbt` on current PATH (catches pipx ~/.local/bin, system pip, homebrew, etc.)
+  // 10. `which dbt` on current PATH (catches pipx ~/.local/bin, system pip, homebrew, etc.)
   try {
     const whichDbt = execFileSync("which", ["dbt"], {
       encoding: "utf-8",
@@ -174,7 +179,7 @@ export function resolveDbt(pythonPath?: string, projectRoot?: string): ResolvedD
     }
   } catch {}
 
-  // 9. Common known locations (last resort)
+  // 11. Common known locations (last resort)
   const home = process.env.HOME ?? ""
   const knownPaths = [
     { path: join(home, ".local", "bin", "dbt"), source: "~/.local/bin/dbt (pipx/user pip)" },
@@ -202,9 +207,7 @@ export function resolveDbt(pythonPath?: string, projectRoot?: string): ResolvedD
  */
 export function validateDbt(resolved: ResolvedDbt): { version: string; isFusion: boolean } | null {
   try {
-    const env = resolved.binDir
-      ? { ...process.env, PATH: `${resolved.binDir}:${process.env.PATH}` }
-      : process.env
+    const env = resolved.binDir ? { ...process.env, PATH: `${resolved.binDir}:${process.env.PATH}` } : process.env
 
     const out = execFileSync(resolved.path, ["--version"], {
       encoding: "utf-8",

@@ -35,9 +35,13 @@ export function findProjectRoot(start = process.cwd()): string | null {
 
 /**
  * Discover the Python binary for a given project root.
- * Priority: ALTIMATE_CODE_VIRTUAL_ENV → project-local .venv → VIRTUAL_ENV → CONDA_PREFIX → which python3
+ * Priority: ALTIMATE_CODE_PYTHON_PATH → ALTIMATE_CODE_VIRTUAL_ENV → project-local .venv → VIRTUAL_ENV → CONDA_PREFIX → which python3
  */
 export function discoverPython(projectRoot: string): string {
+  // ALTIMATE_CODE_PYTHON_PATH (explicit selection from vscode-altimate-mcp-server — highest priority)
+  const altPython = process.env.ALTIMATE_CODE_PYTHON_PATH
+  if (altPython && existsSync(altPython)) return altPython
+
   // ALTIMATE_CODE_VIRTUAL_ENV (injected by vscode-altimate-mcp-server — explicit user selection wins)
   const altVenv = process.env.ALTIMATE_CODE_VIRTUAL_ENV
   if (altVenv) {
@@ -85,8 +89,12 @@ export function discoverPython(projectRoot: string): string {
 async function read(): Promise<Config | null> {
   const p = configPath()
   if (existsSync(p)) {
-    const raw = await readFile(p, "utf-8")
-    return JSON.parse(raw) as Config
+    try {
+      const raw = await readFile(p, "utf-8")
+      return JSON.parse(raw) as Config
+    } catch {
+      // Malformed config — fall through to auto-discovery
+    }
   }
   // No config file — auto-discover from cwd so `altimate-dbt init` isn't required
   const projectRoot = findProjectRoot()

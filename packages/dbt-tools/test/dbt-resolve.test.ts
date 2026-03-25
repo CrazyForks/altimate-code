@@ -27,7 +27,9 @@ function fakePython(dir: string): string {
   chmodSync(p, 0o755)
   // Also create python3 symlink
   const p3 = join(dir, "python3")
-  try { symlinkSync(p, p3) } catch {}
+  try {
+    symlinkSync(p, p3)
+  } catch {}
   return p
 }
 
@@ -38,7 +40,9 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  try { rmSync(tempDir, { recursive: true, force: true }) } catch {}
+  try {
+    rmSync(tempDir, { recursive: true, force: true })
+  } catch {}
 })
 
 // ---------------------------------------------------------------------------

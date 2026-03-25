@@ -20,9 +20,15 @@ describe("config", () => {
   })
 
   test("read returns null for missing file", async () => {
-    const { read } = await import("../src/config")
-    const result = await read()
-    expect(result).toBeNull()
+    const origCwd = process.cwd()
+    process.chdir(dir)
+    try {
+      const { read } = await import("../src/config")
+      const result = await read()
+      expect(result).toBeNull()
+    } finally {
+      process.chdir(origCwd)
+    }
   })
 
   test("write and read round-trip", async () => {
@@ -71,6 +77,31 @@ describe("config", () => {
       expect(realpathSync(result!.projectRoot)).toBe(realpathSync(dir))
       expect(result!.dbtIntegration).toBe("corecommand")
       expect(result!.queryLimit).toBe(500)
+    } finally {
+      process.chdir(origCwd)
+    }
+  })
+
+  test("read falls back to auto-discovery on malformed config file", async () => {
+    const { read } = await import("../src/config")
+    // Write a malformed JSON config file
+    const configDir = join(dir, ".altimate-code")
+    await mkdir(configDir, { recursive: true })
+    await writeFile(join(configDir, "dbt.json"), "{ invalid json !!!")
+
+    // Create a dbt project so auto-discovery has something to find
+    await writeFile(join(dir, "dbt_project.yml"), "name: test")
+    const binDir = join(dir, ".venv", "bin")
+    await mkdir(binDir, { recursive: true })
+    await writeFile(join(binDir, "python3"), "#!/bin/sh")
+
+    const origCwd = process.cwd()
+    process.chdir(dir)
+    try {
+      const result = await read()
+      // Should fall through to auto-discovery instead of crashing
+      expect(result).not.toBeNull()
+      expect(result!.dbtIntegration).toBe("corecommand")
     } finally {
       process.chdir(origCwd)
     }
@@ -138,6 +169,32 @@ describe("discoverPython", () => {
     await rm(dir, { recursive: true, force: true })
   })
 
+  test("ALTIMATE_CODE_PYTHON_PATH takes highest priority", async () => {
+    const { discoverPython } = await import("../src/config")
+
+    const altPythonBin = join(dir, "alt-python", "bin")
+    await mkdir(altPythonBin, { recursive: true })
+    await writeFile(join(altPythonBin, "python3"), "#!/bin/sh")
+
+    const localBin = join(dir, "project", ".venv", "bin")
+    await mkdir(localBin, { recursive: true })
+    await writeFile(join(localBin, "python3"), "#!/bin/sh")
+
+    const origPython = process.env.ALTIMATE_CODE_PYTHON_PATH
+    const origVenv = process.env.ALTIMATE_CODE_VIRTUAL_ENV
+    process.env.ALTIMATE_CODE_PYTHON_PATH = join(altPythonBin, "python3")
+    process.env.ALTIMATE_CODE_VIRTUAL_ENV = join(dir, "project", ".venv")
+    try {
+      const result = discoverPython(join(dir, "project"))
+      expect(result).toBe(join(altPythonBin, "python3"))
+    } finally {
+      if (origPython !== undefined) process.env.ALTIMATE_CODE_PYTHON_PATH = origPython
+      else delete process.env.ALTIMATE_CODE_PYTHON_PATH
+      if (origVenv !== undefined) process.env.ALTIMATE_CODE_VIRTUAL_ENV = origVenv
+      else delete process.env.ALTIMATE_CODE_VIRTUAL_ENV
+    }
+  })
+
   test("ALTIMATE_CODE_VIRTUAL_ENV takes priority over project-local .venv", async () => {
     const { discoverPython } = await import("../src/config")
 
@@ -163,8 +220,10 @@ describe("discoverPython", () => {
   test("falls back to project-local .venv/bin/python3", async () => {
     const { discoverPython } = await import("../src/config")
 
-    const orig = process.env.ALTIMATE_CODE_VIRTUAL_ENV
+    const origVenv = process.env.ALTIMATE_CODE_VIRTUAL_ENV
+    const origPython = process.env.ALTIMATE_CODE_PYTHON_PATH
     delete process.env.ALTIMATE_CODE_VIRTUAL_ENV
+    delete process.env.ALTIMATE_CODE_PYTHON_PATH
 
     const binDir = join(dir, ".venv", "bin")
     await mkdir(binDir, { recursive: true })
@@ -174,15 +233,18 @@ describe("discoverPython", () => {
       const result = discoverPython(dir)
       expect(result).toBe(join(binDir, "python3"))
     } finally {
-      if (orig !== undefined) process.env.ALTIMATE_CODE_VIRTUAL_ENV = orig
+      if (origVenv !== undefined) process.env.ALTIMATE_CODE_VIRTUAL_ENV = origVenv
+      if (origPython !== undefined) process.env.ALTIMATE_CODE_PYTHON_PATH = origPython
     }
   })
 
   test("tries python3 before python in each location", async () => {
     const { discoverPython } = await import("../src/config")
 
-    const orig = process.env.ALTIMATE_CODE_VIRTUAL_ENV
+    const origVenv = process.env.ALTIMATE_CODE_VIRTUAL_ENV
+    const origPython = process.env.ALTIMATE_CODE_PYTHON_PATH
     delete process.env.ALTIMATE_CODE_VIRTUAL_ENV
+    delete process.env.ALTIMATE_CODE_PYTHON_PATH
 
     const binDir = join(dir, ".venv", "bin")
     await mkdir(binDir, { recursive: true })
@@ -193,7 +255,8 @@ describe("discoverPython", () => {
       const result = discoverPython(dir)
       expect(result).toBe(join(binDir, "python3"))
     } finally {
-      if (orig !== undefined) process.env.ALTIMATE_CODE_VIRTUAL_ENV = orig
+      if (origVenv !== undefined) process.env.ALTIMATE_CODE_VIRTUAL_ENV = origVenv
+      if (origPython !== undefined) process.env.ALTIMATE_CODE_PYTHON_PATH = origPython
     }
   })
 })
