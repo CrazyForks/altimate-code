@@ -39,7 +39,7 @@ if [ -n "$Q1_RESULT" ] && [ "$Q1_RESULT" != "[]" ]; then
         log_info "Creating autofix issue for $key"
         api_retry gh issue create \
           --repo "$GH_REPO" \
-          --title "[autofix] $key" \
+          --title "[altimate-code] $key" \
           --body "**Telemetry pattern detected** (count: $count in last 2h)
 
 Error: \`$err\`
@@ -47,7 +47,7 @@ Tool: \`$tool\`
 
 This pattern was automatically classified as fixable by the telemetry scan." \
           --label "$GH_LABEL_AUTOFIX" \
-          --label "telemetry" 2>/dev/null || true
+          --label "telemetry-auto" 2>/dev/null || true
       fi
     else
       update_seen_issue "$key" "$count"
@@ -83,13 +83,13 @@ if [ -n "$Q2_RESULT" ] && [ "$Q2_RESULT" != "[]" ]; then
       if [ "$fixability" = "fixable" ]; then
         api_retry gh issue create \
           --repo "$GH_REPO" \
-          --title "[autofix] $key" \
+          --title "[altimate-code] $key" \
           --body "**SQL failure pattern** (count: $count in last 2h)
 
 Warehouse: \`$warehouse\`
 Error: \`$err\`" \
           --label "$GH_LABEL_AUTOFIX" \
-          --label "telemetry" 2>/dev/null || true
+          --label "telemetry-auto" 2>/dev/null || true
       fi
     else
       update_seen_issue "$key" "$count"
@@ -155,13 +155,13 @@ if [ -n "$Q4_RESULT" ] && [ "$Q4_RESULT" != "[]" ]; then
       if [ "$fixability" = "fixable" ]; then
         api_retry gh issue create \
           --repo "$GH_REPO" \
-          --title "[autofix] $key" \
+          --title "[altimate-code] $key" \
           --body "**Application error** (count: $count in last 2h)
 
 Error: \`$err_name\`
 Context: \`$context\`" \
           --label "$GH_LABEL_AUTOFIX" \
-          --label "telemetry" 2>/dev/null || true
+          --label "telemetry-auto" 2>/dev/null || true
       fi
     else
       update_seen_issue "$key" "$count"

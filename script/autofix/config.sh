@@ -13,10 +13,9 @@ export WORKTREE_BASE="${WORKTREE_BASE:-/tmp/ac-autofix-worktrees}"
 
 # GitHub
 export GH_REPO="${GH_REPO:-AltimateAI/altimate-code}"
-export GH_LABEL_AUTOFIX="${GH_LABEL_AUTOFIX:-autofix}"
+export GH_LABEL_AUTOFIX="${GH_LABEL_AUTOFIX:-altimate-code}"
 export GH_LABEL_IN_PROGRESS="${GH_LABEL_IN_PROGRESS:-autofix-in-progress}"
 export GH_LABEL_FAILED="${GH_LABEL_FAILED:-autofix-failed}"
-export GH_LABEL_COMPLETED="${GH_LABEL_COMPLETED:-autofix-completed}"
 
 # Codex CLI
 export CODEX_MODEL="${CODEX_MODEL:-gpt-5.4}"
