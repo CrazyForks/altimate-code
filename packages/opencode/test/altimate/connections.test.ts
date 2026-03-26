@@ -10,6 +10,7 @@ afterAll(() => { delete process.env.ALTIMATE_TELEMETRY_DISABLED })
 // ---------------------------------------------------------------------------
 
 import * as Registry from "../../src/altimate/native/connections/registry"
+import { detectAuthMethod } from "../../src/altimate/native/connections/registry"
 import * as CredentialStore from "../../src/altimate/native/connections/credential-store"
 import { parseDbtProfiles } from "../../src/altimate/native/connections/dbt-profiles"
 import { discoverContainers } from "../../src/altimate/native/connections/docker-discovery"
@@ -134,6 +135,69 @@ describe("CredentialStore", () => {
     expect(sanitized.token).toBeUndefined()
     expect(sanitized.oauth_client_secret).toBeUndefined()
     expect(sanitized.authenticator).toBe("oauth")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// detectAuthMethod
+// ---------------------------------------------------------------------------
+
+describe("detectAuthMethod", () => {
+  test("returns 'connection_string' for config with connection_string", () => {
+    expect(detectAuthMethod({ type: "postgres", connection_string: "postgresql://..." } as any)).toBe("connection_string")
+  })
+
+  test("returns 'key_pair' for Snowflake private_key_path", () => {
+    expect(detectAuthMethod({ type: "snowflake", private_key_path: "/path/to/key.p8" } as any)).toBe("key_pair")
+  })
+
+  test("returns 'key_pair' for camelCase privateKeyPath", () => {
+    expect(detectAuthMethod({ type: "snowflake", privateKeyPath: "/path/to/key.p8" } as any)).toBe("key_pair")
+  })
+
+  test("returns 'sso' for Snowflake externalbrowser", () => {
+    expect(detectAuthMethod({ type: "snowflake", authenticator: "EXTERNALBROWSER" } as any)).toBe("sso")
+  })
+
+  test("returns 'sso' for Okta URL authenticator", () => {
+    expect(detectAuthMethod({ type: "snowflake", authenticator: "https://myorg.okta.com" } as any)).toBe("sso")
+  })
+
+  test("returns 'oauth' for OAuth authenticator", () => {
+    expect(detectAuthMethod({ type: "snowflake", authenticator: "OAUTH" } as any)).toBe("oauth")
+  })
+
+  test("returns 'token' for access_token", () => {
+    expect(detectAuthMethod({ type: "databricks", access_token: "dapi..." } as any)).toBe("token")
+  })
+
+  test("returns 'password' for config with password", () => {
+    expect(detectAuthMethod({ type: "postgres", password: "secret" } as any)).toBe("password")
+  })
+
+  test("returns 'file' for duckdb", () => {
+    expect(detectAuthMethod({ type: "duckdb", path: "/data/my.db" } as any)).toBe("file")
+  })
+
+  test("returns 'file' for sqlite", () => {
+    expect(detectAuthMethod({ type: "sqlite", path: "/data/my.sqlite" } as any)).toBe("file")
+  })
+
+  test("returns 'connection_string' for mongodb without password", () => {
+    expect(detectAuthMethod({ type: "mongodb" } as any)).toBe("connection_string")
+  })
+
+  test("returns 'password' for mongo with password", () => {
+    expect(detectAuthMethod({ type: "mongo", password: "secret" } as any)).toBe("password")
+  })
+
+  test("returns 'unknown' for null/undefined", () => {
+    expect(detectAuthMethod(null)).toBe("unknown")
+    expect(detectAuthMethod(undefined)).toBe("unknown")
+  })
+
+  test("returns 'unknown' for empty config with no identifiable auth", () => {
+    expect(detectAuthMethod({ type: "postgres" } as any)).toBe("unknown")
   })
 })
 

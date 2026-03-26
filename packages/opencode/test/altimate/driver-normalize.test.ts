@@ -652,6 +652,55 @@ describe("normalizeConfig — DuckDB/SQLite passthrough", () => {
 // normalizeConfig — Snowflake private_key edge cases
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// normalizeConfig — MongoDB aliases
+// ---------------------------------------------------------------------------
+
+describe("normalizeConfig — MongoDB", () => {
+  test("connectionString → connection_string", () => {
+    const config = { type: "mongodb", connectionString: "mongodb://localhost:27017/mydb" }
+    const result = normalizeConfig(config)
+    expect(result.connection_string).toBe("mongodb://localhost:27017/mydb")
+    expect(result.connectionString).toBeUndefined()
+  })
+
+  test("uri → connection_string", () => {
+    const config = { type: "mongodb", uri: "mongodb://localhost:27017/mydb" }
+    const result = normalizeConfig(config)
+    expect(result.connection_string).toBe("mongodb://localhost:27017/mydb")
+    expect(result.uri).toBeUndefined()
+  })
+
+  test("url → connection_string", () => {
+    const config = { type: "mongodb", url: "mongodb+srv://user:pass@cluster.mongodb.net/db" }
+    const result = normalizeConfig(config)
+    expect(result.connection_string).toBe("mongodb+srv://user:pass@cluster.mongodb.net/db")
+    expect(result.url).toBeUndefined()
+  })
+
+  test("canonical connection_string takes precedence over uri alias", () => {
+    const config = { type: "mongodb", connection_string: "mongodb://primary", uri: "mongodb://fallback" }
+    const result = normalizeConfig(config)
+    expect(result.connection_string).toBe("mongodb://primary")
+    expect(result.uri).toBeUndefined()
+  })
+
+  test("mongo type alias resolves MongoDB-specific aliases", () => {
+    const config = { type: "mongo", uri: "mongodb://localhost:27017/test", authSource: "admin" }
+    const result = normalizeConfig(config)
+    expect(result.connection_string).toBe("mongodb://localhost:27017/test")
+    expect(result.auth_source).toBe("admin")
+    expect(result.authSource).toBeUndefined()
+  })
+
+  test("authSource → auth_source", () => {
+    const config = { type: "mongodb", host: "localhost", authSource: "admin" }
+    const result = normalizeConfig(config)
+    expect(result.auth_source).toBe("admin")
+    expect(result.authSource).toBeUndefined()
+  })
+})
+
 describe("normalizeConfig — Snowflake private_key edge cases", () => {
   test("opaque string without path indicators stays as private_key", () => {
     const result = normalizeConfig({
