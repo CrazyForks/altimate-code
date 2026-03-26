@@ -261,6 +261,124 @@ snow:
       fs.rmSync(tmpDir, { recursive: true })
     }
   })
+
+  // altimate_change start — tests for untested dbt profiles parser edge cases
+  test("resolves env_var with default fallback when env var is missing", async () => {
+    const fs = await import("fs")
+    const os = await import("os")
+    const path = await import("path")
+
+    // Ensure the env var does NOT exist
+    delete process.env.__TEST_DBT_MISSING_VAR_12345
+
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dbt-test-"))
+    const profilesPath = path.join(tmpDir, "profiles.yml")
+
+    fs.writeFileSync(
+      profilesPath,
+      `
+myproject:
+  outputs:
+    dev:
+      type: postgres
+      host: "{{ env_var('__TEST_DBT_MISSING_VAR_12345', 'localhost') }}"
+      port: 5432
+      user: "{{ env_var('__TEST_DBT_MISSING_USER_12345', 'default_user') }}"
+      password: secret
+      dbname: mydb
+`,
+    )
+
+    try {
+      const connections = await parseDbtProfiles(profilesPath)
+      expect(connections).toHaveLength(1)
+      expect(connections[0].config.host).toBe("localhost")
+      expect(connections[0].config.user).toBe("default_user")
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true })
+    }
+  })
+
+  test("skips 'config' top-level key (dbt global settings)", async () => {
+    const fs = await import("fs")
+    const os = await import("os")
+    const path = await import("path")
+
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dbt-test-"))
+    const profilesPath = path.join(tmpDir, "profiles.yml")
+
+    fs.writeFileSync(
+      profilesPath,
+      `
+config:
+  send_anonymous_usage_stats: false
+  use_colors: true
+
+real_project:
+  outputs:
+    dev:
+      type: postgres
+      host: localhost
+      dbname: analytics
+`,
+    )
+
+    try {
+      const connections = await parseDbtProfiles(profilesPath)
+      expect(connections).toHaveLength(1)
+      expect(connections[0].name).toBe("real_project_dev")
+      // The 'config' key should not appear as a connection
+      expect(connections.find((c) => c.name.startsWith("config"))).toBeUndefined()
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true })
+    }
+  })
+
+  test("handles multiple profiles with multiple outputs", async () => {
+    const fs = await import("fs")
+    const os = await import("os")
+    const path = await import("path")
+
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dbt-test-"))
+    const profilesPath = path.join(tmpDir, "profiles.yml")
+
+    fs.writeFileSync(
+      profilesPath,
+      `
+warehouse_a:
+  outputs:
+    dev:
+      type: postgres
+      host: localhost
+      dbname: dev_db
+    prod:
+      type: postgres
+      host: prod.example.com
+      dbname: prod_db
+
+warehouse_b:
+  outputs:
+    staging:
+      type: snowflake
+      account: abc123
+      user: admin
+      password: pw
+      database: STAGING
+      warehouse: COMPUTE_WH
+      schema: PUBLIC
+`,
+    )
+
+    try {
+      const connections = await parseDbtProfiles(profilesPath)
+      expect(connections).toHaveLength(3)
+      const names = connections.map((c) => c.name).sort()
+      expect(names).toEqual(["warehouse_a_dev", "warehouse_a_prod", "warehouse_b_staging"])
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true })
+    }
+  })
+  // altimate_change end
 })
 
 // ---------------------------------------------------------------------------
