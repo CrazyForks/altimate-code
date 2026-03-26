@@ -48,7 +48,7 @@ describe("build command", () => {
   test("build surfaces stderr as error", async () => {
     const adapter = makeAdapter({
       unsafeBuildProjectImmediately: mock(() =>
-        Promise.resolve({ stdout: "partial output", stderr: "compilation error" }),
+        Promise.resolve({ stdout: "partial output", stderr: "compilation error", fullOutput: "" }),
       ),
     })
     const result = await build(adapter, [])
