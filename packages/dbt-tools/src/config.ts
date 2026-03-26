@@ -64,11 +64,11 @@ export function discoverPython(projectRoot: string): string {
     }
   }
 
-  // CONDA_PREFIX
+  // CONDA_PREFIX (Conda places python at env root on Windows, bin/ on Unix)
   const condaPrefix = process.env.CONDA_PREFIX
   if (condaPrefix) {
     for (const bin of pythonBins) {
-      const py = join(condaPrefix, VENV_BIN, bin)
+      const py = isWindows ? join(condaPrefix, bin) : join(condaPrefix, VENV_BIN, bin)
       if (existsSync(py)) return py
     }
   }
@@ -79,7 +79,7 @@ export function discoverPython(projectRoot: string): string {
   for (const cmd of cmds) {
     try {
       // `where` on Windows may return multiple lines — take the first
-      const first = execFileSync(whichCmd, [cmd], { encoding: "utf-8" }).trim().split(/\r?\n/)[0]
+      const first = execFileSync(whichCmd, [cmd], { encoding: "utf-8", timeout: 5_000 }).trim().split(/\r?\n/)[0]
       if (first) return first
     } catch {}
   }

@@ -27,7 +27,7 @@
 
 import { execFileSync } from "child_process"
 import { existsSync, realpathSync, readFileSync } from "fs"
-import { dirname, join } from "path"
+import { delimiter, dirname, join } from "path"
 
 const isWindows = process.platform === "win32"
 // Windows venvs use Scripts/, Unix venvs use bin/
@@ -211,7 +211,9 @@ export function resolveDbt(pythonPath?: string, projectRoot?: string): ResolvedD
  */
 export function validateDbt(resolved: ResolvedDbt): { version: string; isFusion: boolean } | null {
   try {
-    const env = resolved.binDir ? { ...process.env, PATH: `${resolved.binDir}:${process.env.PATH}` } : process.env
+    const env = resolved.binDir
+      ? { ...process.env, PATH: `${resolved.binDir}${delimiter}${process.env.PATH}` }
+      : process.env
 
     const out = execFileSync(resolved.path, ["--version"], {
       encoding: "utf-8",
@@ -240,7 +242,7 @@ export function validateDbt(resolved: ResolvedDbt): { version: string; isFusion:
 export function buildDbtEnv(resolved: ResolvedDbt): Record<string, string | undefined> {
   const env = { ...process.env }
   if (resolved.binDir) {
-    env.PATH = `${resolved.binDir}:${env.PATH ?? ""}`
+    env.PATH = `${resolved.binDir}${delimiter}${env.PATH ?? ""}`
   }
   // Ensure DBT_PROFILES_DIR is set if we have a project root
   // (dbt looks in cwd for profiles.yml by default, but we may not be in the project dir)
