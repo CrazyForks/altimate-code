@@ -69,7 +69,7 @@ CODEX_LOG="$LOG_DIR/codex-issue-${ISSUE_NUMBER}-$(date +%s).log"
 
 set +e
 timeout "$CODEX_TIMEOUT" codex exec \
-  --full-auto \
+  --dangerously-bypass-approvals-and-sandbox \
   --model "$CODEX_MODEL" \
   --cd "$WORKTREE_PATH" \
   "$PROMPT" \
