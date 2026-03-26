@@ -2,6 +2,10 @@
 # config.sh — All tunable constants for the autofix system
 # Override any value via environment variables.
 
+# Ensure fnm/bun/node are on PATH (needed for git hooks in subshells)
+export PATH="$HOME/.local/share/fnm/aliases/default/bin:$HOME/.bun/bin:$HOME/.local/share/fnm:$PATH"
+eval "$(fnm env 2>/dev/null)" || true
+
 # Azure VM paths (on the VM)
 export REPO_DIR="${REPO_DIR:-/home/kulvir/altimate-code}"
 export LOG_DIR="${LOG_DIR:-/home/kulvir/autofix-logs}"
