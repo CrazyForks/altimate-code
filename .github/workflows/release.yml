@@ -161,9 +161,9 @@ jobs:
             echo "::error::node_python_bridge.py missing from dbt-tools dist"
             exit 1
           fi
-          # Verify no hardcoded CI runner paths remain in the bundle
-          if grep -q 'home/runner' packages/dbt-tools/dist/index.js; then
-            echo "::error::dbt-tools bundle contains hardcoded CI runner path"
+          # Verify no hardcoded absolute path in __dirname (catches any CI runner OS)
+          if grep -qE 'var __dirname\s*=\s*"(/|[A-Za-z]:\\)' packages/dbt-tools/dist/index.js; then
+            echo "::error::dbt-tools bundle contains hardcoded absolute path in __dirname"
             exit 1
           fi
           # Verify __dirname was patched to runtime resolution

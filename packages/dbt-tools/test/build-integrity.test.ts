@@ -15,14 +15,14 @@ describe("build integrity", () => {
     expect(existsSync(join(dist, "node_python_bridge.py"))).toBe(true)
   })
 
-  test("no hardcoded CI runner paths in bundle", () => {
+  test("no hardcoded absolute paths in __dirname", () => {
     const code = readFileSync(join(dist, "index.js"), "utf8")
-    expect(code).not.toContain("home/runner")
+    // Catch both Unix ("/...") and Windows ("C:\\...") hardcoded paths
+    expect(code).not.toMatch(/var __dirname\s*=\s*"(?:[A-Za-z]:\\\\|\/)/)
   })
 
   test("__dirname is patched to runtime resolution", () => {
     const code = readFileSync(join(dist, "index.js"), "utf8")
     expect(code).toContain("import.meta.dirname")
-    expect(code).not.toMatch(/var __dirname\s*=\s*"\//)
   })
 })
