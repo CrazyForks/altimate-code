@@ -1,11 +1,15 @@
 import { describe, test, expect, mock, beforeEach } from "bun:test"
+import * as realChildProcess from "child_process"
 
-// We test the parsing logic by mocking execFile
+// We test the parsing logic by mocking execFile.
+// Spread the real module so other exports (execFileSync, etc.)
+// remain available — mock.module leaks across test files in Bun.
 const mockExecFile = mock((cmd: string, args: string[], opts: any, cb: Function) => {
   cb(null, "", "")
 })
 
 mock.module("child_process", () => ({
+  ...realChildProcess,
   execFile: mockExecFile,
 }))
 
