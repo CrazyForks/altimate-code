@@ -1,0 +1,20 @@
+[Unit]
+Description=Altimate Code Autofix Webhook Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kulvir
+WorkingDirectory=/home/kulvir/altimate-code
+ExecStart=/home/kulvir/altimate-code/script/autofix/webhook-server.sh
+Restart=always
+RestartSec=10
+EnvironmentFile=/home/kulvir/.env
+Environment=HOME=/home/kulvir
+Environment=PATH=/home/kulvir/.local/share/fnm/aliases/default/bin:/home/kulvir/.bun/bin:/usr/local/bin:/usr/bin:/bin
+Environment=WEBHOOK_PORT=9876
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target
