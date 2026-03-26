@@ -79,7 +79,8 @@ export function discoverPython(projectRoot: string): string {
   for (const cmd of cmds) {
     try {
       // `where` on Windows may return multiple lines — take the first
-      return execFileSync(whichCmd, [cmd], { encoding: "utf-8" }).trim().split(/\r?\n/)[0]
+      const first = execFileSync(whichCmd, [cmd], { encoding: "utf-8" }).trim().split(/\r?\n/)[0]
+      if (first) return first
     } catch {}
   }
   return isWindows ? "python.exe" : "python3"
