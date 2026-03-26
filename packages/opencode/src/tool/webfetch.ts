@@ -15,6 +15,51 @@ const BROWSER_UA =
 // Status codes that warrant a retry with a different User-Agent
 const RETRYABLE_STATUSES = new Set([403, 406])
 
+// altimate_change start — session-level URL failure cache (#471)
+// Prevents repeated fetches to URLs that already returned 404/410 in this session.
+// Keyed by URL string. Cleared when the process restarts (new session).
+const failedUrls = new Map<string, { status: number; timestamp: number }>()
+const FAILURE_CACHE_TTL = 5 * 60 * 1000 // 5 minutes
+
+function isUrlCachedFailure(url: string): { status: number } | null {
+  const entry = failedUrls.get(url)
+  if (!entry) return null
+  if (Date.now() - entry.timestamp > FAILURE_CACHE_TTL) {
+    failedUrls.delete(url)
+    return null
+  }
+  return { status: entry.status }
+}
+
+function cacheUrlFailure(url: string, status: number): void {
+  // Only cache permanent-ish failures, not transient ones
+  if (status === 404 || status === 410 || status === 451) {
+    failedUrls.set(url, { status, timestamp: Date.now() })
+  }
+}
+
+/** Build an actionable error message so the model knows whether to retry. */
+function buildFetchError(url: string, status: number, headers?: Headers): string {
+  switch (status) {
+    case 404:
+      return `HTTP 404: ${url} does not exist. Do NOT retry this URL — it will fail again. Try a different URL or search for the correct page.`
+    case 410:
+      return `HTTP 410: ${url} has been permanently removed. Do NOT retry. Find an alternative resource.`
+    case 403:
+      return `HTTP 403: Access to ${url} is forbidden. The server rejected both bot and browser User-Agents. Try a different source.`
+    case 429: {
+      const retryAfter = headers?.get("retry-after")
+      const wait = retryAfter ? ` (retry after ${retryAfter}s)` : ""
+      return `HTTP 429: Rate limited by ${new URL(url).hostname}${wait}. Wait before fetching from this domain again, or use a different source.`
+    }
+    case 451:
+      return `HTTP 451: ${url} is unavailable for legal reasons. Do NOT retry.`
+    default:
+      return `HTTP ${status}: Request to ${url} failed. This may be transient — retry once if needed.`
+  }
+}
+// altimate_change end
+
 export const WebFetchTool = Tool.define("webfetch", {
   description: DESCRIPTION,
   parameters: z.object({
@@ -26,10 +71,23 @@ export const WebFetchTool = Tool.define("webfetch", {
     timeout: z.number().describe("Optional timeout in seconds (max 120)").optional(),
   }),
   async execute(params, ctx) {
-    // Validate URL
+    // altimate_change start — URL validation and failure cache (#471)
+    // Validate URL format
     if (!params.url.startsWith("http://") && !params.url.startsWith("https://")) {
       throw new Error("URL must start with http:// or https://")
     }
+    try {
+      new URL(params.url)
+    } catch {
+      throw new Error(`Invalid URL: "${params.url.slice(0, 200)}" is not a valid URL. Check the format and try again.`)
+    }
+
+    // Check failure cache — avoid re-fetching URLs that already returned 404/410
+    const cached = isUrlCachedFailure(params.url)
+    if (cached) {
+      throw new Error(buildFetchError(params.url, cached.status))
+    }
+    // altimate_change end
 
     await ctx.ask({
       permission: "webfetch",
@@ -83,9 +141,12 @@ export const WebFetchTool = Tool.define("webfetch", {
         response = await fetch(params.url, { signal, headers: browserHeaders })
       }
 
+      // altimate_change start — actionable error messages and failure caching (#471)
       if (!response.ok) {
-        throw new Error(`Request failed with status code: ${response.status}`)
+        cacheUrlFailure(params.url, response.status)
+        throw new Error(buildFetchError(params.url, response.status, response.headers))
       }
+      // altimate_change end
 
       // Check content length
       const contentLength = response.headers.get("content-length")
