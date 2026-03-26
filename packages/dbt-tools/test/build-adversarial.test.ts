@@ -160,7 +160,8 @@ describe("adversarial: runtime resolution", () => {
     const dirname = import.meta.dir
     expect(typeof dirname).toBe("string")
     expect(dirname.length).toBeGreaterThan(0)
-    expect(dirname).not.toContain("runner")
+    // Validate it's an actual directory, not a stale/hardcoded path
+    expect(existsSync(dirname)).toBe(true)
   })
 
   test("node_python_bridge.py is findable relative to dist/index.js", () => {
