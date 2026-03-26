@@ -65,6 +65,9 @@ async function copyAssets(targetDir: string) {
   await $`cp ../dbt-tools/bin/altimate-dbt ${targetDir}/dbt-tools/bin/altimate-dbt`
   await $`mkdir -p ${targetDir}/dbt-tools/dist`
   await $`cp ../dbt-tools/dist/index.js ${targetDir}/dbt-tools/dist/`
+  // node_python_bridge.py must live next to index.js — the patched __dirname
+  // resolves to this directory at runtime (see copy-python.ts)
+  await $`cp ../dbt-tools/dist/node_python_bridge.py ${targetDir}/dbt-tools/dist/`
   // A package.json with "type": "module" must be present so Node loads
   // dist/index.js as ESM instead of CJS. We synthesize a minimal one rather
   // than copying the full source package.json (which contains devDependencies
