@@ -24,7 +24,7 @@ const pattern = /var __dirname\s*=\s*"[^"]*python-bridge[^"]*"/
 if (pattern.test(code)) {
   // import.meta.dirname is supported by Bun and Node >= 20.11.0.
   // Node 18 is EOL (April 2025), so no fallback needed.
-  const replacement = `var __dirname = import.meta.dirname`
+  const replacement = `var __dirname = typeof import.meta.dirname === "string" ? import.meta.dirname : __require("path").dirname(__require("url").fileURLToPath(import.meta.url))`
   code = code.replace(pattern, replacement)
   writeFileSync(indexPath, code)
   console.log(`Patched __dirname in dist/index.js`)
