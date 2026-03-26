@@ -13,10 +13,9 @@ log_info "Repo: $REPO_DIR | Poll: ${POLL_INTERVAL}s | Max parallel: $MAX_PARALLE
 log_info "Budget: $(get_budget_status)"
 
 while true; do
-  # Update repo
+  # Update repo (fetch only — do NOT checkout main, worktrees handle branches)
   cd "$REPO_DIR"
-  git fetch origin main --quiet 2>/dev/null || true
-  git checkout main --quiet 2>/dev/null || true
+  git fetch origin --quiet 2>/dev/null || true
   git pull --ff-only --quiet 2>/dev/null || true
 
   # Clean stale worktrees

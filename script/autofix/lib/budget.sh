@@ -10,6 +10,7 @@ init_budget() {
   current_month="$(date -u +%Y-%m)"
 
   if [ ! -f "$BUDGET_FILE" ]; then
+    mkdir -p "$(dirname "$BUDGET_FILE")"
     echo "{\"month\":\"$current_month\",\"attempts\":0,\"successes\":0,\"failures\":0}" > "$BUDGET_FILE"
     return
   fi
