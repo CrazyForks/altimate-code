@@ -36,7 +36,7 @@ function fail(msg: string) {
 // ---------------------------------------------------------------------------
 // Check 1: Required externals are in package.json dependencies
 // ---------------------------------------------------------------------------
-console.log("\n[1/4] Checking required externals in package.json...")
+console.log("\n[1/5] Checking required externals in package.json...")
 
 const requiredExternals = ["@altimateai/altimate-core"]
 
@@ -51,7 +51,7 @@ for (const ext of requiredExternals) {
 // ---------------------------------------------------------------------------
 // Check 2: Required externals are resolvable in node_modules
 // ---------------------------------------------------------------------------
-console.log("\n[2/4] Checking required externals are installed...")
+console.log("\n[2/5] Checking required externals are installed...")
 
 for (const ext of requiredExternals) {
   try {
@@ -63,9 +63,36 @@ for (const ext of requiredExternals) {
 }
 
 // ---------------------------------------------------------------------------
+// Check 2b: Verify altimate-core napi binary has all expected exports
+// ---------------------------------------------------------------------------
+console.log("\n[2b/5] Verifying altimate-core napi exports...")
+
+const CRITICAL_EXPORTS = [
+  "getStatementTypes", "formatSql", "lint", "validate", "transpile",
+  "extractMetadata", "columnLineage", "trackLineage", "diffSchemas",
+  "importDdl", "exportDdl", "optimizeContext", "pruneSchema",
+  "compareQueries", "classifyPii", "checkQueryPii", "parseDbtProject",
+]
+
+try {
+  const core = require("@altimateai/altimate-core")
+  const missing = CRITICAL_EXPORTS.filter((name) => typeof core[name] !== "function")
+  if (missing.length > 0) {
+    fail(
+      `altimate-core binary is missing ${missing.length} export(s): ${missing.join(", ")}.\n` +
+        `    The platform binary may be stale. Fix: rm -rf node_modules && bun install`,
+    )
+  } else {
+    pass(`All ${CRITICAL_EXPORTS.length} critical napi exports verified`)
+  }
+} catch (e: any) {
+  fail(`altimate-core failed to load: ${e.message}`)
+}
+
+// ---------------------------------------------------------------------------
 // Check 3: Build and smoke-test the binary
 // ---------------------------------------------------------------------------
-console.log("\n[3/4] Building local binary...")
+console.log("\n[3/5] Building local binary...")
 
 const buildResult = spawnSync("bun", ["run", "build:local"], {
   cwd: pkgDir,
@@ -105,7 +132,7 @@ if (buildResult.status !== 0) {
   if (!binaryPath) {
     fail("No binary found in dist/ after build")
   } else {
-    console.log("\n[4/4] Smoke-testing compiled binary...")
+    console.log("\n[4/5] Smoke-testing compiled binary...")
 
     // Resolve NODE_PATH like the bin wrapper does — start from pkgDir
     // to include workspace-level node_modules where NAPI modules live
