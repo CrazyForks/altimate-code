@@ -9,9 +9,6 @@
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test"
 import * as Registry from "../../src/altimate/native/connections/registry"
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "fs"
-import { tmpdir } from "os"
-import { join } from "path"
 
 // ---------------------------------------------------------------------------
 // Env var cleanup helper

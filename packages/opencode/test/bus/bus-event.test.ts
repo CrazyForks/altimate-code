@@ -17,11 +17,9 @@ describe("BusEvent.define", () => {
 })
 
 describe("BusEvent.payloads", () => {
-  // Register a known test event before payloads() tests
-  const testSchema = z.object({ value: z.string() })
-  BusEvent.define("__test_payloads_registered", testSchema)
-
   test("includes a registered event in the discriminated union", () => {
+    const testSchema = z.object({ value: z.string() })
+    BusEvent.define("__test_payloads_registered", testSchema)
     const union = BusEvent.payloads()
     const result = union.safeParse({
       type: "__test_payloads_registered",
@@ -40,6 +38,7 @@ describe("BusEvent.payloads", () => {
   })
 
   test("rejects event with wrong properties shape", () => {
+    BusEvent.define("__test_payloads_registered", z.object({ value: z.string() }))
     const union = BusEvent.payloads()
     const result = union.safeParse({
       type: "__test_payloads_registered",

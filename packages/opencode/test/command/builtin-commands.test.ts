@@ -108,9 +108,7 @@ describe("Command.hints()", () => {
     expect(Command.hints("plain text")).toEqual([])
   })
 
-  test("sorts numbered placeholders lexicographically", () => {
-    // Note: uses .sort() with no comparator, so $10 sorts before $2.
-    // For single-digit placeholders, lexicographic order matches numeric.
+  test("sorts numbered placeholders numerically", () => {
     expect(Command.hints("$3 then $1 then $2")).toEqual(["$1", "$2", "$3"])
   })
 })

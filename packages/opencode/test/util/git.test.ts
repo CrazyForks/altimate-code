@@ -4,10 +4,7 @@ import { git } from "../../src/util/git"
 
 describe("git() utility", () => {
   test("runs a simple git command and returns stdout", async () => {
-    // Use tmpdir without git:true to avoid commit signing issues; just git init manually
-    await using tmp = await tmpdir()
-    await Bun.spawn(["git", "init"], { cwd: tmp.path, stdout: "ignore", stderr: "ignore" }).exited
-    await Bun.spawn(["git", "config", "core.fsmonitor", "false"], { cwd: tmp.path, stdout: "ignore", stderr: "ignore" }).exited
+    await using tmp = await tmpdir({ git: true })
 
     const result = await git(["rev-parse", "--is-inside-work-tree"], { cwd: tmp.path })
     expect(result.exitCode).toBe(0)
@@ -15,16 +12,14 @@ describe("git() utility", () => {
   })
 
   test("returns non-zero exit code for unknown git subcommand", async () => {
-    await using tmp = await tmpdir()
-    await Bun.spawn(["git", "init"], { cwd: tmp.path, stdout: "ignore", stderr: "ignore" }).exited
+    await using tmp = await tmpdir({ git: true })
 
     const result = await git(["not-a-real-subcommand"], { cwd: tmp.path })
     expect(result.exitCode).not.toBe(0)
   })
 
   test("stderr is populated on error", async () => {
-    await using tmp = await tmpdir()
-    await Bun.spawn(["git", "init"], { cwd: tmp.path, stdout: "ignore", stderr: "ignore" }).exited
+    await using tmp = await tmpdir({ git: true })
 
     const result = await git(["checkout", "nonexistent-branch-xyz"], { cwd: tmp.path })
     expect(result.exitCode).not.toBe(0)
@@ -32,8 +27,7 @@ describe("git() utility", () => {
   })
 
   test("passes custom env vars through to git process", async () => {
-    await using tmp = await tmpdir()
-    await Bun.spawn(["git", "init"], { cwd: tmp.path, stdout: "ignore", stderr: "ignore" }).exited
+    await using tmp = await tmpdir({ git: true })
 
     // Use GIT_CONFIG_COUNT to inject a config value that only exists via env
     const result = await git(["config", "--get", "test.injected"], {
