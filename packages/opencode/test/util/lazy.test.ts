@@ -47,4 +47,44 @@ describe("util.lazy", () => {
     expect(lazyNull()).toBe(null)
     expect(lazyUndefined()).toBe(undefined)
   })
+
+  // altimate_change start — error recovery and reset tests
+  test("retries initialization after a throw (does not cache failures)", () => {
+    let attempt = 0
+    const lazyValue = lazy(() => {
+      attempt++
+      if (attempt === 1) throw new Error("init failed")
+      return "recovered"
+    })
+
+    expect(() => lazyValue()).toThrow("init failed")
+    expect(attempt).toBe(1)
+
+    // Second call should retry, not return cached error
+    const result = lazyValue()
+    expect(result).toBe("recovered")
+    expect(attempt).toBe(2)
+
+    // Third call should use cached value
+    const result2 = lazyValue()
+    expect(result2).toBe("recovered")
+    expect(attempt).toBe(2)
+  })
+
+  test("reset() allows re-initialization", () => {
+    let callCount = 0
+    const lazyValue = lazy(() => {
+      callCount++
+      return callCount
+    })
+
+    expect(lazyValue()).toBe(1)
+    expect(lazyValue()).toBe(1)
+
+    lazyValue.reset()
+
+    expect(lazyValue()).toBe(2)
+    expect(lazyValue()).toBe(2)
+  })
+  // altimate_change end
 })
