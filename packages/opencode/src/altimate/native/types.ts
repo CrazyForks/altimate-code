@@ -964,6 +964,38 @@ export interface LocalTestResult {
   error?: string
 }
 
+// --- Data Diff ---
+
+export interface DataDiffParams {
+  /** Source table name (e.g. "orders", "db.schema.orders") or full SQL query */
+  source: string
+  /** Target table name or SQL query */
+  target: string
+  /** Primary key columns that uniquely identify each row */
+  key_columns: string[]
+  /** Source warehouse connection name */
+  source_warehouse?: string
+  /** Target warehouse connection name (defaults to source_warehouse) */
+  target_warehouse?: string
+  /** Extra columns to compare beyond the key */
+  extra_columns?: string[]
+  /** Algorithm: "auto" | "joindiff" | "hashdiff" | "profile" | "cascade" */
+  algorithm?: string
+  /** Optional WHERE filter applied to both tables */
+  where_clause?: string
+  /** Absolute numeric tolerance */
+  numeric_tolerance?: number
+  /** Timestamp tolerance in milliseconds */
+  timestamp_tolerance_ms?: number
+}
+
+export interface DataDiffResult {
+  success: boolean
+  steps: number
+  outcome?: unknown
+  error?: string
+}
+
 // --- Method registry ---
 
 export const BridgeMethods = {
@@ -1007,6 +1039,8 @@ export const BridgeMethods = {
   // --- local testing ---
   "local.schema_sync": {} as { params: LocalSchemaSyncParams; result: LocalSchemaSyncResult },
   "local.test": {} as { params: LocalTestParams; result: LocalTestResult },
+  // --- data diff ---
+  "data.diff": {} as { params: DataDiffParams; result: DataDiffResult },
   // --- altimate-core (existing) ---
   "altimate_core.validate": {} as { params: AltimateCoreValidateParams; result: AltimateCoreResult },
   "altimate_core.lint": {} as { params: AltimateCoreLintParams; result: AltimateCoreResult },
