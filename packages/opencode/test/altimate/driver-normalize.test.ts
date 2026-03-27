@@ -663,3 +663,100 @@ describe("normalizeConfig — Snowflake private_key edge cases", () => {
     expect(result.private_key_path).toBeUndefined()
   })
 })
+
+// ---------------------------------------------------------------------------
+// normalizeConfig — MongoDB aliases
+// ---------------------------------------------------------------------------
+
+describe("normalizeConfig — MongoDB aliases", () => {
+  test("connection_string alias: uri", () => {
+    const config = { type: "mongodb", uri: "mongodb://localhost:27017/mydb" }
+    const result = normalizeConfig(config)
+    expect(result.connection_string).toBe("mongodb://localhost:27017/mydb")
+    expect(result).not.toHaveProperty("uri")
+  })
+
+  test("connection_string alias: url", () => {
+    const config = { type: "mongodb", url: "mongodb://localhost:27017/mydb" }
+    const result = normalizeConfig(config)
+    expect(result.connection_string).toBe("mongodb://localhost:27017/mydb")
+    expect(result).not.toHaveProperty("url")
+  })
+
+  test("connection_string alias: connectionString (camelCase)", () => {
+    const config = { type: "mongodb", connectionString: "mongodb://localhost:27017/mydb" }
+    const result = normalizeConfig(config)
+    expect(result.connection_string).toBe("mongodb://localhost:27017/mydb")
+    expect(result).not.toHaveProperty("connectionString")
+  })
+
+  test("canonical connection_string takes precedence over aliases", () => {
+    const config = {
+      type: "mongodb",
+      connection_string: "mongodb://primary:27017",
+      uri: "mongodb://secondary:27017",
+    }
+    const result = normalizeConfig(config)
+    expect(result.connection_string).toBe("mongodb://primary:27017")
+    expect(result).not.toHaveProperty("uri")
+  })
+
+  test("auth_source alias: authSource", () => {
+    const config = { type: "mongodb", host: "localhost", authSource: "admin" }
+    const result = normalizeConfig(config)
+    expect(result.auth_source).toBe("admin")
+    expect(result).not.toHaveProperty("authSource")
+  })
+
+  test("replica_set alias: replicaSet", () => {
+    const config = { type: "mongodb", host: "localhost", replicaSet: "rs0" }
+    const result = normalizeConfig(config)
+    expect(result.replica_set).toBe("rs0")
+    expect(result).not.toHaveProperty("replicaSet")
+  })
+
+  test("direct_connection alias: directConnection", () => {
+    const config = { type: "mongodb", host: "localhost", directConnection: true }
+    const result = normalizeConfig(config)
+    expect(result.direct_connection).toBe(true)
+    expect(result).not.toHaveProperty("directConnection")
+  })
+
+  test("common aliases: username → user, dbname → database", () => {
+    const config = { type: "mongodb", host: "localhost", username: "admin", dbname: "mydb" }
+    const result = normalizeConfig(config)
+    expect(result.user).toBe("admin")
+    expect(result.database).toBe("mydb")
+    expect(result).not.toHaveProperty("username")
+    expect(result).not.toHaveProperty("dbname")
+  })
+
+  test("type alias: 'mongo' resolves same as 'mongodb'", () => {
+    const config = { type: "mongo", uri: "mongodb://localhost:27017" }
+    const result = normalizeConfig(config)
+    expect(result.connection_string).toBe("mongodb://localhost:27017")
+    expect(result).not.toHaveProperty("uri")
+  })
+
+  test("timeout aliases: connectTimeoutMS → connect_timeout, serverSelectionTimeoutMS → server_selection_timeout", () => {
+    const config = { type: "mongodb", host: "localhost", connectTimeoutMS: 5000, serverSelectionTimeoutMS: 10000 }
+    const result = normalizeConfig(config)
+    expect(result.connect_timeout).toBe(5000)
+    expect(result.server_selection_timeout).toBe(10000)
+    expect(result).not.toHaveProperty("connectTimeoutMS")
+    expect(result).not.toHaveProperty("serverSelectionTimeoutMS")
+  })
+
+  test("alias priority: connectionString beats uri when both present", () => {
+    const config = {
+      type: "mongodb",
+      connectionString: "mongodb://first:27017",
+      uri: "mongodb://second:27017",
+    }
+    const result = normalizeConfig(config)
+    // connectionString is listed first in MONGODB_ALIASES, so it wins
+    expect(result.connection_string).toBe("mongodb://first:27017")
+    expect(result).not.toHaveProperty("connectionString")
+    expect(result).not.toHaveProperty("uri")
+  })
+})
