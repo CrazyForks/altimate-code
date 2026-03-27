@@ -31,6 +31,8 @@ export namespace FileIgnore {
     "mypy_cache",
     ".history",
     ".gradle",
+    "dbt_packages",
+    "dbt_modules",
   ])
 
   const FILES = [

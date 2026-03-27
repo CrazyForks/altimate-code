@@ -52,3 +52,56 @@ describe("FileIgnore.match: directory and file patterns", () => {
     expect(FileIgnore.match("src\\.git\\config")).toBe(true)
   })
 })
+
+describe("FileIgnore.match: dbt directory patterns", () => {
+  test("matches dbt_packages directory and nested files", () => {
+    expect(FileIgnore.match("dbt_packages")).toBe(true)
+    expect(FileIgnore.match("dbt_packages/")).toBe(true)
+    expect(FileIgnore.match("dbt_packages/dbt_utils/macros/sql/generate_series.sql")).toBe(true)
+    expect(FileIgnore.match("dbt_packages/dbt_expectations/macros/schema_tests/expect_column_values_to_be_unique.sql")).toBe(true)
+    expect(FileIgnore.match("dbt_packages/some_package/models/staging/stg_orders.sql")).toBe(true)
+  })
+
+  test("matches dbt_modules directory and nested files", () => {
+    expect(FileIgnore.match("dbt_modules")).toBe(true)
+    expect(FileIgnore.match("dbt_modules/")).toBe(true)
+    expect(FileIgnore.match("dbt_modules/dbt_utils/macros/sql/generate_series.sql")).toBe(true)
+  })
+
+  test("matches dbt directories nested under project subdirectories", () => {
+    expect(FileIgnore.match("my_project/dbt_packages/dbt_utils/macros/sql/union.sql")).toBe(true)
+    expect(FileIgnore.match("my_project/dbt_modules/some_package/models/model.sql")).toBe(true)
+  })
+
+  test("matches dbt directories with Windows-style separators", () => {
+    expect(FileIgnore.match("dbt_packages\\dbt_utils\\macros\\generate_series.sql")).toBe(true)
+    expect(FileIgnore.match("dbt_modules\\some_package\\models\\model.sql")).toBe(true)
+  })
+
+  test("does not match files that merely contain dbt_packages in their name", () => {
+    expect(FileIgnore.match("setup_dbt_packages.sh")).toBe(false)
+    expect(FileIgnore.match("docs/dbt_packages_guide.md")).toBe(false)
+  })
+})
+
+describe("FileIgnore.PATTERNS: watcher ignore list", () => {
+  test("includes dbt_packages in PATTERNS array used by file watcher", () => {
+    expect(FileIgnore.PATTERNS).toContain("dbt_packages")
+  })
+
+  test("includes dbt_modules in PATTERNS array used by file watcher", () => {
+    expect(FileIgnore.PATTERNS).toContain("dbt_modules")
+  })
+
+  test("includes other expected dependency directories", () => {
+    expect(FileIgnore.PATTERNS).toContain("node_modules")
+    expect(FileIgnore.PATTERNS).toContain("vendor")
+    expect(FileIgnore.PATTERNS).toContain("bower_components")
+  })
+
+  test("includes build output directories", () => {
+    expect(FileIgnore.PATTERNS).toContain("dist")
+    expect(FileIgnore.PATTERNS).toContain("build")
+    expect(FileIgnore.PATTERNS).toContain("target")
+  })
+})
