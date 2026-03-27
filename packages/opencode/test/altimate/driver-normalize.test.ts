@@ -649,6 +649,126 @@ describe("normalizeConfig — DuckDB/SQLite passthrough", () => {
 })
 
 // ---------------------------------------------------------------------------
+// normalizeConfig — MongoDB
+// ---------------------------------------------------------------------------
+
+describe("normalizeConfig — MongoDB", () => {
+  test("connectionString → connection_string for mongodb", () => {
+    const result = normalizeConfig({
+      type: "mongodb",
+      connectionString: "mongodb://localhost:27017/mydb",
+    })
+    expect(result.connection_string).toBe("mongodb://localhost:27017/mydb")
+    expect(result.connectionString).toBeUndefined()
+  })
+
+  test("uri → connection_string for mongodb", () => {
+    const result = normalizeConfig({
+      type: "mongodb",
+      uri: "mongodb://localhost:27017/mydb",
+    })
+    expect(result.connection_string).toBe("mongodb://localhost:27017/mydb")
+    expect(result.uri).toBeUndefined()
+  })
+
+  test("url → connection_string for mongodb", () => {
+    const result = normalizeConfig({
+      type: "mongodb",
+      url: "mongodb+srv://cluster0.example.net/mydb",
+    })
+    expect(result.connection_string).toBe("mongodb+srv://cluster0.example.net/mydb")
+    expect(result.url).toBeUndefined()
+  })
+
+  test("authSource → auth_source for mongodb", () => {
+    const result = normalizeConfig({
+      type: "mongodb",
+      host: "localhost",
+      authSource: "admin",
+    })
+    expect(result.auth_source).toBe("admin")
+    expect(result.authSource).toBeUndefined()
+  })
+
+  test("replicaSet → replica_set for mongodb", () => {
+    const result = normalizeConfig({
+      type: "mongodb",
+      host: "localhost",
+      replicaSet: "rs0",
+    })
+    expect(result.replica_set).toBe("rs0")
+    expect(result.replicaSet).toBeUndefined()
+  })
+
+  test("directConnection → direct_connection for mongodb", () => {
+    const result = normalizeConfig({
+      type: "mongodb",
+      host: "localhost",
+      directConnection: true,
+    })
+    expect(result.direct_connection).toBe(true)
+    expect(result.directConnection).toBeUndefined()
+  })
+
+  test("connectTimeoutMS → connect_timeout for mongodb", () => {
+    const result = normalizeConfig({
+      type: "mongodb",
+      host: "localhost",
+      connectTimeoutMS: 5000,
+    })
+    expect(result.connect_timeout).toBe(5000)
+    expect(result.connectTimeoutMS).toBeUndefined()
+  })
+
+  test("serverSelectionTimeoutMS → server_selection_timeout for mongodb", () => {
+    const result = normalizeConfig({
+      type: "mongodb",
+      host: "localhost",
+      serverSelectionTimeoutMS: 15000,
+    })
+    expect(result.server_selection_timeout).toBe(15000)
+    expect(result.serverSelectionTimeoutMS).toBeUndefined()
+  })
+
+  test("mongo type alias works", () => {
+    const result = normalizeConfig({
+      type: "mongo",
+      uri: "mongodb://localhost:27017",
+      authSource: "admin",
+    })
+    expect(result.connection_string).toBe("mongodb://localhost:27017")
+    expect(result.auth_source).toBe("admin")
+    expect(result.uri).toBeUndefined()
+    expect(result.authSource).toBeUndefined()
+  })
+
+  test("resolves multiple aliases in a single config", () => {
+    const result = normalizeConfig({
+      type: "mongodb",
+      uri: "mongodb://localhost:27017/mydb",
+      authSource: "admin",
+      replicaSet: "rs0",
+      directConnection: false,
+      connectTimeoutMS: 5000,
+      serverSelectionTimeoutMS: 15000,
+    })
+    expect(result.connection_string).toBe("mongodb://localhost:27017/mydb")
+    expect(result.auth_source).toBe("admin")
+    expect(result.replica_set).toBe("rs0")
+    expect(result.direct_connection).toBe(false)
+    expect(result.connect_timeout).toBe(5000)
+    expect(result.server_selection_timeout).toBe(15000)
+    // All aliases removed
+    expect(result.uri).toBeUndefined()
+    expect(result.authSource).toBeUndefined()
+    expect(result.replicaSet).toBeUndefined()
+    expect(result.directConnection).toBeUndefined()
+    expect(result.connectTimeoutMS).toBeUndefined()
+    expect(result.serverSelectionTimeoutMS).toBeUndefined()
+  })
+})
+
+// ---------------------------------------------------------------------------
 // normalizeConfig — Snowflake private_key edge cases
 // ---------------------------------------------------------------------------
 
