@@ -12,7 +12,7 @@ afterAll(() => { delete process.env.ALTIMATE_TELEMETRY_DISABLED })
 import * as Registry from "../../src/altimate/native/connections/registry"
 import * as CredentialStore from "../../src/altimate/native/connections/credential-store"
 import { parseDbtProfiles } from "../../src/altimate/native/connections/dbt-profiles"
-import { discoverContainers } from "../../src/altimate/native/connections/docker-discovery"
+import { discoverContainers, containerToConfig } from "../../src/altimate/native/connections/docker-discovery"
 import { registerAll } from "../../src/altimate/native/connections/register"
 
 // ---------------------------------------------------------------------------
@@ -271,6 +271,51 @@ describe("Docker discovery", () => {
   test("returns empty array when dockerode not installed", async () => {
     const containers = await discoverContainers()
     expect(containers).toEqual([])
+  })
+})
+
+describe("containerToConfig", () => {
+  test("converts full container info to ConnectionConfig", () => {
+    const config = containerToConfig({
+      container_id: "abc123def456",
+      name: "my-postgres",
+      image: "postgres:15",
+      db_type: "postgres",
+      host: "127.0.0.1",
+      port: 5432,
+      user: "postgres",
+      password: "secret",
+      database: "mydb",
+      status: "running",
+    })
+    expect(config).toEqual({
+      type: "postgres",
+      host: "127.0.0.1",
+      port: 5432,
+      user: "postgres",
+      password: "secret",
+      database: "mydb",
+    })
+  })
+
+  test("omits optional fields when undefined or absent", () => {
+    const config = containerToConfig({
+      container_id: "abc123def456",
+      name: "my-mysql",
+      image: "mysql:8",
+      db_type: "mysql",
+      host: "127.0.0.1",
+      port: 3306,
+      user: undefined,
+      password: undefined,
+      database: undefined,
+      status: "running",
+    })
+    expect(config).toEqual({
+      type: "mysql",
+      host: "127.0.0.1",
+      port: 3306,
+    })
   })
 })
 
