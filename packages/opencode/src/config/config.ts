@@ -1425,7 +1425,11 @@ export namespace Config {
   }
 
   export async function update(config: Info) {
-    const filepath = path.join(Instance.directory, "config.json")
+    // Find an existing project config file, or default to opencode.json.
+    // ConfigPaths.projectFiles("opencode", ...) looks for opencode.jsonc and opencode.json,
+    // so we must write to one of those — not config.json which is never loaded by state().
+    const projectFiles = await ConfigPaths.projectFiles("opencode", Instance.directory, Instance.worktree)
+    const filepath = projectFiles[projectFiles.length - 1] ?? path.join(Instance.directory, "opencode.json")
     const existing = await loadFile(filepath)
     await Filesystem.writeJson(filepath, mergeDeep(existing, config))
     await Instance.dispose()
