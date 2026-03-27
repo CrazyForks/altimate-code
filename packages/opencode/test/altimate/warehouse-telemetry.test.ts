@@ -169,6 +169,20 @@ describe("warehouse telemetry: detectAuthMethod", () => {
     expect(connectEvent).toBeDefined()
     expect(connectEvent.auth_method).toBe("unknown")
   })
+
+  // MongoDB-specific branch (added with MongoDB driver support).
+  // Without this branch, { type: "mongodb" } with no password would return
+  // "unknown" instead of "connection_string".
+  test("detects MongoDB connection_string fallback (no password)", () => {
+    // Direct call — no password, no connection_string field, so only the
+    // type-specific branch at line 229 can produce "connection_string".
+    expect(Registry.detectAuthMethod({ type: "mongodb", host: "localhost" } as any)).toBe("connection_string")
+  })
+
+  test("detects mongo alias connection_string fallback", () => {
+    // Verifies the `|| t === "mongo"` half of the OR condition.
+    expect(Registry.detectAuthMethod({ type: "mongo", host: "localhost" } as any)).toBe("connection_string")
+  })
 })
 
 // ---------------------------------------------------------------------------

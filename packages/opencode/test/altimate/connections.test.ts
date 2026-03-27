@@ -75,6 +75,55 @@ describe("ConnectionRegistry", () => {
 })
 
 // ---------------------------------------------------------------------------
+// loadFromEnv — env var connection parsing (ALTIMATE_CODE_CONN_*)
+// ---------------------------------------------------------------------------
+
+describe("ConnectionRegistry: loadFromEnv", () => {
+  beforeEach(() => {
+    Registry.reset()
+  })
+
+  test("loads connection from ALTIMATE_CODE_CONN_* env var", () => {
+    process.env.ALTIMATE_CODE_CONN_TESTPG = JSON.stringify({
+      type: "postgres",
+      host: "localhost",
+      database: "ci_db",
+    })
+    try {
+      Registry.load()
+      // Env var suffix is lowercased: TESTPG → "testpg"
+      const config = Registry.getConfig("testpg")
+      expect(config).toBeDefined()
+      expect(config?.type).toBe("postgres")
+      expect(config?.host).toBe("localhost")
+      expect(config?.database).toBe("ci_db")
+    } finally {
+      delete process.env.ALTIMATE_CODE_CONN_TESTPG
+    }
+  })
+
+  test("ignores env var with invalid JSON", () => {
+    process.env.ALTIMATE_CODE_CONN_BAD = "not-valid-json"
+    try {
+      Registry.load()
+      expect(Registry.getConfig("bad")).toBeUndefined()
+    } finally {
+      delete process.env.ALTIMATE_CODE_CONN_BAD
+    }
+  })
+
+  test("ignores env var with missing type field", () => {
+    process.env.ALTIMATE_CODE_CONN_NOTYPE = JSON.stringify({ host: "localhost" })
+    try {
+      Registry.load()
+      expect(Registry.getConfig("notype")).toBeUndefined()
+    } finally {
+      delete process.env.ALTIMATE_CODE_CONN_NOTYPE
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
 // CredentialStore (keytar not available in test environment)
 // ---------------------------------------------------------------------------
 
