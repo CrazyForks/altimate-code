@@ -41,4 +41,71 @@ fi
 # 9. git available (needed for project detection)
 assert_exit_0 "git CLI available" git --version
 
+# 10. Version matches semver format (X.Y.Z) — catches #212 regressions
+VERSION_CLEAN=$(echo "$VERSION" | head -1 | tr -d '[:space:]')
+if echo "$VERSION_CLEAN" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+'; then
+  echo "  PASS: version is semver ($VERSION_CLEAN)"
+  PASS_COUNT=$((PASS_COUNT + 1))
+else
+  echo "  FAIL: version is not semver (got '$VERSION_CLEAN')"
+  FAIL_COUNT=$((FAIL_COUNT + 1))
+fi
+
+# 11. --help output doesn't contain upstream "opencode" branding (#416, #417)
+# Legitimate internal names (.opencode/, opencode.json, @opencode-ai/) are allowed;
+# user-facing prose like "opencode is a..." or "start opencode" is not.
+HELP_OUTPUT=$(altimate --help 2>&1 || echo "")
+BRANDING_LEAKS=$(echo "$HELP_OUTPUT" | grep -iE 'opencode' | grep -ivE '\.opencode|opencode\.json[c]?|@opencode-ai|opencode\.local|OPENCODE_' || true)
+if [ -z "$BRANDING_LEAKS" ]; then
+  echo "  PASS: --help has no upstream branding leaks"
+  PASS_COUNT=$((PASS_COUNT + 1))
+else
+  echo "  FAIL: --help contains upstream branding:"
+  echo "$BRANDING_LEAKS" | head -5 | sed 's/^/    /'
+  FAIL_COUNT=$((FAIL_COUNT + 1))
+fi
+
+# 12. No "opencode" in welcome/hint strings visible at startup
+# Check the binary's embedded strings for user-facing "opencode" references
+SUBCOMMAND_HELP=$(altimate run --help 2>&1 || echo "")
+SUBCOMMAND_LEAKS=$(echo "$SUBCOMMAND_HELP" | grep -iE 'opencode' | grep -ivE '\.opencode|opencode\.json[c]?|@opencode-ai|opencode\.local|OPENCODE_' || true)
+if [ -z "$SUBCOMMAND_LEAKS" ]; then
+  echo "  PASS: 'altimate run --help' has no upstream branding leaks"
+  PASS_COUNT=$((PASS_COUNT + 1))
+else
+  echo "  FAIL: 'altimate run --help' contains upstream branding:"
+  echo "$SUBCOMMAND_LEAKS" | head -5 | sed 's/^/    /'
+  FAIL_COUNT=$((FAIL_COUNT + 1))
+fi
+
+# 13. Database driver packages resolvable (#295)
+# All drivers use dynamic import() at runtime — if the package can't be resolved,
+# the tool fails with "driver not installed". This catches the #295 regression
+# where published binaries don't ship driver dependencies.
+echo "  --- Driver Resolvability ---"
+
+DRIVERS=(
+  "pg:pg"
+  "snowflake-sdk:snowflake"
+  "mysql2:mysql"
+  "mssql:sqlserver"
+  "duckdb:duckdb"
+  "mongodb:mongodb"
+  "@google-cloud/bigquery:bigquery"
+  "@databricks/sql:databricks"
+  "oracledb:oracle"
+)
+
+for entry in "${DRIVERS[@]}"; do
+  pkg="${entry%%:*}"
+  label="${entry##*:}"
+  if node -e "require('$pkg')" 2>/dev/null; then
+    echo "  PASS: $label driver resolvable ($pkg)"
+    PASS_COUNT=$((PASS_COUNT + 1))
+  else
+    echo "  FAIL: $label driver not resolvable ($pkg)"
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+  fi
+done
+
 report_results "Phase 1: Verify Installation"
