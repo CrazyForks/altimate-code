@@ -5,109 +5,85 @@ description: Validate that two tables or query results are identical — or diag
 
 # Data Parity (Table Diff)
 
-## Output Style
+## CRITICAL: Always Start With a Plan
 
-**Report facts only. No editorializing.**
-- Show counts, changed values, missing rows, new rows — that's it.
-- Do NOT explain why row-level diffing is valuable, why COUNT(*) is insufficient, or pitch the tool.
-- Do NOT add "the dangerous one", "this is exactly why", "this matters" style commentary.
-- The user asked for a diff result, not a lecture.
+**Before doing anything else**, generate a numbered TODO list for the user:
 
-## Requirements
-**Agent:** any
-**Tools used:** `sql_query` (for schema discovery), `data_diff`
+```
+Here's my plan:
+1. [ ] List available warehouse connections
+2. [ ] Inspect schema and discover primary key candidates
+3. [ ] Confirm primary keys with you
+4. [ ] Check row counts on both sides
+5. [ ] Run column-level profile (cheap — no row scan)
+6. [ ] Ask whether to proceed with row-level diff (may be expensive for large tables)
+7. [ ] Run targeted row-level diff on diverging columns only
+8. [ ] Report findings
+```
 
-## When to Use This Skill
-
-**Use when the user wants to:**
-- Confirm two tables contain the same data after a migration
-- Find rows added, deleted, or modified between source and target
-- Validate that a dbt model produces the same output as the old query
-- Run regression checks after a pipeline change
-
-**Do NOT use for:**
-- Schema comparison (column names, types) — check DDL instead
-- Performance benchmarking — this runs SELECT queries
+Update each item to `[x]` as you complete it. This plan should be visible before any tool is called.
 
 ---
 
-## The `data_diff` Tool
+## CRITICAL: Use `data_diff` Tool — Never Write Manual Diff SQL
 
-`data_diff` takes table names and key columns. It generates SQL, routes it through the specified warehouse connections, and reports differences. It **does not discover schema** — you must provide key columns and relevant comparison columns.
+**NEVER** write SQL to diff tables manually (e.g., `EXCEPT`, `FULL OUTER JOIN`, `MINUS`).
+**ALWAYS** use the `data_diff` tool for any comparison operation.
 
-**Key parameters:**
-- `source` — table name (`orders`, `db.schema.orders`) or full SELECT/WITH query
-- `target` — table name or SELECT query
-- `key_columns` — primary key(s) uniquely identifying each row (required)
-- `source_warehouse` — connection name for source
-- `target_warehouse` — connection name for target (omit = same as source)
-- `extra_columns` — columns to compare beyond keys (omit = compare all)
-- `algorithm` — `auto`, `joindiff`, `hashdiff`, `profile`, `cascade`
-- `where_clause` — filter applied to both tables
-- `partition_column` — split the table by this column and diff each group independently (recommended for large tables); three modes:
-  - **Date column**: set `partition_granularity` → groups by truncated date periods
-  - **Numeric column**: set `partition_bucket_size` → groups by equal-width key ranges
-  - **Categorical column**: set neither → groups by distinct values (strings, enums, booleans like `status`, `region`, `country`)
-- `partition_granularity` — `day` | `week` | `month` | `year` — only for date columns
-- `partition_bucket_size` — bucket width for numeric columns (e.g. `100000`)
+`sql_query` is only for:
+- Schema inspection (`information_schema`, `SHOW COLUMNS`, `DESCRIBE`)
+- Cardinality checks to identify keys
+- Row count estimates
 
-> **CRITICAL — Algorithm choice:**
-> - If `source_warehouse` ≠ `target_warehouse` → **always use `hashdiff`** (or `auto`).
-> - `joindiff` runs a single SQL JOIN on ONE connection — it physically cannot see the other table.
->   Using `joindiff` across different servers always reports 0 differences (both sides look identical).
-> - When in doubt, use `algorithm="auto"` — it picks `joindiff` for same-warehouse and `hashdiff` for cross-warehouse automatically.
+Everything else — profile, row diff, value comparison — goes through `data_diff`.
 
 ---
 
-## Workflow
+## Step 1: List Connections
 
-The key principle: **the LLM does the identification work using SQL tools first, then calls data_diff with informed parameters.**
+Use `warehouse_list` to show the user what connections are available and which warehouses map to source and target.
 
-### Step 1: Inspect the tables
+---
 
-Before calling `data_diff`, use `sql_query` to understand what you're comparing:
+## Step 2: Inspect Schema and Discover Primary Keys
+
+Use `sql_query` to get columns and identify key candidates:
 
 ```sql
--- Get columns and types
+-- Postgres / Redshift / DuckDB
 SELECT column_name, data_type, is_nullable
 FROM information_schema.columns
 WHERE table_schema = 'public' AND table_name = 'orders'
 ORDER BY ordinal_position
 ```
 
-For ClickHouse:
 ```sql
-DESCRIBE TABLE source_db.events
-```
-
-For Snowflake:
-```sql
+-- Snowflake
 SHOW COLUMNS IN TABLE orders
 ```
 
-**Look for:**
-- Columns that look like primary keys (named `id`, `*_id`, `*_key`, `uuid`)
-- Columns with `NOT NULL` constraints
-- Whether there are composite keys
+```sql
+-- ClickHouse
+DESCRIBE TABLE source_db.events
+```
 
-### Step 2: Identify the key columns
+**Look for:** columns named `id`, `*_id`, `*_key`, `uuid`, or with `NOT NULL` + unique index.
 
-If the primary key isn't obvious from the schema, run a cardinality check:
+If no obvious PK, run a cardinality check:
 
 ```sql
 SELECT
   COUNT(*) AS total_rows,
   COUNT(DISTINCT order_id) AS distinct_order_id,
-  COUNT(DISTINCT customer_id) AS distinct_customer_id,
-  COUNT(DISTINCT created_at) AS distinct_created_at
+  COUNT(DISTINCT customer_id) AS distinct_customer_id
 FROM orders
 ```
 
-**A good key column:** `distinct_count = total_rows` (fully unique) and `null_count = 0`.
+A valid key column: `distinct_count = total_rows`.
 
-If no single column is unique, find a composite key:
+For composite keys:
 ```sql
-SELECT order_id, line_item_id, COUNT(*) as cnt
+SELECT order_id, line_item_id, COUNT(*) AS cnt
 FROM order_lines
 GROUP BY order_id, line_item_id
 HAVING COUNT(*) > 1
@@ -115,21 +91,100 @@ LIMIT 5
 ```
 If this returns 0 rows, `(order_id, line_item_id)` is a valid composite key.
 
-### Step 3: Estimate table size
+## Step 3: Confirm Keys With the User
+
+**Always confirm** the identified key columns before proceeding:
+
+> "I identified `order_id` as the primary key (150,000 distinct values = 150,000 rows, no NULLs). Does that look right, or should I use a different column?"
+
+Do not proceed to diff until the user confirms or corrects.
+
+---
+
+## Step 4: Check Row Counts
 
 ```sql
-SELECT COUNT(*) FROM orders
+SELECT COUNT(*) FROM orders   -- run on both source and target
 ```
 
-Use this to choose the algorithm:
-- **< 1M rows**: `joindiff` (same DB) or `hashdiff` (cross-DB) — either is fine
-- **1M–100M rows**: `hashdiff` with `partition_column` for faster, more precise results
-- **> 100M rows**: `hashdiff` + `partition_column` — required; bisection alone may miss rows at this scale
+Use counts to:
+- Detect load completeness issues before row-level diff
+- Choose the algorithm and decide whether to ask about cost
+- If counts differ significantly (>5%), flag it immediately
 
-**When to use `partition_column`:**
-- Table has a natural time or key column (e.g. `created_at`, `order_id`, `event_date`)
-- Table has > 500K rows and bisection is slow or returning incomplete results
-- You need per-partition visibility (which month/range has the problem)
+---
+
+## Step 5: Column-Level Profile (Always Run This First)
+
+Profile is cheap — it runs aggregates, not row scans. **Always run profile before row-level diff.**
+
+```
+data_diff(
+  source="orders",
+  target="orders",
+  key_columns=["order_id"],
+  source_warehouse="postgres_prod",
+  target_warehouse="snowflake_dw",
+  algorithm="profile"
+)
+```
+
+Profile tells you:
+- Row count on each side
+- Which columns have null count differences → NULL handling bug
+- Min/max divergence per column → value transformation bug
+- Which columns match exactly → safe to skip in row-level diff
+
+**Example output:**
+```
+Column Profile Comparison
+
+  ✓ order_id: match
+  ✓ customer_id: match
+  ✗ amount: DIFFER     ← source min=10.00, target min=10.01 — rounding?
+  ✗ status: DIFFER     ← source nulls=0, target nulls=47 — NULL mapping bug?
+  ✓ created_at: match
+```
+
+---
+
+## Step 6: Ask Before Running Row-Level Diff on Large Tables
+
+After profiling, check row count and **ask the user** before proceeding:
+
+**If table has < 100K rows:** proceed automatically.
+
+**If table has 100K–10M rows:**
+> "The table has 1.2M rows. Row-level diff will scan all rows on both sides — this may take 30–60 seconds and consume warehouse compute. Do you want to proceed? You can also provide a `where_clause` to limit the scope (e.g., `created_at >= '2024-01-01'`)."
+
+**If table has > 10M rows:**
+> "The table has 50M rows. Full row-level diff could be expensive. Options:
+> 1. Diff a recent window only (e.g., last 30 days)
+> 2. Partition by a date/key column — shows which partition has problems without scanning everything
+> 3. Proceed with full diff (may take several minutes)
+> Which would you prefer?"
+
+---
+
+## Step 7: Run Targeted Row-Level Diff
+
+Use only the columns that the profile said differ. This is faster and produces cleaner output.
+
+```
+data_diff(
+  source="orders",
+  target="orders",
+  key_columns=["order_id"],
+  extra_columns=["amount", "status"],    // only diverging columns from profile
+  source_warehouse="postgres_prod",
+  target_warehouse="snowflake_dw",
+  algorithm="hashdiff"
+)
+```
+
+### For large tables — use partition_column
+
+Split the table into groups and diff each independently. Three modes:
 
 ```
 // Date column — partition by month
@@ -146,62 +201,15 @@ data_diff(source="orders", target="orders",
   partition_column="o_orderkey", partition_bucket_size=100000,
   algorithm="hashdiff")
 
-// Categorical column — partition by distinct status values ('O', 'F', 'P')
+// Categorical column — partition by distinct values (string, enum, boolean)
 data_diff(source="orders", target="orders",
   key_columns=["o_orderkey"],
   source_warehouse="pg_source", target_warehouse="pg_target",
-  partition_column="o_orderstatus",   // no granularity or bucket_size needed
+  partition_column="o_orderstatus",
   algorithm="hashdiff")
 ```
 
-Output includes an aggregate diff plus a per-partition table showing exactly which ranges differ.
-
-### Step 4: Profile first for unknown tables
-
-If you don't know what to expect (first-time validation, unfamiliar pipeline), start cheap:
-
-```
-data_diff(
-  source="orders",
-  target="orders_migrated",
-  key_columns=["order_id"],
-  source_warehouse="postgres_prod",
-  target_warehouse="snowflake_dw",
-  algorithm="profile"
-)
-```
-
-Profile output tells you:
-- Row count on each side (mismatch = load completeness problem)
-- Which columns have null count differences (mismatch = NULL handling bug)
-- Min/max divergence per column (mismatch = value transformation bug)
-- Which columns match exactly (safe to skip in row-level diff)
-
-**Interpret profile to narrow the diff:**
-```
-Column Profile Comparison
-
-  ✓ order_id: match
-  ✓ customer_id: match
-  ✗ amount: DIFFER     ← source min=10.00, target min=10.01 — rounding issue?
-  ✗ status: DIFFER     ← source nulls=0, target nulls=47 — NULL mapping bug?
-  ✓ created_at: match
-```
-→ Only diff `amount` and `status` in the next step.
-
-### Step 5: Run targeted row-level diff
-
-```
-data_diff(
-  source="orders",
-  target="orders_migrated",
-  key_columns=["order_id"],
-  extra_columns=["amount", "status"],    // only the columns profile said differ
-  source_warehouse="postgres_prod",
-  target_warehouse="snowflake_dw",
-  algorithm="hashdiff"
-)
-```
+Output includes aggregate diff + per-partition breakdown showing which group has problems.
 
 ---
 
@@ -209,13 +217,13 @@ data_diff(
 
 | Algorithm | When to use |
 |-----------|-------------|
-| `profile` | First pass — column stats (count, min, max, nulls). No row scan. |
-| `joindiff` | Same database — single FULL OUTER JOIN query. Fast. |
-| `hashdiff` | Cross-database, or large tables — bisection with checksums. Scales. |
+| `profile` | **Always run first** — column stats (count, min, max, nulls). No row scan. |
+| `joindiff` | Same database — single FULL OUTER JOIN. Fast, exact. |
+| `hashdiff` | Cross-database or large tables — bisection with checksums. Scales to billions. |
 | `cascade` | Auto-escalate: profile → hashdiff on diverging columns. |
 | `auto` | JoinDiff if same warehouse, HashDiff if cross-database. |
 
-**JoinDiff constraint:** Both tables must be on the **same database connection**. If source and target are on different servers, JoinDiff will always report 0 diffs (it only sees one side). Use `hashdiff` or `auto` for cross-database.
+> **CRITICAL:** If `source_warehouse` ≠ `target_warehouse`, **never use `joindiff`** — it only sees one connection and always reports 0 differences. Use `hashdiff` or `auto`.
 
 ---
 
@@ -226,101 +234,41 @@ data_diff(
 ✓ Tables are IDENTICAL
   Rows checked: 1,000,000
 ```
-→ Migration validated. Data is identical.
 
-### DIFFER — Diagnose by pattern
-
+### DIFFER
 ```
 ✗ Tables DIFFER
 
-  Only in source:  2       → rows deleted in target (ETL missed deletes)
-  Only in target:  2       → rows added to target (dedup issue or new data)
-  Updated rows:    3       → values changed (transform bug, type casting, rounding)
-  Identical rows:  15
+  Source rows:      150,000
+  Target rows:      149,950
+  Only in source:   50       → rows deleted in target (ETL missed deletes)
+  Only in target:   0
+  Updated rows:     0
+  Identical rows:   149,950
 ```
 
-| Pattern | Root cause hypothesis |
-|---------|----------------------|
-| `only_in_source > 0`, `only_in_target = 0` | ETL dropped rows — check filters, incremental logic |
-| `only_in_source = 0`, `only_in_target > 0` | Target has extra rows — check dedup or wrong join |
-| `updated_rows > 0`, row counts match | Silent value corruption — check transforms, type casts |
-| Row count differs | Load completeness issue — check ETL watermarks |
-
-Sample diffs point to the specific key + column + old→new value:
-```
-key={"order_id":"4"} col=amount: 300.00 → 305.00
-```
-Use this to query the source systems directly and trace the discrepancy.
-
----
-
-## Usage Examples
-
-### Full workflow: unknown migration
-```
-// 1. Discover schema
-sql_query("SELECT column_name, data_type FROM information_schema.columns WHERE table_name='orders'", warehouse="postgres_prod")
-
-// 2. Check row count
-sql_query("SELECT COUNT(*), COUNT(DISTINCT order_id) FROM orders", warehouse="postgres_prod")
-
-// 3. Profile to find which columns differ
-data_diff(source="orders", target="orders", key_columns=["order_id"],
-  source_warehouse="postgres_prod", target_warehouse="snowflake_dw", algorithm="profile")
-
-// 4. Row-level diff on diverging columns only
-data_diff(source="orders", target="orders", key_columns=["order_id"],
-  extra_columns=["amount", "status"],
-  source_warehouse="postgres_prod", target_warehouse="snowflake_dw", algorithm="hashdiff")
-```
-
-### Same-database query refactor
-```
-data_diff(
-  source="SELECT id, amount, status FROM orders WHERE region = 'us-east'",
-  target="SELECT id, amount, status FROM orders_v2 WHERE region = 'us-east'",
-  key_columns=["id"]
-)
-```
-
-### Large table — filter to recent window first
-```
-data_diff(
-  source="fact_events",
-  target="fact_events_v2",
-  key_columns=["event_id"],
-  where_clause="event_date >= '2024-01-01'",
-  algorithm="hashdiff"
-)
-```
-
-### ClickHouse — always qualify with database.table
-```
-data_diff(
-  source="source_db.events",
-  target="target_db.events",
-  key_columns=["event_id"],
-  source_warehouse="clickhouse_source",
-  target_warehouse="clickhouse_target",
-  algorithm="hashdiff"
-)
-```
+| Pattern | Root cause |
+|---------|-----------|
+| `only_in_source > 0`, target = 0 | ETL dropped rows — check filters, incremental logic |
+| `only_in_target > 0`, source = 0 | Target has extra rows — dedup issue or wrong join |
+| `updated_rows > 0`, counts match | Silent value corruption — check type casts, rounding |
+| Row counts differ significantly | Load completeness — check ETL watermarks |
 
 ---
 
 ## Common Mistakes
 
-**Calling data_diff without knowing the key**
-→ Run `sql_query` to check cardinality first. A bad key gives meaningless results.
+**Writing manual diff SQL instead of calling data_diff**
+→ Never use EXCEPT, MINUS, or FULL OUTER JOIN to diff tables. Use `data_diff`.
+
+**Calling data_diff without confirming the key**
+→ Confirm cardinality with the user first. A bad key gives meaningless results.
 
 **Using joindiff for cross-database tables**
-→ JoinDiff runs one SQL query on one connection. It can't see the other table. Use `hashdiff` or `auto`.
+→ JoinDiff can't see the remote table. Always returns 0 diffs. Use `hashdiff` or `auto`.
 
-**Diffing a 1B row table without a date filter**
-→ Add `where_clause` to scope to recent data. Validate a window first, then expand.
+**Skipping the profile step and jumping to full row diff**
+→ Profile is free. It tells you which columns actually differ so you avoid scanning everything.
 
-**Ignoring profile output and jumping to full diff**
-→ Profile is free. It tells you which columns actually differ so you can avoid scanning all columns across all rows.
-
-**Forgetting to check row counts before diffing**
-→ If source has 1M rows and target has 900K, row-level diff is misleading. Fix the load completeness issue first.
+**Running full diff on a billion-row table without asking**
+→ Always ask the user before expensive operations. Offer filtering and partition options.
