@@ -57,6 +57,7 @@ import { SqlFormatTool } from "../altimate/tools/sql-format"
 import { SqlFixTool } from "../altimate/tools/sql-fix"
 import { SqlAutocompleteTool } from "../altimate/tools/sql-autocomplete"
 import { SqlDiffTool } from "../altimate/tools/sql-diff"
+import { DataDiffTool } from "../altimate/tools/data-diff"
 import { FinopsQueryHistoryTool } from "../altimate/tools/finops-query-history"
 import { FinopsAnalyzeCreditsTool } from "../altimate/tools/finops-analyze-credits"
 import { FinopsExpensiveQueriesTool } from "../altimate/tools/finops-expensive-queries"
@@ -233,6 +234,7 @@ export namespace ToolRegistry {
       SqlFixTool,
       SqlAutocompleteTool,
       SqlDiffTool,
+      DataDiffTool,
       FinopsQueryHistoryTool,
       FinopsAnalyzeCreditsTool,
       FinopsExpensiveQueriesTool,

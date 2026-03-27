@@ -5,7 +5,7 @@
  * Uses the official ClickHouse JS client which communicates over HTTP(S).
  */
 
-import type { ConnectionConfig, Connector, ConnectorResult, SchemaColumn } from "./types"
+import type { ConnectionConfig, Connector, ConnectorResult, ExecuteOptions, SchemaColumn } from "./types"
 
 export async function connect(config: ConnectionConfig): Promise<Connector> {
   let createClient: any
@@ -60,11 +60,11 @@ export async function connect(config: ConnectionConfig): Promise<Connector> {
       client = createClient(clientConfig)
     },
 
-    async execute(sql: string, limit?: number, _binds?: any[]): Promise<ConnectorResult> {
+    async execute(sql: string, limit?: number, _binds?: any[], options?: ExecuteOptions): Promise<ConnectorResult> {
       if (!client) {
         throw new Error("ClickHouse client not connected — call connect() first")
       }
-      const effectiveLimit = limit === undefined ? 1000 : limit
+      const effectiveLimit = options?.noLimit ? 0 : (limit ?? 1000)
       let query = sql
 
       // Strip string literals, then comments, for accurate SQL heuristic checks.

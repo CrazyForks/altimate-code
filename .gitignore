@@ -28,6 +28,12 @@ target
 # Commit message scratch files
 .github/meta/
 
+# Local connections config (may contain credentials)
+.altimate-code/
+
+# Pre-built native binaries (platform-specific, not for source control)
+packages/opencode/*.node
+
 # Local dev files
 opencode-dev
 logs/
