@@ -12,7 +12,7 @@ afterAll(() => { delete process.env.ALTIMATE_TELEMETRY_DISABLED })
 import * as Registry from "../../src/altimate/native/connections/registry"
 import * as CredentialStore from "../../src/altimate/native/connections/credential-store"
 import { parseDbtProfiles } from "../../src/altimate/native/connections/dbt-profiles"
-import { discoverContainers } from "../../src/altimate/native/connections/docker-discovery"
+import { discoverContainers, containerToConfig } from "../../src/altimate/native/connections/docker-discovery"
 import { registerAll } from "../../src/altimate/native/connections/register"
 
 // ---------------------------------------------------------------------------
@@ -126,6 +126,39 @@ describe("CredentialStore", () => {
     const { sanitized, warnings } = await CredentialStore.saveConnection("sf_keypair", config)
     expect(sanitized.private_key).toBeUndefined()
     expect(warnings.length).toBeGreaterThan(0)
+  })
+
+  test("saveConnection strips all sensitive fields from complex config", async () => {
+    const config = {
+      type: "snowflake",
+      account: "abc123",
+      user: "svc_user",
+      password: "pw123",
+      private_key: "-----BEGIN PRIVATE KEY-----",
+      private_key_passphrase: "passphrase",
+      token: "oauth-token",
+      oauth_client_secret: "client-secret",
+      ssh_password: "ssh-pw",
+      connection_string: "mongodb://...",
+    } as any
+    const { sanitized, warnings } = await CredentialStore.saveConnection("complex", config)
+
+    // All sensitive fields stripped
+    expect(sanitized.password).toBeUndefined()
+    expect(sanitized.private_key).toBeUndefined()
+    expect(sanitized.private_key_passphrase).toBeUndefined()
+    expect(sanitized.token).toBeUndefined()
+    expect(sanitized.oauth_client_secret).toBeUndefined()
+    expect(sanitized.ssh_password).toBeUndefined()
+    expect(sanitized.connection_string).toBeUndefined()
+
+    // Non-sensitive fields preserved
+    expect(sanitized.type).toBe("snowflake")
+    expect(sanitized.account).toBe("abc123")
+    expect(sanitized.user).toBe("svc_user")
+
+    // One warning per stripped field
+    expect(warnings).toHaveLength(7)
   })
 
   test("saveConnection strips OAuth credentials as sensitive", async () => {
@@ -271,6 +304,29 @@ describe("Docker discovery", () => {
   test("returns empty array when dockerode not installed", async () => {
     const containers = await discoverContainers()
     expect(containers).toEqual([])
+  })
+
+  test("containerToConfig omits undefined optional fields", () => {
+    const container = {
+      container_id: "def456",
+      name: "mysql_dev",
+      image: "mysql:8",
+      db_type: "mysql",
+      host: "127.0.0.1",
+      port: 3306,
+      user: undefined as string | undefined,
+      password: undefined as string | undefined,
+      database: undefined as string | undefined,
+      status: "running",
+    }
+    const config = containerToConfig(container as any)
+    expect(config.type).toBe("mysql")
+    expect(config.host).toBe("127.0.0.1")
+    expect(config.port).toBe(3306)
+    // Optional fields should not be set when undefined
+    expect(config.user).toBeUndefined()
+    expect(config.password).toBeUndefined()
+    expect(config.database).toBeUndefined()
   })
 })
 
