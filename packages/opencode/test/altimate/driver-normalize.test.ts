@@ -663,3 +663,85 @@ describe("normalizeConfig — Snowflake private_key edge cases", () => {
     expect(result.private_key_path).toBeUndefined()
   })
 })
+
+// ---------------------------------------------------------------------------
+// normalizeConfig — MongoDB aliases
+// ---------------------------------------------------------------------------
+
+describe("normalizeConfig — MongoDB", () => {
+  test("connectionString → connection_string", () => {
+    const result = normalizeConfig({
+      type: "mongodb",
+      connectionString: "mongodb://localhost:27017/mydb",
+    })
+    expect(result.connection_string).toBe("mongodb://localhost:27017/mydb")
+    expect(result.connectionString).toBeUndefined()
+  })
+
+  test("uri → connection_string", () => {
+    const result = normalizeConfig({
+      type: "mongodb",
+      uri: "mongodb://localhost:27017/mydb",
+    })
+    expect(result.connection_string).toBe("mongodb://localhost:27017/mydb")
+    expect(result.uri).toBeUndefined()
+  })
+
+  test("authSource → auth_source", () => {
+    const result = normalizeConfig({
+      type: "mongodb",
+      authSource: "admin",
+    })
+    expect(result.auth_source).toBe("admin")
+    expect(result.authSource).toBeUndefined()
+  })
+
+  test("replicaSet → replica_set", () => {
+    const result = normalizeConfig({
+      type: "mongodb",
+      replicaSet: "rs0",
+    })
+    expect(result.replica_set).toBe("rs0")
+    expect(result.replicaSet).toBeUndefined()
+  })
+
+  test("directConnection → direct_connection", () => {
+    const result = normalizeConfig({
+      type: "mongodb",
+      directConnection: true,
+    })
+    expect(result.direct_connection).toBe(true)
+    expect(result.directConnection).toBeUndefined()
+  })
+
+  test("connectTimeoutMS → connect_timeout", () => {
+    const result = normalizeConfig({
+      type: "mongodb",
+      connectTimeoutMS: 5000,
+    })
+    expect(result.connect_timeout).toBe(5000)
+    expect(result.connectTimeoutMS).toBeUndefined()
+  })
+
+  test("'mongo' type alias routes to MongoDB aliases", () => {
+    const result = normalizeConfig({
+      type: "mongo",
+      uri: "mongodb://localhost/test",
+    })
+    expect(result.connection_string).toBe("mongodb://localhost/test")
+    expect(result.uri).toBeUndefined()
+  })
+
+  test("canonical mongodb config passes through unchanged", () => {
+    const config = {
+      type: "mongodb",
+      connection_string: "mongodb://localhost:27017",
+      user: "admin",
+      password: "secret",
+      database: "mydb",
+      auth_source: "admin",
+      replica_set: "rs0",
+    }
+    expect(normalizeConfig(config)).toEqual(config)
+  })
+})
