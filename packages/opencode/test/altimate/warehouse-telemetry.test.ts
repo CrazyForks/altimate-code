@@ -158,6 +158,24 @@ describe("warehouse telemetry: detectAuthMethod", () => {
     expect(connectEvent.auth_method).toBe("file")
   })
 
+  // altimate_change start — MongoDB detectAuthMethod coverage (PR #482)
+  // These call detectAuthMethod directly rather than going through Registry.get(),
+  // because the MongoDB driver import + connect would time out in test environments.
+  test("detects connection_string auth for mongodb without password", () => {
+    expect(Registry.detectAuthMethod({ type: "mongodb", host: "localhost" })).toBe("connection_string")
+  })
+
+  test("detects connection_string auth for mongo alias without password", () => {
+    expect(Registry.detectAuthMethod({ type: "mongo", host: "localhost" })).toBe("connection_string")
+  })
+
+  test("detects password auth for mongodb with password", () => {
+    // Note: the generic password check (line 226) fires before the mongo branch,
+    // but the result is the same — "password". This verifies the overall behavior.
+    expect(Registry.detectAuthMethod({ type: "mongodb", password: "secret" })).toBe("password")
+  })
+  // altimate_change end
+
   test("returns unknown for unrecognized auth", async () => {
     Registry.setConfigs({
       mystery: { type: "unsupported_db_type", host: "localhost" },
