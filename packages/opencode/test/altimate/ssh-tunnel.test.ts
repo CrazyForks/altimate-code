@@ -1,6 +1,9 @@
-// altimate_change start — unit tests for SSH tunnel config extraction and lifecycle
-import { describe, test, expect } from "bun:test"
-import { extractSshConfig, closeTunnel, getActiveTunnel } from "../../src/altimate/native/connections/ssh-tunnel"
+import { describe, test, expect, afterEach } from "bun:test"
+import { extractSshConfig, closeTunnel, closeAllTunnels, getActiveTunnel } from "../../src/altimate/native/connections/ssh-tunnel"
+
+afterEach(() => {
+  closeAllTunnels()
+})
 
 // ---------------------------------------------------------------------------
 // extractSshConfig — pure function that extracts SSH tunnel config
@@ -81,4 +84,3 @@ describe("SSH tunnel state management", () => {
     expect(getActiveTunnel("nonexistent")).toBeUndefined()
   })
 })
-// altimate_change end

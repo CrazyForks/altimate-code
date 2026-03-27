@@ -99,7 +99,7 @@ DRIVERS=(
 for entry in "${DRIVERS[@]}"; do
   pkg="${entry%%:*}"
   label="${entry##*:}"
-  if node -e "require('$pkg')" 2>/dev/null; then
+  if node -e "require.resolve('$pkg')" 2>/dev/null; then
     echo "  PASS: $label driver resolvable ($pkg)"
     PASS_COUNT=$((PASS_COUNT + 1))
   else
