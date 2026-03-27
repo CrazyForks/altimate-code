@@ -183,7 +183,8 @@ echo "  [10/10] No internet graceful handling..."
 # - Set both lowercase and uppercase proxy vars to unreachable TEST-NET-1
 # - Clear NO_PROXY to prevent bypass
 # - Use unshare --net if available (network namespace isolation — most reliable)
-if command -v unshare >/dev/null 2>&1; then
+# Try unshare --net first (Linux with privileges), fall back to proxy blocking
+if command -v unshare >/dev/null 2>&1 && unshare --net true 2>/dev/null; then
   NO_NET_OUTPUT=$(timeout 15 unshare --net altimate run --max-turns 1 --yolo "hello" 2>&1 || true)
 else
   NO_NET_OUTPUT=$(timeout 15 env \
