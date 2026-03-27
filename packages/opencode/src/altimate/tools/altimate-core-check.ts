@@ -57,7 +57,7 @@ export const AltimateCoreCheckTool = Tool.define("altimate_core_check", {
   },
 })
 
-function formatCheckTitle(data: Record<string, any>): string {
+export function formatCheckTitle(data: Record<string, any>): string {
   const parts: string[] = []
   if (!data.validation?.valid) parts.push("validation errors")
   if (!data.lint?.clean) parts.push(`${data.lint?.findings?.length ?? 0} lint findings`)
@@ -66,7 +66,7 @@ function formatCheckTitle(data: Record<string, any>): string {
   return parts.length ? parts.join(", ") : "PASS"
 }
 
-function formatCheck(data: Record<string, any>): string {
+export function formatCheck(data: Record<string, any>): string {
   const lines: string[] = []
 
   lines.push("=== Validation ===")

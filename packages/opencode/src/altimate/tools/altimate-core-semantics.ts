@@ -61,7 +61,7 @@ export const AltimateCoreSemanticsTool = Tool.define("altimate_core_semantics", 
   },
 })
 
-function extractSemanticsErrors(data: Record<string, any>): string | undefined {
+export function extractSemanticsErrors(data: Record<string, any>): string | undefined {
   if (Array.isArray(data.validation_errors) && data.validation_errors.length > 0) {
     const msgs = data.validation_errors
       .map((e: any) => (typeof e === "string" ? e : (e.message ?? String(e))))
@@ -71,7 +71,7 @@ function extractSemanticsErrors(data: Record<string, any>): string | undefined {
   return undefined
 }
 
-function formatSemantics(data: Record<string, any>): string {
+export function formatSemantics(data: Record<string, any>): string {
   if (data.error) return `Error: ${data.error}`
   if (data.valid) return "No semantic issues found."
   const lines = ["Semantic issues:\n"]
