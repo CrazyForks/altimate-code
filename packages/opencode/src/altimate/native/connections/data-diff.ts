@@ -147,8 +147,70 @@ function isAuditColumn(columnName: string): boolean {
   return AUDIT_COLUMN_PATTERNS.some((pattern) => pattern.test(columnName))
 }
 
+// ---------------------------------------------------------------------------
+// Auto-timestamp default detection (schema-level)
+// ---------------------------------------------------------------------------
+
 /**
- * Build a query to discover column names for a table, appropriate for the dialect.
+ * Patterns that detect auto-generated timestamp/date defaults in column_default
+ * expressions. These functions produce the current time when a row is inserted
+ * (or updated), meaning the column value will inherently differ between source
+ * and target — not because of actual data discrepancies, but because of when
+ * each copy was written.
+ *
+ * Covers: PostgreSQL, MySQL/MariaDB, Snowflake, SQL Server, Oracle,
+ *         ClickHouse, DuckDB, SQLite, Redshift, BigQuery, Databricks.
+ */
+const AUTO_TIMESTAMP_DEFAULT_PATTERNS = [
+  // PostgreSQL, DuckDB, Redshift
+  /\bnow\s*\(\)/i,
+  /\bclock_timestamp\s*\(\)/i,
+  /\bstatement_timestamp\s*\(\)/i,
+  /\btransaction_timestamp\s*\(\)/i,
+  /\blocaltimestamp\b/i,
+  // Standard SQL — used by most dialects
+  /\bcurrent_timestamp\b/i,
+  // MySQL / MariaDB — "ON UPDATE CURRENT_TIMESTAMP" in the EXTRA column
+  /\bon\s+update\s+current_timestamp/i,
+  // Snowflake
+  /\bsysdate\s*\(\)/i,
+  // SQL Server
+  /\bgetdate\s*\(\)/i,
+  /\bsysdatetime\s*\(\)/i,
+  /\bsysutcdatetime\s*\(\)/i,
+  /\bsysdatetimeoffset\s*\(\)/i,
+  // Oracle
+  /\bSYSDATE\b/i,
+  /\bSYSTIMESTAMP\b/i,
+  // ClickHouse
+  /\btoday\s*\(\)/i,
+  // SQLite
+  /\bdatetime\s*\(\s*'now'/i,
+]
+
+/**
+ * Check whether a column_default expression contains an auto-generating
+ * timestamp function. Also matches expressions that *contain* these functions
+ * (e.g. `(now() + '1 mon'::interval)`).
+ */
+function isAutoTimestampDefault(defaultExpr: string | null): boolean {
+  if (!defaultExpr) return false
+  return AUTO_TIMESTAMP_DEFAULT_PATTERNS.some((pattern) => pattern.test(defaultExpr))
+}
+
+// ---------------------------------------------------------------------------
+// Column discovery (names + defaults) — dialect-aware
+// ---------------------------------------------------------------------------
+
+interface ColumnInfo {
+  name: string
+  defaultExpr: string | null
+}
+
+/**
+ * Build a query to discover column names and default expressions for a table.
+ * Returns both pieces of information in a single round-trip so we can detect
+ * auto-timestamp defaults without an extra query.
  */
 function buildColumnDiscoverySQL(tableName: string, dialect: string): string {
   // Parse schema.table or db.schema.table
@@ -168,33 +230,85 @@ function buildColumnDiscoverySQL(tableName: string, dialect: string): string {
 
   switch (dialect) {
     case "clickhouse":
+      // Returns: name, type, default_type, default_expression, ...
       return `DESCRIBE TABLE ${tableName}`
     case "snowflake":
+      // Returns: table_name, schema_name, column_name, data_type, null?, default, ...
       return `SHOW COLUMNS IN TABLE ${tableName}`
-    default: {
-      // Postgres, MySQL, Redshift, DuckDB, etc. — use information_schema
+    case "mysql":
+    case "mariadb": {
+      // MySQL puts "on update CURRENT_TIMESTAMP" in the EXTRA column, not column_default
       const conditions = [tableFilter]
       if (schemaFilter) conditions.push(schemaFilter)
-      return `SELECT column_name FROM information_schema.columns WHERE ${conditions.join(" AND ")} ORDER BY ordinal_position`
+      return `SELECT column_name, column_default, extra FROM information_schema.columns WHERE ${conditions.join(" AND ")} ORDER BY ordinal_position`
+    }
+    case "oracle": {
+      // Oracle uses ALL_TAB_COLUMNS (no information_schema)
+      const oracleTable = parts[parts.length - 1]
+      const conditions = [`TABLE_NAME = '${oracleTable.toUpperCase()}'`]
+      if (parts.length >= 2) {
+        conditions.push(`OWNER = '${parts[parts.length - 2].toUpperCase()}'`)
+      }
+      return `SELECT COLUMN_NAME, DATA_DEFAULT FROM ALL_TAB_COLUMNS WHERE ${conditions.join(" AND ")} ORDER BY COLUMN_ID`
+    }
+    case "sqlite": {
+      // PRAGMA table_info returns: cid, name, type, notnull, dflt_value, pk
+      const table = parts[parts.length - 1]
+      return `PRAGMA table_info('${table}')`
+    }
+    default: {
+      // Postgres, Redshift, DuckDB, SQL Server, BigQuery, Databricks, etc.
+      const conditions = [tableFilter]
+      if (schemaFilter) conditions.push(schemaFilter)
+      return `SELECT column_name, column_default FROM information_schema.columns WHERE ${conditions.join(" AND ")} ORDER BY ordinal_position`
     }
   }
 }
 
 /**
- * Parse column names from the discovery query result, handling dialect differences.
+ * Parse column info (name + default expression) from the discovery query result,
+ * handling dialect-specific output formats.
  */
-function parseColumnNames(rows: (string | null)[][], dialect: string): string[] {
+function parseColumnInfo(rows: (string | null)[][], dialect: string): ColumnInfo[] {
   switch (dialect) {
     case "clickhouse":
-      // DESCRIBE returns: name, type, default_type, default_expression, ...
-      return rows.map((r) => r[0] ?? "").filter(Boolean)
+      // DESCRIBE: name[0], type[1], default_type[2], default_expression[3], ...
+      return rows.map((r) => ({
+        name: r[0] ?? "",
+        defaultExpr: r[3] ?? null,
+      })).filter((c) => c.name)
     case "snowflake":
-      // SHOW COLUMNS returns: table_name, schema_name, column_name, data_type, ...
-      // column_name is at index 2
-      return rows.map((r) => r[2] ?? "").filter(Boolean)
+      // SHOW COLUMNS: table_name[0], schema_name[1], column_name[2], data_type[3], null?[4], default[5], ...
+      return rows.map((r) => ({
+        name: r[2] ?? "",
+        defaultExpr: r[5] ?? null,
+      })).filter((c) => c.name)
+    case "oracle":
+      // ALL_TAB_COLUMNS: COLUMN_NAME[0], DATA_DEFAULT[1]
+      return rows.map((r) => ({
+        name: r[0] ?? "",
+        defaultExpr: r[1] ?? null,
+      })).filter((c) => c.name)
+    case "sqlite":
+      // PRAGMA table_info: cid[0], name[1], type[2], notnull[3], dflt_value[4], pk[5]
+      return rows.map((r) => ({
+        name: r[1] ?? "",
+        defaultExpr: r[4] ?? null,
+      })).filter((c) => c.name)
+    case "mysql":
+    case "mariadb":
+      // column_name[0], column_default[1], extra[2]
+      // Merge default + extra — MySQL puts "on update CURRENT_TIMESTAMP" in extra
+      return rows.map((r) => ({
+        name: r[0] ?? "",
+        defaultExpr: [r[1], r[2]].filter(Boolean).join(" ") || null,
+      })).filter((c) => c.name)
     default:
-      // information_schema returns: column_name
-      return rows.map((r) => r[0] ?? "").filter(Boolean)
+      // Postgres, Redshift, DuckDB, SQL Server, BigQuery: column_name[0], column_default[1]
+      return rows.map((r) => ({
+        name: r[0] ?? "",
+        defaultExpr: r[1] ?? null,
+      })).filter((c) => c.name)
   }
 }
 
@@ -204,8 +318,13 @@ function parseColumnNames(rows: (string | null)[][], dialect: string): string[] 
  * When the caller omits `extra_columns`, we query the source table's schema to
  * find all columns, then exclude:
  *   1. Key columns (already used for matching)
- *   2. Audit/timestamp columns (updated_at, created_at, etc.) that typically
- *      differ between source and target due to ETL timing
+ *   2. Audit/timestamp columns matched by name pattern (updated_at, created_at, etc.)
+ *   3. Columns with auto-generating timestamp defaults (DEFAULT NOW(), CURRENT_TIMESTAMP,
+ *      GETDATE(), SYSDATE, etc.) — detected from the database catalog
+ *
+ * The schema-level default detection (layer 3) catches columns that don't follow
+ * naming conventions but still auto-generate values on INSERT — these inherently
+ * differ between source and target due to when each copy was written.
  *
  * Returns the list of columns to compare, or undefined if discovery fails
  * (in which case the engine falls back to key-only comparison).
@@ -222,20 +341,20 @@ async function discoverExtraColumns(
   try {
     const sql = buildColumnDiscoverySQL(tableName, dialect)
     const rows = await executeQuery(sql, warehouseName)
-    const allColumns = parseColumnNames(rows, dialect)
+    const columnInfos = parseColumnInfo(rows, dialect)
 
-    if (allColumns.length === 0) return undefined
+    if (columnInfos.length === 0) return undefined
 
     const keySet = new Set(keyColumns.map((k) => k.toLowerCase()))
     const extraColumns: string[] = []
     const excludedAudit: string[] = []
 
-    for (const col of allColumns) {
-      if (keySet.has(col.toLowerCase())) continue
-      if (isAuditColumn(col)) {
-        excludedAudit.push(col)
+    for (const col of columnInfos) {
+      if (keySet.has(col.name.toLowerCase())) continue
+      if (isAuditColumn(col.name) || isAutoTimestampDefault(col.defaultExpr)) {
+        excludedAudit.push(col.name)
       } else {
-        extraColumns.push(col)
+        extraColumns.push(col.name)
       }
     }
 

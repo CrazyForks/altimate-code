@@ -38,7 +38,8 @@ export const DataDiffTool = Tool.define("data_diff", {
       .describe(
         "Columns to compare beyond the key columns. " +
         "IMPORTANT: If omitted AND source is a plain table name, columns are auto-discovered from the schema " +
-        "(excluding key columns and audit/timestamp columns like updated_at, created_at, inserted_at, modified_at). " +
+        "(excluding key columns, audit/timestamp columns matched by name like updated_at/created_at, " +
+        "and columns with auto-generating timestamp defaults like DEFAULT NOW()/CURRENT_TIMESTAMP/GETDATE()/SYSDATE). " +
         "If omitted AND source is a SQL query, ONLY key columns are compared — value changes in non-key columns will NOT be detected. " +
         "Always provide explicit extra_columns when comparing SQL queries to ensure value-level comparison."
       ),
@@ -117,10 +118,10 @@ export const DataDiffTool = Tool.define("data_diff", {
         output += formatPartitionResults(result.partition_results, args.partition_column!)
       }
 
-      // Report auto-excluded audit columns so the LLM and user know what was skipped
+      // Report auto-excluded columns so the LLM and user know what was skipped
       const excluded = (result as any).excluded_audit_columns as string[] | undefined
       if (excluded && excluded.length > 0) {
-        output += `\n\n  Note: ${excluded.length} audit/timestamp column${excluded.length === 1 ? "" : "s"} auto-excluded from comparison: ${excluded.join(", ")}`
+        output += `\n\n  Note: ${excluded.length} column${excluded.length === 1 ? "" : "s"} auto-excluded from comparison (audit name patterns + auto-timestamp defaults like NOW()/CURRENT_TIMESTAMP): ${excluded.join(", ")}`
       }
 
       return {
