@@ -2653,3 +2653,126 @@ describe("ProviderTransform.variants", () => {
     })
   })
 })
+
+// ---------------------------------------------------------------------------
+// ProviderTransform.temperature / topP / topK
+// ---------------------------------------------------------------------------
+
+describe("ProviderTransform.temperature", () => {
+  const m = (id: string) => ({ id } as any)
+
+  test("qwen returns 0.55", () => {
+    expect(ProviderTransform.temperature(m("qwen-turbo"))).toBe(0.55)
+    expect(ProviderTransform.temperature(m("qwen3-235b-a22b"))).toBe(0.55)
+  })
+
+  test("claude returns undefined", () => {
+    expect(ProviderTransform.temperature(m("claude-sonnet-4"))).toBeUndefined()
+    expect(ProviderTransform.temperature(m("claude-opus-4-6"))).toBeUndefined()
+  })
+
+  test("gemini returns 1.0", () => {
+    expect(ProviderTransform.temperature(m("gemini-2.5-pro"))).toBe(1.0)
+  })
+
+  test("glm-4.6 and glm-4.7 return 1.0", () => {
+    expect(ProviderTransform.temperature(m("glm-4.6-flash"))).toBe(1.0)
+    expect(ProviderTransform.temperature(m("glm-4.7-plus"))).toBe(1.0)
+  })
+
+  test("minimax-m2 returns 1.0", () => {
+    expect(ProviderTransform.temperature(m("minimax-m2-pro"))).toBe(1.0)
+  })
+
+  test("kimi-k2 base returns 0.6", () => {
+    expect(ProviderTransform.temperature(m("kimi-k2-instruct"))).toBe(0.6)
+  })
+
+  test("kimi-k2 thinking variant returns 1.0", () => {
+    expect(ProviderTransform.temperature(m("kimi-k2-thinking"))).toBe(1.0)
+  })
+
+  test("kimi-k2.5 (dot variant) returns 1.0", () => {
+    expect(ProviderTransform.temperature(m("kimi-k2.5-turbo"))).toBe(1.0)
+  })
+
+  test("kimi-k2p5 returns 1.0", () => {
+    expect(ProviderTransform.temperature(m("kimi-k2p5"))).toBe(1.0)
+  })
+
+  test("kimi-k2-5 (hyphen variant) returns 1.0", () => {
+    expect(ProviderTransform.temperature(m("kimi-k2-5-chat"))).toBe(1.0)
+  })
+
+  test("unknown model returns undefined", () => {
+    expect(ProviderTransform.temperature(m("gpt-5"))).toBeUndefined()
+    expect(ProviderTransform.temperature(m("llama-4-maverick"))).toBeUndefined()
+  })
+})
+
+describe("ProviderTransform.topP", () => {
+  const m = (id: string) => ({ id } as any)
+
+  test("qwen returns 1", () => {
+    expect(ProviderTransform.topP(m("qwen-turbo"))).toBe(1)
+  })
+
+  test("minimax-m2 returns 0.95", () => {
+    expect(ProviderTransform.topP(m("minimax-m2-pro"))).toBe(0.95)
+  })
+
+  test("gemini returns 0.95", () => {
+    expect(ProviderTransform.topP(m("gemini-2.5-flash"))).toBe(0.95)
+  })
+
+  test("kimi-k2.5 (dot variant) returns 0.95", () => {
+    expect(ProviderTransform.topP(m("kimi-k2.5-turbo"))).toBe(0.95)
+  })
+
+  test("kimi-k2p5 returns 0.95", () => {
+    expect(ProviderTransform.topP(m("kimi-k2p5"))).toBe(0.95)
+  })
+
+  test("kimi-k2-5 (hyphen variant) returns 0.95", () => {
+    expect(ProviderTransform.topP(m("kimi-k2-5-chat"))).toBe(0.95)
+  })
+
+  test("plain kimi-k2 returns undefined (not in topP list)", () => {
+    expect(ProviderTransform.topP(m("kimi-k2-instruct"))).toBeUndefined()
+  })
+
+  test("unknown model returns undefined", () => {
+    expect(ProviderTransform.topP(m("gpt-5"))).toBeUndefined()
+    expect(ProviderTransform.topP(m("claude-sonnet-4"))).toBeUndefined()
+  })
+})
+
+describe("ProviderTransform.topK", () => {
+  const m = (id: string) => ({ id } as any)
+
+  test("minimax-m2 base returns 20", () => {
+    expect(ProviderTransform.topK(m("minimax-m2-pro"))).toBe(20)
+  })
+
+  test("minimax-m2 dot variant (m2.) returns 40", () => {
+    expect(ProviderTransform.topK(m("minimax-m2.5"))).toBe(40)
+  })
+
+  test("minimax-m25 returns 40", () => {
+    expect(ProviderTransform.topK(m("minimax-m25-chat"))).toBe(40)
+  })
+
+  test("minimax-m21 returns 40", () => {
+    expect(ProviderTransform.topK(m("minimax-m21"))).toBe(40)
+  })
+
+  test("gemini returns 64", () => {
+    expect(ProviderTransform.topK(m("gemini-2.5-pro"))).toBe(64)
+  })
+
+  test("unknown model returns undefined", () => {
+    expect(ProviderTransform.topK(m("gpt-5"))).toBeUndefined()
+    expect(ProviderTransform.topK(m("claude-sonnet-4"))).toBeUndefined()
+    expect(ProviderTransform.topK(m("qwen-turbo"))).toBeUndefined()
+  })
+})
