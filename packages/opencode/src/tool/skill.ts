@@ -5,6 +5,9 @@ import { Tool } from "./tool"
 import { Skill } from "../skill"
 import { Ripgrep } from "../file/ripgrep"
 import { iife } from "@/util/iife"
+// altimate_change start — import follow-up suggestions for conversational engagement
+import { SkillFollowups } from "../skill/followups"
+// altimate_change end
 // altimate_change start - import for LLM-based dynamic skill selection
 import { Fingerprint } from "../altimate/fingerprint"
 import { Config } from "../config/config"
@@ -156,6 +159,10 @@ export const SkillTool = Tool.define("skill", async (ctx) => {
       }
       // altimate_change end
 
+      // altimate_change start — append follow-up suggestions after skill content
+      const followups = SkillFollowups.format(skill.name)
+      // altimate_change end
+
       return {
         title: `Loaded skill: ${skill.name}`,
         output: [
@@ -172,6 +179,7 @@ export const SkillTool = Tool.define("skill", async (ctx) => {
           files,
           "</skill_files>",
           "</skill_content>",
+          followups,
         ].join("\n"),
         metadata: {
           name: skill.name,
