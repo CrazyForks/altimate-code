@@ -36,11 +36,11 @@ describe("extractEquivalenceErrors", () => {
     expect(extractEquivalenceErrors(data)).toBe("42")
   })
 
-  test("crashes on null entries in validation_errors (known bug)", () => {
-    // BUG: null passes typeof check (not "string") but null.message throws TypeError
-    // The ?? operator cannot protect because property access on null throws first
-    const data = { validation_errors: [null] }
-    expect(() => extractEquivalenceErrors(data)).toThrow(TypeError)
+  test("handles null entries in validation_errors without crashing", () => {
+    // Previously crashed: null.message throws TypeError before ?? can evaluate
+    // Fixed with optional chaining: e?.message ?? String(e)
+    const data = { validation_errors: [null, "real error"] }
+    expect(extractEquivalenceErrors(data)).toBe("null; real error")
   })
 
   test("filters out falsy messages", () => {

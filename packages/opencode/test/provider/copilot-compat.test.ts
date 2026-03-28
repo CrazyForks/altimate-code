@@ -1,42 +1,7 @@
 import { describe, test, expect } from "bun:test"
-import { mapOpenAICompatibleFinishReason } from "../../src/provider/sdk/copilot/chat/map-openai-compatible-finish-reason"
 import { getResponseMetadata } from "../../src/provider/sdk/copilot/chat/get-response-metadata"
 
-describe("mapOpenAICompatibleFinishReason", () => {
-  test("maps 'stop' to 'stop'", () => {
-    expect(mapOpenAICompatibleFinishReason("stop")).toBe("stop")
-  })
-
-  test("maps 'length' to 'length'", () => {
-    expect(mapOpenAICompatibleFinishReason("length")).toBe("length")
-  })
-
-  test("maps 'content_filter' to 'content-filter'", () => {
-    expect(mapOpenAICompatibleFinishReason("content_filter")).toBe("content-filter")
-  })
-
-  test("maps 'function_call' to 'tool-calls'", () => {
-    expect(mapOpenAICompatibleFinishReason("function_call")).toBe("tool-calls")
-  })
-
-  test("maps 'tool_calls' to 'tool-calls'", () => {
-    expect(mapOpenAICompatibleFinishReason("tool_calls")).toBe("tool-calls")
-  })
-
-  test("maps null to 'unknown'", () => {
-    expect(mapOpenAICompatibleFinishReason(null)).toBe("unknown")
-  })
-
-  test("maps undefined to 'unknown'", () => {
-    expect(mapOpenAICompatibleFinishReason(undefined)).toBe("unknown")
-  })
-
-  test("maps unrecognized string to 'unknown'", () => {
-    expect(mapOpenAICompatibleFinishReason("cancelled")).toBe("unknown")
-    expect(mapOpenAICompatibleFinishReason("error")).toBe("unknown")
-    expect(mapOpenAICompatibleFinishReason("")).toBe("unknown")
-  })
-})
+// mapOpenAICompatibleFinishReason tests live in copilot/finish-reason.test.ts
 
 describe("getResponseMetadata", () => {
   test("converts all fields when present", () => {
