@@ -118,8 +118,7 @@ describe("Todo: CRUD lifecycle", () => {
         const todos = [{ content: "Emit test", status: "pending", priority: "high" }]
         Todo.update({ sessionID: session.id, todos })
 
-        await new Promise((resolve) => setTimeout(resolve, 50))
-
+        // Bus.publish is synchronous — event is delivered immediately
         unsub()
 
         expect(eventReceived).toBe(true)
