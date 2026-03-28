@@ -2653,3 +2653,130 @@ describe("ProviderTransform.variants", () => {
     })
   })
 })
+
+// ---------------------------------------------------------------------------
+// Sampling parameter tests: temperature, topP, topK
+// ---------------------------------------------------------------------------
+
+// Minimal stub — temperature/topP/topK only inspect model.id
+function samplingModel(id: string): any {
+  return {
+    id,
+    providerID: "test",
+    api: { id, url: "https://test", npm: "@ai-sdk/openai-compatible" },
+    capabilities: { reasoning: false },
+    limit: { output: 8192 },
+    release_date: "2025-01-01",
+  }
+}
+
+describe("ProviderTransform.temperature", () => {
+  test("returns 0.55 for qwen models", () => {
+    expect(ProviderTransform.temperature(samplingModel("qwen-2.5-72b"))).toBe(0.55)
+    expect(ProviderTransform.temperature(samplingModel("qwen-plus"))).toBe(0.55)
+  })
+
+  test("returns undefined for claude models", () => {
+    expect(ProviderTransform.temperature(samplingModel("claude-3-7-sonnet"))).toBeUndefined()
+    expect(ProviderTransform.temperature(samplingModel("claude-opus-4-5"))).toBeUndefined()
+  })
+
+  test("returns 1.0 for gemini models", () => {
+    expect(ProviderTransform.temperature(samplingModel("gemini-2.5-pro"))).toBe(1.0)
+    expect(ProviderTransform.temperature(samplingModel("gemini-3.0-flash"))).toBe(1.0)
+  })
+
+  test("returns 1.0 for glm-4.6 and glm-4.7 models", () => {
+    expect(ProviderTransform.temperature(samplingModel("glm-4.6-plus"))).toBe(1.0)
+    expect(ProviderTransform.temperature(samplingModel("glm-4.7"))).toBe(1.0)
+  })
+
+  test("returns 1.0 for minimax-m2 models", () => {
+    expect(ProviderTransform.temperature(samplingModel("minimax-m2-01"))).toBe(1.0)
+  })
+
+  test("returns 1.0 for kimi-k2-thinking", () => {
+    expect(ProviderTransform.temperature(samplingModel("kimi-k2-thinking"))).toBe(1.0)
+  })
+
+  test("returns 1.0 for kimi-k2.5 (matches 'k2.' pattern)", () => {
+    expect(ProviderTransform.temperature(samplingModel("kimi-k2.5"))).toBe(1.0)
+  })
+
+  test("returns 1.0 for kimi-k2p5 (matches 'k2p' pattern)", () => {
+    expect(ProviderTransform.temperature(samplingModel("kimi-k2p5"))).toBe(1.0)
+  })
+
+  test("returns 1.0 for kimi-k2-5 (matches 'k2-5' pattern)", () => {
+    expect(ProviderTransform.temperature(samplingModel("kimi-k2-5-latest"))).toBe(1.0)
+  })
+
+  test("returns 0.6 for base kimi-k2", () => {
+    expect(ProviderTransform.temperature(samplingModel("kimi-k2"))).toBe(0.6)
+  })
+
+  test("returns undefined for generic/unknown models", () => {
+    expect(ProviderTransform.temperature(samplingModel("gpt-5.2"))).toBeUndefined()
+    expect(ProviderTransform.temperature(samplingModel("llama-3.3-70b"))).toBeUndefined()
+  })
+})
+
+describe("ProviderTransform.topP", () => {
+  test("returns 1 for qwen models", () => {
+    expect(ProviderTransform.topP(samplingModel("qwen-2.5-72b"))).toBe(1)
+  })
+
+  test("returns 0.95 for minimax-m2", () => {
+    expect(ProviderTransform.topP(samplingModel("minimax-m2-01"))).toBe(0.95)
+  })
+
+  test("returns 0.95 for gemini", () => {
+    expect(ProviderTransform.topP(samplingModel("gemini-2.5-pro"))).toBe(0.95)
+  })
+
+  test("returns 0.95 for kimi-k2.5", () => {
+    expect(ProviderTransform.topP(samplingModel("kimi-k2.5"))).toBe(0.95)
+  })
+
+  test("returns 0.95 for kimi-k2p5", () => {
+    expect(ProviderTransform.topP(samplingModel("kimi-k2p5"))).toBe(0.95)
+  })
+
+  test("returns 0.95 for kimi-k2-5", () => {
+    expect(ProviderTransform.topP(samplingModel("kimi-k2-5"))).toBe(0.95)
+  })
+
+  test("returns undefined for other models", () => {
+    expect(ProviderTransform.topP(samplingModel("claude-opus-4-5"))).toBeUndefined()
+    expect(ProviderTransform.topP(samplingModel("gpt-5.2"))).toBeUndefined()
+  })
+})
+
+describe("ProviderTransform.topK", () => {
+  test("returns 40 for minimax-m2. (dot pattern)", () => {
+    expect(ProviderTransform.topK(samplingModel("minimax-m2.5"))).toBe(40)
+  })
+
+  test("returns 40 for minimax-m25 (m25 pattern)", () => {
+    expect(ProviderTransform.topK(samplingModel("minimax-m25"))).toBe(40)
+  })
+
+  test("returns 40 for minimax-m21 (m21 pattern)", () => {
+    expect(ProviderTransform.topK(samplingModel("minimax-m21"))).toBe(40)
+  })
+
+  test("returns 20 for base minimax-m2", () => {
+    expect(ProviderTransform.topK(samplingModel("minimax-m2"))).toBe(20)
+    expect(ProviderTransform.topK(samplingModel("minimax-m2-01"))).toBe(20)
+  })
+
+  test("returns 64 for gemini", () => {
+    expect(ProviderTransform.topK(samplingModel("gemini-2.5-pro"))).toBe(64)
+  })
+
+  test("returns undefined for other models", () => {
+    expect(ProviderTransform.topK(samplingModel("claude-opus-4-5"))).toBeUndefined()
+    expect(ProviderTransform.topK(samplingModel("gpt-5.2"))).toBeUndefined()
+    expect(ProviderTransform.topK(samplingModel("qwen-2.5-72b"))).toBeUndefined()
+  })
+})
