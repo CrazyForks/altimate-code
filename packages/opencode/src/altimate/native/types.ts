@@ -1029,6 +1029,8 @@ export interface DataDiffResult {
   error?: string
   /** Per-partition breakdown when partition_column is used */
   partition_results?: PartitionDiffResult[]
+  /** Columns auto-excluded from comparison (audit/timestamp columns like updated_at, created_at) */
+  excluded_audit_columns?: string[]
 }
 
 // --- Method registry ---
