@@ -12,13 +12,14 @@ description: Validate that two tables or query results are identical — or diag
 ```
 Here's my plan:
 1. [ ] List available warehouse connections
-2. [ ] Inspect schema and discover primary key candidates
+2. [ ] Inspect schema, discover primary key candidates, and detect auto-timestamp columns
 3. [ ] Confirm primary keys with you
-4. [ ] Check row counts on both sides
-5. [ ] Run column-level profile (cheap — no row scan)
-6. [ ] Ask whether to proceed with row-level diff (may be expensive for large tables)
-7. [ ] Run targeted row-level diff on diverging columns only
-8. [ ] Report findings
+4. [ ] Confirm which auto-timestamp columns to exclude
+5. [ ] Check row counts on both sides
+6. [ ] Run column-level profile (cheap — no row scan)
+7. [ ] Ask whether to proceed with row-level diff (may be expensive for large tables)
+8. [ ] Run targeted row-level diff on diverging columns only
+9. [ ] Report findings
 ```
 
 Update each item to `[x]` as you complete it. This plan should be visible before any tool is called.
@@ -45,13 +46,13 @@ Use `warehouse_list` to show the user what connections are available and which w
 
 ---
 
-## Step 2: Inspect Schema and Discover Primary Keys
+## Step 2: Inspect Schema, Discover Primary Keys, and Detect Auto-Timestamp Columns
 
-Use `sql_query` to get columns and identify key candidates:
+Use `sql_query` to get columns, defaults, and identify key candidates:
 
 ```sql
 -- Postgres / Redshift / DuckDB
-SELECT column_name, data_type, is_nullable
+SELECT column_name, data_type, is_nullable, column_default
 FROM information_schema.columns
 WHERE table_schema = 'public' AND table_name = 'orders'
 ORDER BY ordinal_position
@@ -63,11 +64,28 @@ SHOW COLUMNS IN TABLE orders
 ```
 
 ```sql
+-- MySQL / MariaDB  (also fetch EXTRA for ON UPDATE detection)
+SELECT column_name, data_type, is_nullable, column_default, extra
+FROM information_schema.columns
+WHERE table_schema = 'mydb' AND table_name = 'orders'
+ORDER BY ordinal_position
+```
+
+```sql
 -- ClickHouse
 DESCRIBE TABLE source_db.events
 ```
 
 **Look for:** columns named `id`, `*_id`, `*_key`, `uuid`, or with `NOT NULL` + unique index.
+
+**Also look for auto-timestamp columns** — any column whose `column_default` contains a time-generating function:
+- PostgreSQL/DuckDB/Redshift: `now()`, `CURRENT_TIMESTAMP`, `clock_timestamp()`
+- MySQL/MariaDB: `CURRENT_TIMESTAMP` (in default or EXTRA)
+- Snowflake: `CURRENT_TIMESTAMP()`, `SYSDATE()`
+- SQL Server: `getdate()`, `sysdatetime()`
+- Oracle: `SYSDATE`, `SYSTIMESTAMP`
+
+These columns auto-generate values on INSERT, so they inherently differ between source and target due to write timing — not because of actual data discrepancies. **Collect them for confirmation in Step 4.**
 
 If no obvious PK, run a cardinality check:
 
@@ -101,7 +119,33 @@ Do not proceed to diff until the user confirms or corrects.
 
 ---
 
-## Step 4: Check Row Counts
+## Step 4: Confirm Auto-Timestamp Column Exclusions
+
+If you detected any columns with auto-generating timestamp defaults in Step 2, **present them to the user and ask for confirmation** before excluding them.
+
+**Example prompt when auto-timestamp columns are found:**
+
+> "I found **3 columns** with auto-generating timestamp defaults that will inherently differ between source and target (due to when each row was written, not actual data differences):
+>
+> | Column | Default | Reason to exclude |
+> |--------|---------|-------------------|
+> | `created_at` | `DEFAULT now()` | Set on insert — reflects when this copy was written |
+> | `updated_at` | `DEFAULT now()` | Set on insert — reflects when this copy was written |
+> | `_loaded_at` | `DEFAULT CURRENT_TIMESTAMP` | ETL load timestamp |
+>
+> Should I **exclude** these from the comparison? Or do you want to include any of them (e.g., if you're verifying that `created_at` was preserved during migration)?"
+
+**If user confirms exclusion:** Omit those columns from `extra_columns` when calling `data_diff`.
+
+**If user wants to include some:** Add them explicitly to `extra_columns`.
+
+**If no auto-timestamp columns were detected:** Skip this step and proceed to Step 5.
+
+> **Why ask?** In migration validation, `created_at` should often be *identical* between source and target (it was migrated, not regenerated). But in ETL replication, `created_at` is freshly generated on each side and *should* differ. Only the user knows which case applies.
+
+---
+
+## Step 5: Check Row Counts
 
 ```sql
 SELECT COUNT(*) FROM orders   -- run on both source and target
@@ -114,7 +158,7 @@ Use counts to:
 
 ---
 
-## Step 5: Column-Level Profile (Always Run This First)
+## Step 6: Column-Level Profile (Always Run This First)
 
 Profile is cheap — it runs aggregates, not row scans. **Always run profile before row-level diff.**
 
@@ -148,7 +192,7 @@ Column Profile Comparison
 
 ---
 
-## Step 6: Ask Before Running Row-Level Diff on Large Tables
+## Step 7: Ask Before Running Row-Level Diff on Large Tables
 
 After profiling, check row count and **ask the user** before proceeding:
 
@@ -166,7 +210,7 @@ After profiling, check row count and **ask the user** before proceeding:
 
 ---
 
-## Step 7: Run Targeted Row-Level Diff
+## Step 8: Run Targeted Row-Level Diff
 
 Use only the columns that the profile said differ. This is faster and produces cleaner output.
 
@@ -260,7 +304,12 @@ Output includes aggregate diff + per-partition breakdown showing which group has
 
 The Rust engine **only compares columns listed in `extra_columns`**. If the list is empty, it compares key existence only — rows that match on key but differ in values will be silently reported as "identical". This is the most common source of false positives.
 
-**Auto-discovery (default for table names):** When `extra_columns` is omitted and the source is a plain table name, `data_diff` auto-discovers all non-key columns from `information_schema` and excludes audit/timestamp columns (like `updated_at`, `created_at`, `inserted_at`, `modified_at`, `publisher_last_updated_epoch_ms`, ETL metadata columns like `_fivetran_synced`, etc.). The output will list which columns were auto-excluded.
+**Auto-discovery (default for table names):** When `extra_columns` is omitted and the source is a plain table name, `data_diff` auto-discovers all non-key columns from the database catalog and excludes columns using two detection layers:
+
+1. **Name-pattern matching** — columns named like `updated_at`, `created_at`, `inserted_at`, `modified_at`, `publisher_last_updated_epoch_ms`, ETL metadata columns like `_fivetran_synced`, `_airbyte_extracted_at`, etc.
+2. **Schema-level default detection** — columns with auto-generating timestamp defaults (`DEFAULT NOW()`, `DEFAULT CURRENT_TIMESTAMP`, `GETDATE()`, `SYSDATE()`, `SYSTIMESTAMP`, etc.), detected directly from the database catalog. This catches columns that don't follow naming conventions but still auto-generate values on INSERT. Works across PostgreSQL, MySQL, Snowflake, SQL Server, Oracle, ClickHouse, DuckDB, SQLite, and Redshift.
+
+The output lists which columns were auto-excluded and why.
 
 **SQL queries:** When source is a SQL query (not a table name), auto-discovery cannot work. You **must** provide `extra_columns` explicitly. If you don't, only key-level matching occurs.
 
@@ -287,3 +336,6 @@ The Rust engine **only compares columns listed in `extra_columns`**. If the list
 
 **Omitting extra_columns when source is a SQL query**
 → Auto-discovery only works for table names. For SQL queries, always list the columns to compare explicitly.
+
+**Silently excluding auto-timestamp columns without asking the user**
+→ Always present detected auto-timestamp columns (Step 4) and get explicit confirmation. In migration scenarios, `created_at` should be *identical* — excluding it silently hides real bugs.
