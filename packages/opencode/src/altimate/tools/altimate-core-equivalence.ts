@@ -65,7 +65,7 @@ export const AltimateCoreEquivalenceTool = Tool.define("altimate_core_equivalenc
   },
 })
 
-function extractEquivalenceErrors(data: Record<string, any>): string | undefined {
+export function extractEquivalenceErrors(data: Record<string, any>): string | undefined {
   if (Array.isArray(data.validation_errors) && data.validation_errors.length > 0) {
     const msgs = data.validation_errors
       .map((e: any) => (typeof e === "string" ? e : (e.message ?? String(e))))
@@ -75,7 +75,7 @@ function extractEquivalenceErrors(data: Record<string, any>): string | undefined
   return undefined
 }
 
-function formatEquivalence(data: Record<string, any>): string {
+export function formatEquivalence(data: Record<string, any>): string {
   if (data.error) return `Error: ${data.error}`
   const lines: string[] = []
   lines.push(data.equivalent ? "Queries are semantically equivalent." : "Queries produce different results.")
