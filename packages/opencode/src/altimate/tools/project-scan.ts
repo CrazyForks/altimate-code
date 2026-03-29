@@ -517,7 +517,7 @@ export const ProjectScanTool = Tool.define("project_scan", {
         const { PostConnectSuggestions } = await import("./post-connect-suggestions")
         PostConnectSuggestions.trackSuggestions({
           suggestionType: "dbt_detected",
-          suggestionsShown: ["dbt_develop", "dbt_troubleshoot", "dbt_analyze"],
+          suggestionsShown: ["dbt-develop", "dbt-troubleshoot", "dbt-analyze"],
         })
       } catch {
         // Telemetry must never break scan output

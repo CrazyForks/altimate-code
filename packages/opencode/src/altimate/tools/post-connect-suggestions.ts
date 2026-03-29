@@ -91,10 +91,11 @@ export namespace PostConnectSuggestions {
     warehouseType?: string
   }): void {
     try {
+      const sessionId = Telemetry.getContext().sessionId || "unknown-session"
       Telemetry.track({
         type: "feature_suggestion",
         timestamp: Date.now(),
-        session_id: Telemetry.getContext().sessionId,
+        session_id: sessionId,
         suggestion_type: opts.suggestionType,
         suggestions_shown: opts.suggestionsShown,
         warehouse_type: opts.warehouseType ?? "unknown",

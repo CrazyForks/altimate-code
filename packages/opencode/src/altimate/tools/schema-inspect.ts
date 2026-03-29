@@ -29,6 +29,7 @@ export const SchemaInspectTool = Tool.define("schema_inspect", {
         PostConnectSuggestions.trackSuggestions({
           suggestionType: "progressive_disclosure",
           suggestionsShown: ["lineage_check"],
+          warehouseType: args.warehouse ?? "unknown",
         })
       }
       // altimate_change end

@@ -60,19 +60,20 @@ IMPORTANT: For private key file paths, always use "private_key_path" (not "priva
             // project-scan unavailable — skip dbt detection
           }
 
-          const ctx: PostConnectSuggestions.SuggestionContext = {
+          const suggestionCtx: PostConnectSuggestions.SuggestionContext = {
             warehouseType: result.type,
             schemaIndexed,
             dbtDetected,
             connectionCount: warehouseList.warehouses.length,
             toolsUsedInSession: [],
           }
-          output += PostConnectSuggestions.getPostConnectSuggestions(ctx)
+          output += PostConnectSuggestions.getPostConnectSuggestions(suggestionCtx)
 
+          // Derive suggestions list from the same context to avoid drift
           const suggestionsShown = ["sql_execute", "sql_analyze", "lineage_check", "schema_detect_pii"]
-          if (!schemaIndexed) suggestionsShown.unshift("schema_index")
-          if (dbtDetected) suggestionsShown.push("dbt_develop", "dbt_troubleshoot")
-          if (warehouseList.warehouses.length > 1) suggestionsShown.push("data_diff")
+          if (!suggestionCtx.schemaIndexed) suggestionsShown.unshift("schema_index")
+          if (suggestionCtx.dbtDetected) suggestionsShown.push("dbt-develop", "dbt-troubleshoot")
+          if (suggestionCtx.connectionCount > 1) suggestionsShown.push("data_diff")
           PostConnectSuggestions.trackSuggestions({
             suggestionType: "post_warehouse_connect",
             suggestionsShown,

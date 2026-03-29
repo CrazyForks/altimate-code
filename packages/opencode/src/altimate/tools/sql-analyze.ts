@@ -32,6 +32,7 @@ export const SqlAnalyzeTool = Tool.define("sql_analyze", {
         PostConnectSuggestions.trackSuggestions({
           suggestionType: "progressive_disclosure",
           suggestionsShown: ["schema_inspect"],
+          warehouseType: "unknown",
         })
       }
       // altimate_change end

@@ -636,14 +636,17 @@ export namespace SessionPrompt {
             .filter((p): p is MessageV2.TextPart => p.type === "text" && !("synthetic" in p && p.synthetic))
             .map((p) => p.text.toLowerCase())
             .join(" ") ?? ""
+          const rejectionPhrases = ["no", "don't", "stop", "reject", "not good", "undo", "abort", "start over", "wrong"]
           const approvalPhrases = ["looks good", "proceed", "approved", "approve", "lgtm", "go ahead", "ship it", "yes", "perfect"]
-          const isApproval = approvalPhrases.some((phrase) => userText.includes(phrase))
+          const isRejection = rejectionPhrases.some((phrase) => userText.includes(phrase))
+          const isApproval = !isRejection && approvalPhrases.some((phrase) => userText.includes(phrase))
+          const action = isRejection ? "reject" : isApproval ? "approve" : "refine"
           Telemetry.track({
             type: "plan_revision",
             timestamp: Date.now(),
             session_id: sessionID,
             revision_number: planRevisionCount,
-            action: isApproval ? "approve" : "refine",
+            action,
           })
         }
       }

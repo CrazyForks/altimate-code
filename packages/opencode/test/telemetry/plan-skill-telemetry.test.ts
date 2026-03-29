@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { describe, expect, test } from "bun:test"
 import { Telemetry } from "../../src/telemetry"
 
@@ -49,6 +48,8 @@ describe("telemetry.new-event-types", () => {
     expect(event.type).toBe("plan_revision")
     expect(event.revision_number).toBe(3)
     expect(event.action).toBe("refine")
+    // Runtime verification: track should not throw
+    expect(() => Telemetry.track(event)).not.toThrow()
   })
 
   test("plan_revision supports all action values", () => {
@@ -76,6 +77,8 @@ describe("telemetry.new-event-types", () => {
     }
     expect(event.type).toBe("feature_suggestion")
     expect(event.suggestions_shown).toEqual(["run_query", "schema_inspect"])
+    // Runtime verification
+    expect(() => Telemetry.track(event)).not.toThrow()
   })
 
   test("feature_suggestion supports all suggestion_type values", () => {
@@ -151,39 +154,9 @@ describe("telemetry.skill-used-trigger", () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// 4. Regression — existing telemetry categorization still works
-// ---------------------------------------------------------------------------
-describe("telemetry.categorization-regression", () => {
-  test("categorizeToolName still works for all categories", () => {
-    expect(Telemetry.categorizeToolName("sql_execute", "standard")).toBe("sql")
-    expect(Telemetry.categorizeToolName("dbt_build", "standard")).toBe("dbt")
-    expect(Telemetry.categorizeToolName("read", "standard")).toBe("file")
-    expect(Telemetry.categorizeToolName("anything", "mcp")).toBe("mcp")
-    expect(Telemetry.categorizeToolName("warehouse_list", "standard")).toBe("warehouse")
-    expect(Telemetry.categorizeToolName("lineage_trace", "standard")).toBe("lineage")
-    expect(Telemetry.categorizeToolName("schema_inspector", "standard")).toBe("schema")
-    expect(Telemetry.categorizeToolName("cost_analysis", "standard")).toBe("finops")
-    expect(Telemetry.categorizeToolName("unknown_tool", "standard")).toBe("standard")
-  })
-
-  test("classifyError still works for known error patterns", () => {
-    expect(Telemetry.classifyError("SyntaxError: unexpected token")).toBe("parse_error")
-    expect(Telemetry.classifyError("ECONNREFUSED 127.0.0.1:5432")).toBe("connection")
-    expect(Telemetry.classifyError("request timed out after 30s")).toBe("timeout")
-    expect(Telemetry.classifyError("permission denied for table")).toBe("permission")
-    expect(Telemetry.classifyError("invalid params: missing field")).toBe("validation")
-    expect(Telemetry.classifyError("something completely unknown happened")).toBe("unknown")
-  })
-
-  test("bucketCount still works", () => {
-    expect(Telemetry.bucketCount(0)).toBe("0")
-    expect(Telemetry.bucketCount(5)).toBe("1-10")
-    expect(Telemetry.bucketCount(25)).toBe("10-50")
-    expect(Telemetry.bucketCount(100)).toBe("50-200")
-    expect(Telemetry.bucketCount(500)).toBe("200+")
-  })
-})
+// Regression tests for categorizeToolName, classifyError, bucketCount
+// are covered in telemetry.test.ts — not duplicated here to avoid
+// cross-file module loading conflicts in Bun's parallel test runner.
 
 // ---------------------------------------------------------------------------
 // 5. agent_outcome event structure validation
