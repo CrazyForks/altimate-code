@@ -423,7 +423,41 @@ export namespace Telemetry {
         dialect?: string
         duration_ms: number
       }
+    // implicit quality signal for task outcome intelligence
+    | {
+        type: "task_outcome_signal"
+        timestamp: number
+        session_id: string
+        /** Behavioral signal derived from session outcome patterns */
+        signal: "accepted" | "error" | "abandoned" | "cancelled"
+        /** Total tool calls in this loop() invocation */
+        tool_count: number
+        /** Number of LLM generation steps in this loop() invocation */
+        step_count: number
+        /** Total session wall-clock duration in milliseconds */
+        duration_ms: number
+        /** Last tool category the agent used (or "none") */
+        last_tool_category: string
+      }
   // altimate_change end
+
+  /** Derive a quality signal from the agent outcome.
+   *  Exported so tests can verify the derivation logic without
+   *  duplicating the implementation. */
+  export function deriveQualitySignal(
+    outcome: "completed" | "abandoned" | "aborted" | "error",
+  ): "accepted" | "error" | "abandoned" | "cancelled" {
+    switch (outcome) {
+      case "abandoned":
+        return "abandoned"
+      case "aborted":
+        return "cancelled"
+      case "error":
+        return "error"
+      case "completed":
+        return "accepted"
+    }
+  }
 
   const ERROR_PATTERNS: Array<{
     class: Telemetry.Event & { type: "core_failure" } extends { error_class: infer C } ? C : never

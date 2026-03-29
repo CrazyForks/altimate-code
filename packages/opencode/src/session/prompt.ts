@@ -321,6 +321,8 @@ export namespace SessionPrompt {
     let sessionAgentName = ""
     let sessionHadError = false
     let emergencySessionEndFired = false
+    // Quality signal tracking
+    let lastToolCategory = ""
     const emergencySessionEnd = () => {
       if (emergencySessionEndFired) return
       emergencySessionEndFired = true
@@ -796,6 +798,15 @@ export namespace SessionPrompt {
       const stepParts = await MessageV2.parts(processor.message.id)
       toolCallCount += stepParts.filter((p) => p.type === "tool").length
       if (processor.message.error) sessionHadError = true
+      // Quality signal: track last tool category used
+      const toolParts = stepParts.filter((p) => p.type === "tool")
+      if (toolParts.length > 0) {
+        const lastTool = toolParts[toolParts.length - 1]
+        if (lastTool.type === "tool") {
+          const toolType = lastTool.tool.startsWith("mcp__") ? "mcp" as const : "standard" as const
+          lastToolCategory = Telemetry.categorizeToolName(lastTool.tool, toolType)
+        }
+      }
       // altimate_change end
 
       if (result === "stop") break
@@ -822,6 +833,18 @@ export namespace SessionPrompt {
         : sessionTotalCost === 0 && toolCallCount === 0
           ? "abandoned"
           : "completed"
+    // altimate_change start — implicit quality signal
+    Telemetry.track({
+      type: "task_outcome_signal",
+      timestamp: Date.now(),
+      session_id: sessionID,
+      signal: Telemetry.deriveQualitySignal(outcome),
+      tool_count: toolCallCount,
+      step_count: step,
+      duration_ms: Date.now() - sessionStartTime,
+      last_tool_category: lastToolCategory || "none",
+    })
+    // altimate_change end
     Telemetry.track({
       type: "agent_outcome",
       timestamp: Date.now(),

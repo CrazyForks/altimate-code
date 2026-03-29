@@ -1808,3 +1808,66 @@ describe("telemetry.maskArgs", () => {
     expect(parsed.connection_string).toBe("****")
   })
 })
+
+// ---------------------------------------------------------------------------
+// task_outcome_signal event type and deriveQualitySignal
+// ---------------------------------------------------------------------------
+describe("telemetry.task_outcome_signal", () => {
+  test("accepts valid task_outcome_signal event with all signals", () => {
+    const signals = ["accepted", "error", "abandoned", "cancelled"] as const
+    for (const signal of signals) {
+      const event: Telemetry.Event = {
+        type: "task_outcome_signal",
+        timestamp: Date.now(),
+        session_id: "test-session",
+        signal,
+        tool_count: 10,
+        step_count: 3,
+        duration_ms: 45000,
+        last_tool_category: "sql",
+      }
+      expect(event.type).toBe("task_outcome_signal")
+      expect(event.signal).toBe(signal)
+      expect(typeof event.tool_count).toBe("number")
+      expect(typeof event.step_count).toBe("number")
+      expect(typeof event.duration_ms).toBe("number")
+      expect(typeof event.last_tool_category).toBe("string")
+    }
+  })
+
+  test("event can be passed to Telemetry.track without error", () => {
+    expect(() => {
+      Telemetry.track({
+        type: "task_outcome_signal",
+        timestamp: Date.now(),
+        session_id: "s1",
+        signal: "accepted",
+        tool_count: 5,
+        step_count: 2,
+        duration_ms: 30000,
+        last_tool_category: "dbt",
+      })
+    }).not.toThrow()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// deriveQualitySignal — exported pure function
+// ---------------------------------------------------------------------------
+describe("telemetry.deriveQualitySignal", () => {
+  test("completed outcome produces 'accepted' signal", () => {
+    expect(Telemetry.deriveQualitySignal("completed")).toBe("accepted")
+  })
+
+  test("abandoned outcome produces 'abandoned' signal", () => {
+    expect(Telemetry.deriveQualitySignal("abandoned")).toBe("abandoned")
+  })
+
+  test("aborted outcome produces 'cancelled' signal", () => {
+    expect(Telemetry.deriveQualitySignal("aborted")).toBe("cancelled")
+  })
+
+  test("error outcome produces 'error' signal", () => {
+    expect(Telemetry.deriveQualitySignal("error")).toBe("error")
+  })
+})
