@@ -561,7 +561,7 @@ export namespace Telemetry {
     const patterns: Array<{ intent: string; strong: RegExp[]; weak: RegExp[] }> = [
       {
         intent: "debug_dbt",
-        strong: [/dbt\s+(error|fail|bug|issue|broken|fix|debug|not\s+work)/],
+        strong: [/dbt\s+.*?(error|fail|bug|issue|broken|fix|debug|not\s+work)/],
         weak: [/dbt\s+(run|build|test|compile|parse)/, /dbt_project/, /ref\s*\(/, /source\s*\(/],
       },
       {
@@ -591,7 +591,7 @@ export namespace Telemetry {
       },
       {
         intent: "migrate_sql",
-        strong: [/migrat|convert.*(?:to|from)\s+(?:snowflake|bigquery|postgres|redshift|databricks)/, /translate.*(?:sql|dialect)/],
+        strong: [/migrat|convert.*(?:to|from)\s+.*?(?:snowflake|bigquery|postgres|redshift|databricks)/, /translate.*(?:sql|dialect)/],
         weak: [/dialect|transpile|port\s+(?:to|from)/],
       },
       {
