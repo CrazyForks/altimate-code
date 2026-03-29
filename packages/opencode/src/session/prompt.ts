@@ -320,6 +320,10 @@ export namespace SessionPrompt {
     let compactionCount = 0
     let sessionAgentName = ""
     let sessionHadError = false
+    // altimate_change start — plan refinement tracking
+    let planRevisionCount = 0
+    let planHasWritten = false
+    // altimate_change end
     let emergencySessionEndFired = false
     // altimate_change start — quality signal, tool chain, error fingerprint tracking
     let lastToolCategory = ""
@@ -371,6 +375,9 @@ export namespace SessionPrompt {
       }
 
       if (!lastUser) throw new Error("No user message found in stream. This should never happen.")
+      // altimate_change start — always track the current agent name so early breaks still report it
+      if (lastUser.agent) sessionAgentName = lastUser.agent
+      // altimate_change end
       if (
         lastAssistant?.finish &&
         !["tool-calls", "unknown"].includes(lastAssistant.finish) &&
@@ -520,6 +527,9 @@ export namespace SessionPrompt {
         assistantMessage.finish = "tool-calls"
         assistantMessage.time.completed = Date.now()
         await Session.updateMessage(assistantMessage)
+        // altimate_change start — count subtask tool calls in session metrics
+        toolCallCount++
+        // altimate_change end
         if (result && part.state.status === "running") {
           await Session.updatePart({
             ...part,
@@ -620,6 +630,79 @@ export namespace SessionPrompt {
         session,
       })
 
+      // altimate_change start — plan refinement detection and telemetry
+      if (agent.name === "plan") {
+        // Check if plan file has been written in a previous step
+        if (!planHasWritten) {
+          const planPath = Session.plan(session)
+          planHasWritten = await Filesystem.exists(planPath)
+        }
+        // If plan was already written and user sent a new message, this is a refinement
+        if (planHasWritten && step > 1) {
+          // Detect approval phrases in the last user message text
+          const lastUserMsg = msgs.findLast((m) => m.info.role === "user")
+          const userText = lastUserMsg?.parts
+            .filter((p): p is MessageV2.TextPart => p.type === "text" && !("synthetic" in p && p.synthetic))
+            .map((p) => p.text.toLowerCase())
+            .join(" ") ?? ""
+
+          if (planRevisionCount >= 5) {
+            // Cap reached — track and inject a synthetic hint so the LLM informs the user
+            Telemetry.track({
+              type: "plan_revision",
+              timestamp: Date.now(),
+              session_id: sessionID,
+              revision_number: planRevisionCount,
+              action: "cap_reached",
+            })
+            // Append a synthetic text part to the last user message in the local msgs copy
+            // so the LLM sees the limit and can communicate it. This does not persist.
+            if (lastUserMsg) {
+              lastUserMsg.parts = [
+                ...lastUserMsg.parts,
+                {
+                  type: "text" as const,
+                  id: PartID.ascending(),
+                  sessionID,
+                  messageID: lastUserMsg.info.id,
+                  text: "\n\n[System note: This plan has reached the maximum revision limit (5). Please inform the user and suggest finalizing the plan or starting a new planning session.]",
+                  synthetic: true,
+                },
+              ]
+            }
+          } else {
+            planRevisionCount++
+
+            // Refinement qualifiers: if the user says "yes, but ..." or "approve, however ..."
+            // they intend to refine, not approve. Check for these before pure approval.
+            const refinementQualifiers = [" but ", " however ", " except ", " change ", " modify ", " update ", " instead ", " although ", " with the following", " with these"]
+            const hasRefinementQualifier = refinementQualifiers.some((q) => userText.includes(q))
+
+            const rejectionPhrases = ["don't", "stop", "reject", "not good", "undo", "abort", "start over", "wrong"]
+            // "no" as a standalone word to avoid matching "know", "notion", etc.
+            const rejectionWords = ["no"]
+            const approvalPhrases = ["looks good", "proceed", "approved", "approve", "lgtm", "go ahead", "ship it", "yes", "perfect"]
+
+            const isRejectionPhrase = rejectionPhrases.some((phrase) => userText.includes(phrase))
+            const isRejectionWord = rejectionWords.some((word) => {
+              const regex = new RegExp(`\\b${word}\\b`)
+              return regex.test(userText)
+            })
+            const isRejection = isRejectionPhrase || isRejectionWord
+            const isApproval = !isRejection && !hasRefinementQualifier && approvalPhrases.some((phrase) => userText.includes(phrase))
+            const action = isRejection ? "reject" : isApproval ? "approve" : "refine"
+            Telemetry.track({
+              type: "plan_revision",
+              timestamp: Date.now(),
+              session_id: sessionID,
+              revision_number: planRevisionCount,
+              action,
+            })
+          }
+        }
+      }
+      // altimate_change end
+
       const processor = SessionProcessor.create({
         assistantMessage: (await Session.updateMessage({
           id: MessageID.ascending(),
@@ -685,7 +768,6 @@ export namespace SessionPrompt {
           messageID: lastUser.id,
         })
         // altimate_change start — session start telemetry
-        sessionAgentName = lastUser.agent
         Telemetry.track({
           type: "session_start",
           timestamp: Date.now(),
@@ -869,6 +951,13 @@ export namespace SessionPrompt {
         pendingError = null
       }
       // altimate_change end — quality signal + tool chain + error fingerprints
+      // altimate_change end
+
+      // altimate_change start — detect plan file creation after tool calls
+      if (agent.name === "plan" && !planHasWritten) {
+        const planPath = Session.plan(session)
+        planHasWritten = await Filesystem.exists(planPath)
+      }
       // altimate_change end
 
       if (result === "stop") break
@@ -1644,6 +1733,22 @@ ${exists ? `A plan file already exists at ${plan}. You can read it and make incr
 You should build your plan incrementally by writing to or editing this file. NOTE that this is the only file you are allowed to edit - other than this you are only allowed to take READ-ONLY actions.
 
 ## Plan Workflow
+
+// altimate_change start — two-step plan approach with refinement loop
+## Two-Step Plan Approach
+
+When creating a plan:
+1. FIRST, present a brief outline (3-5 bullet points) summarizing your proposed approach
+2. Ask the user if this direction looks right before expanding
+3. If the user wants changes, refine the outline based on their feedback
+4. Only write the full detailed plan to the plan file after the user confirms the approach
+
+When the user provides feedback on a plan you have already written:
+1. Read the existing plan file
+2. Incorporate their feedback into the plan
+3. Update the plan file with revisions
+4. Summarize what changed
+// altimate_change end
 
 ### Phase 1: Initial Understanding
 Goal: Gain a comprehensive understanding of the user's request by reading through code and asking them questions. Critical: In this phase you should only use the explore subagent type.

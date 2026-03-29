@@ -6,6 +6,9 @@ import type { SqlExecuteResult } from "../native/types"
 import { classifyAndCheck, computeSqlFingerprint } from "./sql-classify"
 import { Telemetry } from "../telemetry"
 // altimate_change end
+// altimate_change start — progressive disclosure suggestions
+import { PostConnectSuggestions } from "./post-connect-suggestions"
+// altimate_change end
 
 export const SqlExecuteTool = Tool.define("sql_execute", {
   description: "Execute SQL against a connected data warehouse. Returns results as a formatted table.",
@@ -38,7 +41,7 @@ export const SqlExecuteTool = Tool.define("sql_execute", {
         limit: args.limit,
       })
 
-      const output = formatResult(result)
+      let output = formatResult(result)
       // altimate_change start — emit SQL structure fingerprint telemetry
       try {
         const fp = computeSqlFingerprint(args.query)
@@ -59,6 +62,17 @@ export const SqlExecuteTool = Tool.define("sql_execute", {
         }
       } catch {
         // Fingerprinting must never break query execution
+      }
+      // altimate_change end
+      // altimate_change start — progressive disclosure suggestions
+      const suggestion = PostConnectSuggestions.getProgressiveSuggestion("sql_execute")
+      if (suggestion) {
+        output += "\n\n" + suggestion
+        PostConnectSuggestions.trackSuggestions({
+          suggestionType: "progressive_disclosure",
+          suggestionsShown: ["sql_analyze"],
+          warehouseType: args.warehouse ?? "default",
+        })
       }
       // altimate_change end
       return {
