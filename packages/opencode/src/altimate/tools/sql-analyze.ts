@@ -2,6 +2,9 @@ import z from "zod"
 import { Tool } from "../../tool/tool"
 import { Dispatcher } from "../native"
 import type { SqlAnalyzeResult } from "../native/types"
+// altimate_change start — progressive disclosure suggestions
+import { PostConnectSuggestions } from "./post-connect-suggestions"
+// altimate_change end
 
 export const SqlAnalyzeTool = Tool.define("sql_analyze", {
   description:
@@ -21,6 +24,17 @@ export const SqlAnalyzeTool = Tool.define("sql_analyze", {
         dialect: args.dialect,
       })
 
+      // altimate_change start — progressive disclosure suggestions
+      let output = formatAnalysis(result)
+      const suggestion = PostConnectSuggestions.getProgressiveSuggestion("sql_analyze")
+      if (suggestion) {
+        output += "\n\n" + suggestion
+        PostConnectSuggestions.trackSuggestions({
+          suggestionType: "progressive_disclosure",
+          suggestionsShown: ["schema_inspect"],
+        })
+      }
+      // altimate_change end
       return {
         title: `Analyze: ${result.error ? "PARSE ERROR" : `${result.issue_count} issue${result.issue_count !== 1 ? "s" : ""}`} [${result.confidence}]`,
         metadata: {
@@ -29,7 +43,7 @@ export const SqlAnalyzeTool = Tool.define("sql_analyze", {
           confidence: result.confidence,
           ...(result.error && { error: result.error }),
         },
-        output: formatAnalysis(result),
+        output,
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)

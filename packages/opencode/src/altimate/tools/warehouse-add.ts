@@ -1,6 +1,9 @@
 import z from "zod"
 import { Tool } from "../../tool/tool"
 import { Dispatcher } from "../native"
+// altimate_change start — post-connect feature suggestions
+import { PostConnectSuggestions } from "./post-connect-suggestions"
+// altimate_change end
 
 export const WarehouseAddTool = Tool.define("warehouse_add", {
   description:
@@ -41,10 +44,49 @@ IMPORTANT: For private key file paths, always use "private_key_path" (not "priva
       })
 
       if (result.success) {
+        // altimate_change start — append post-connect feature suggestions
+        let output = `Successfully added warehouse '${result.name}' (type: ${result.type}).\n\nUse warehouse_test to verify connectivity.`
+        try {
+          const schemaCache = await Dispatcher.call("schema.cache_status", {}).catch(() => null)
+          const schemaIndexed = (schemaCache?.total_tables ?? 0) > 0
+          const warehouseList = await Dispatcher.call("warehouse.list", {}).catch(() => ({ warehouses: [] }))
+
+          let dbtDetected = false
+          try {
+            const { detectDbtProject } = await import("./project-scan")
+            const dbtInfo = await detectDbtProject(process.cwd())
+            dbtDetected = dbtInfo.found
+          } catch {
+            // project-scan unavailable — skip dbt detection
+          }
+
+          const ctx: PostConnectSuggestions.SuggestionContext = {
+            warehouseType: result.type,
+            schemaIndexed,
+            dbtDetected,
+            connectionCount: warehouseList.warehouses.length,
+            toolsUsedInSession: [],
+          }
+          output += PostConnectSuggestions.getPostConnectSuggestions(ctx)
+
+          const suggestionsShown = ["sql_execute", "sql_analyze", "lineage_check", "schema_detect_pii"]
+          if (!schemaIndexed) suggestionsShown.unshift("schema_index")
+          if (dbtDetected) suggestionsShown.push("dbt_develop", "dbt_troubleshoot")
+          if (warehouseList.warehouses.length > 1) suggestionsShown.push("data_diff")
+          PostConnectSuggestions.trackSuggestions({
+            suggestionType: "post_warehouse_connect",
+            suggestionsShown,
+            warehouseType: result.type,
+          })
+        } catch {
+          // Suggestions must never break the add flow
+        }
+        // altimate_change end
+
         return {
           title: `Add '${args.name}': OK`,
           metadata: { success: true, name: result.name, type: result.type },
-          output: `Successfully added warehouse '${result.name}' (type: ${result.type}).\n\nUse warehouse_test to verify connectivity.`,
+          output,
         }
       }
 

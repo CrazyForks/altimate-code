@@ -223,6 +223,7 @@ describe("telemetry.event-types", () => {
       "agent_outcome",
       "error_recovered",
       "mcp_server_census",
+      "mcp_discovery",
       "memory_operation",
       "memory_injection",
       "warehouse_connect",
@@ -230,13 +231,17 @@ describe("telemetry.event-types", () => {
       "warehouse_introspection",
       "warehouse_discovery",
       "warehouse_census",
-      "core_failure",
+      "skill_used",
       "first_launch",
       "skill_created",
       "skill_installed",
       "skill_removed",
+      "plan_revision",
+      "sql_execute_failure",
+      "feature_suggestion",
+      "core_failure",
     ]
-    expect(eventTypes.length).toBe(37)
+    expect(eventTypes.length).toBe(42)
   })
 })
 
@@ -348,6 +353,7 @@ describe("telemetry.naming-convention", () => {
       "agent_outcome",
       "error_recovered",
       "mcp_server_census",
+      "mcp_discovery",
       "memory_operation",
       "memory_injection",
       "warehouse_connect",
@@ -355,11 +361,15 @@ describe("telemetry.naming-convention", () => {
       "warehouse_introspection",
       "warehouse_discovery",
       "warehouse_census",
-      "core_failure",
+      "skill_used",
       "first_launch",
       "skill_created",
       "skill_installed",
       "skill_removed",
+      "plan_revision",
+      "sql_execute_failure",
+      "feature_suggestion",
+      "core_failure",
     ]
     for (const t of types) {
       expect(t).toMatch(/^[a-z][a-z0-9_]*$/)
