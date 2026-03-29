@@ -127,6 +127,8 @@ describe("telemetry.skill-used-trigger", () => {
       skill_source: "builtin",
       duration_ms: 150,
       trigger: "llm_selected",
+      has_followups: false,
+      followup_count: 0,
     }
     expect(event.trigger).toBe("llm_selected")
   })
@@ -148,6 +150,8 @@ describe("telemetry.skill-used-trigger", () => {
         skill_source: "project",
         duration_ms: 10,
         trigger,
+        has_followups: true,
+        followup_count: 2,
       }
       expect(event.trigger).toBe(trigger)
     }

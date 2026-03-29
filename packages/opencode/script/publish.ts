@@ -21,14 +21,14 @@ const runtimeDependencies: Record<string, string> = {
 }
 
 const driverPeerDependencies: Record<string, string> = {
-  "pg": ">=8",
+  pg: ">=8",
   "snowflake-sdk": ">=1",
   "@google-cloud/bigquery": ">=8",
   "@databricks/sql": ">=1",
-  "mysql2": ">=3",
-  "mssql": ">=11",
-  "oracledb": ">=6",
-  "duckdb": ">=1",
+  mysql2: ">=3",
+  mssql: ">=11",
+  oracledb: ">=6",
+  duckdb: ">=1",
 }
 
 const driverPeerDependenciesMeta: Record<string, { optional: true }> = Object.fromEntries(
@@ -65,13 +65,14 @@ async function copyAssets(targetDir: string) {
   await $`cp ../dbt-tools/bin/altimate-dbt ${targetDir}/dbt-tools/bin/altimate-dbt`
   await $`mkdir -p ${targetDir}/dbt-tools/dist`
   await $`cp ../dbt-tools/dist/index.js ${targetDir}/dbt-tools/dist/`
+  // node_python_bridge.py must live next to index.js — the patched __dirname
+  // resolves to this directory at runtime (see copy-python.ts)
+  await $`cp ../dbt-tools/dist/node_python_bridge.py ${targetDir}/dbt-tools/dist/`
   // A package.json with "type": "module" must be present so Node loads
   // dist/index.js as ESM instead of CJS. We synthesize a minimal one rather
   // than copying the full source package.json (which contains devDependencies
   // with Bun catalog: versions that would confuse vulnerability scanners).
-  await Bun.file(`${targetDir}/dbt-tools/package.json`).write(
-    JSON.stringify({ type: "module" }, null, 2) + "\n",
-  )
+  await Bun.file(`${targetDir}/dbt-tools/package.json`).write(JSON.stringify({ type: "module" }, null, 2) + "\n")
   if (fs.existsSync("../dbt-tools/dist/altimate_python_packages")) {
     await $`cp -r ../dbt-tools/dist/altimate_python_packages ${targetDir}/dbt-tools/dist/`
   }
@@ -107,12 +108,39 @@ await Bun.file(`./dist/${pkg.name}/package.json`).write(
   ),
 )
 
+// Verify npm auth before publishing
+console.log("Verifying npm authentication...")
+const npmrcPath = process.env.NPM_CONFIG_USERCONFIG || "~/.npmrc"
+console.log(`NPM_CONFIG_USERCONFIG=${npmrcPath}`)
+try {
+  const whoami = await $`npm whoami`.text()
+  console.log(`npm whoami: ${whoami.trim()}`)
+} catch (e: any) {
+  console.error("npm whoami failed — auth may be misconfigured:", e?.stderr || e)
+  process.exit(1)
+}
+
 const tasks = Object.entries(binaries).map(async ([name]) => {
   if (process.platform !== "win32") {
     await $`chmod -R 755 .`.cwd(`./dist/${name}`)
   }
   await $`bun pm pack`.cwd(`./dist/${name}`)
-  await $`npm publish *.tgz --access public --tag ${Script.channel}`.cwd(`./dist/${name}`)
+  // Retry up to 3 times — npm returns transient 404s when multiple scoped
+  // packages under the same org are published concurrently.
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await $`npm publish *.tgz --access public --tag ${Script.channel}`.cwd(`./dist/${name}`)
+      break
+    } catch (e: any) {
+      const isRetryable = String(e?.stderr ?? e).includes("E404") || String(e?.stderr ?? e).includes("ETIMEDOUT")
+      if (isRetryable && attempt < 3) {
+        console.warn(`npm publish ${name} attempt ${attempt} failed (retryable), retrying in ${attempt * 5}s...`)
+        await Bun.sleep(attempt * 5000)
+      } else {
+        throw e
+      }
+    }
+  }
 })
 await Promise.all(tasks)
 await $`cd ./dist/${pkg.name} && bun pm pack && npm publish *.tgz --access public --tag ${Script.channel}`

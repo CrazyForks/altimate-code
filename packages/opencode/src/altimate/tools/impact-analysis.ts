@@ -5,6 +5,7 @@
 import z from "zod"
 import { Tool } from "../../tool/tool"
 import { Dispatcher } from "../native"
+import type { Telemetry } from "../telemetry"
 
 export const ImpactAnalysisTool = Tool.define("impact_analysis", {
   description: [
@@ -19,28 +20,15 @@ export const ImpactAnalysisTool = Tool.define("impact_analysis", {
     '- impact_analysis({ manifest_path: "target/manifest.json", model: "dim_customers", change_type: "retype" })',
   ].join("\n"),
   parameters: z.object({
-    model: z
-      .string()
-      .describe("dbt model name to analyze impact for (e.g., 'stg_orders', 'dim_customers')"),
+    model: z.string().describe("dbt model name to analyze impact for (e.g., 'stg_orders', 'dim_customers')"),
     column: z
       .string()
       .optional()
       .describe("Specific column to trace impact for. If omitted, analyzes model-level impact."),
-    change_type: z
-      .enum(["remove", "rename", "retype", "add", "modify"])
-      .describe("Type of change being considered"),
-    manifest_path: z
-      .string()
-      .optional()
-      .default("target/manifest.json")
-      .describe("Path to dbt manifest.json file"),
-    dialect: z
-      .string()
-      .optional()
-      .default("snowflake")
-      .describe("SQL dialect for lineage analysis"),
+    change_type: z.enum(["remove", "rename", "retype", "add", "modify"]).describe("Type of change being considered"),
+    manifest_path: z.string().optional().default("target/manifest.json").describe("Path to dbt manifest.json file"),
+    dialect: z.string().optional().default("snowflake").describe("SQL dialect for lineage analysis"),
   }),
-  // @ts-expect-error tsgo TS2719 false positive — identical pattern works in other tools
   async execute(args, ctx) {
     try {
       // Step 1: Parse the dbt manifest to get the full DAG
@@ -82,8 +70,15 @@ export const ImpactAnalysisTool = Tool.define("impact_analysis", {
       const direct = downstream.filter((d) => d.depth === 1)
       const transitive = downstream.filter((d) => d.depth > 1)
 
-      // Step 4: Report test count (manifest has test_count but not individual tests)
-      const affectedTestCount = manifest.test_count ?? 0
+      // Step 4: Count only tests that reference the target model or its downstream models
+      const affectedModelIds = new Set([
+        targetModel.unique_id,
+        ...downstream.map((d) => modelsByName.get(d.name)?.unique_id).filter(Boolean),
+      ])
+      const affectedTests = (manifest.tests ?? []).filter((t) =>
+        t.depends_on?.some((dep) => affectedModelIds.has(dep)),
+      )
+      const affectedTestCount = affectedTests.length
 
       // Step 5: If column specified, attempt column-level lineage
       let columnImpact: string[] = []
@@ -121,14 +116,20 @@ export const ImpactAnalysisTool = Tool.define("impact_analysis", {
 
       const totalAffected = downstream.length
       const severity =
-        totalAffected === 0
-          ? "SAFE"
-          : totalAffected <= 3
-            ? "LOW"
-            : totalAffected <= 10
-              ? "MEDIUM"
-              : "HIGH"
+        totalAffected === 0 ? "SAFE" : totalAffected <= 3 ? "LOW" : totalAffected <= 10 ? "MEDIUM" : "HIGH"
 
+      // altimate_change start — sql quality findings for telemetry
+      const findings: Telemetry.Finding[] = []
+      if (totalAffected > 0) {
+        findings.push({ category: `impact_${severity.toLowerCase()}` })
+        for (const d of direct) {
+          findings.push({ category: "impact_direct_dependent" })
+        }
+        for (const t of transitive) {
+          findings.push({ category: "impact_transitive_dependent" })
+        }
+      }
+      // altimate_change end
       return {
         title: `Impact: ${severity} — ${totalAffected} downstream model${totalAffected !== 1 ? "s" : ""} affected`,
         metadata: {
@@ -138,6 +139,8 @@ export const ImpactAnalysisTool = Tool.define("impact_analysis", {
           transitive_count: transitive.length,
           test_count: affectedTestCount,
           column_impact: columnImpact.length,
+          has_schema: false,
+          ...(findings.length > 0 && { findings }),
         },
         output,
       }
@@ -145,7 +148,7 @@ export const ImpactAnalysisTool = Tool.define("impact_analysis", {
       const msg = e instanceof Error ? e.message : String(e)
       return {
         title: "Impact: ERROR",
-        metadata: { success: false },
+        metadata: { success: false, has_schema: false, error: msg },
         output: `Failed to analyze impact: ${msg}\n\nEnsure the dbt manifest exists (run \`dbt compile\`) and the dispatcher is running.`,
       }
     }
@@ -257,9 +260,13 @@ export function formatImpactReport(data: {
 
   // Affected tests
   if (data.affectedTestCount > 0) {
-    lines.push(`Tests in project: ${data.affectedTestCount}`)
+    lines.push(`Affected tests: ${data.affectedTestCount}`)
     lines.push("".padEnd(40, "-"))
-    lines.push(`  Run \`dbt test\` to verify all ${data.affectedTestCount} tests still pass after this change.`)
+    lines.push(
+      data.affectedTestCount === 1
+        ? "  Run `dbt test` to verify this test still passes after this change."
+        : `  Run \`dbt test\` to verify these ${data.affectedTestCount} tests still pass after this change.`,
+    )
     lines.push("")
   }
 

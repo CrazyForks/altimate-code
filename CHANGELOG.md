@@ -5,6 +5,64 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.13] - 2026-03-26
+
+### Fixed
+
+- **Pin `@altimateai/altimate-core` to exact version** — prevents npm from resolving stale cached binaries during install (#475)
+- **Flaky `dbt Profiles Auto-Discovery` tests in CI** — stabilized tests that failed intermittently due to timing issues
+
+### Changed
+
+- **Bump `yaml` from 2.8.2 to 2.8.3** — dependency update in `packages/opencode` (#473)
+
+## [0.5.12] - 2026-03-25
+
+### Added
+
+- **`altimate-dbt` auto-discover config** — `altimate-dbt` commands now auto-detect `dbt_project.yml` and Python from the current directory without requiring `altimate-dbt init` first; supports Windows paths (`Scripts/`, `.exe`, `path.delimiter`) (#464)
+- **Local E2E sanity test harness** — Docker-based test suite (`test/sanity/`) for install verification, smoke tests, upgrade scenarios, and resilience checks; runnable via `bun run sanity` (#461)
+
+### Fixed
+
+- **`altimate-dbt` commands fail with hardcoded CI path** — published binary contained a baked-in `/home/runner/work/...` path for the Python bridge; `copy-python.ts` now patches `__dirname` to use `import.meta.dirname` at runtime (#467)
+
+### Testing
+
+- 42 adversarial tests for config auto-discovery and dbt resolution: `findProjectRoot` edge cases (deep nesting, symlinks, nonexistent dirs), `discoverPython` with broken symlinks and malicious env vars, `resolveDbt` with conflicting env vars and priority ordering, `validateDbt` timeout/garbage handling, Windows constant correctness, `path.delimiter` usage, `buildDbtEnv` mutation safety
+- 484-line adversarial test suite for the `__dirname` patch: regex edge cases, ReDoS protection, mutation testing, idempotency, CI smoke test parity, bundle runtime structure validation
+
+## [0.5.11] - 2026-03-25
+
+### Fixed
+
+- **README changelog gap** — updated README to reflect releases v0.5.1 through v0.5.11; previous README only listed up to v0.5.0
+- **npm publish transient 404s** — added retry logic (3 attempts with backoff) to `publish.ts` for concurrent scoped package publishes that hit npm registry race conditions
+
+## [0.5.10] - 2026-03-24
+
+### Added
+
+- **`altimate-code check` CLI command** — deterministic SQL checks (linting, formatting, style) that run without an LLM, suitable for CI pipelines and pre-commit hooks (#453)
+- **Data-viz skill improvements** — lazy initialization, data-code separation, color contrast rules, icon semantics, field validation, and pre-delivery checklist (#434)
+
+### Fixed
+
+- **Snowflake Cortex not visible before authentication** — provider now appears in the provider list even when not yet authenticated (#447)
+- **New user detection race condition** — first-run welcome flow and telemetry events could fire out of order or be skipped entirely (#445)
+- **52 CI test failures from `mock.module` leaking across files** — test isolation fix for the new `check` command e2e tests (#460)
+- **Missing `altimate_change` marker** — added required upstream marker on `isStatelessCommand` guard to pass Marker Guard CI (#457)
+
+### Changed
+
+- **Rename Recap back to Trace** — reverted the Recap branding to Trace across 29 files for better AI model comprehension of session recording concepts (#443)
+
+### Testing
+
+- Consolidated 12 hourly test PRs into single batch: slugify, hints sort, skill formatting, batch tools, filesystem utilities, wildcard matching — 1,680 new test lines (#439)
+- `altimate-code check` unit + e2e test suites (1,687 lines) (#453)
+- Snowflake Cortex provider visibility tests (#447)
+
 ## [0.5.9] - 2026-03-23
 
 ### Fixed

@@ -24,11 +24,13 @@ export interface SqlExecuteResult {
 export interface SqlAnalyzeParams {
   sql: string
   dialect?: string
+  schema_path?: string
   schema_context?: Record<string, any>
 }
 
 export interface SqlAnalyzeIssue {
   type: string
+  rule?: string
   severity: string
   message: string
   recommendation: string
@@ -186,9 +188,16 @@ export interface DbtSourceInfo {
   columns: ModelColumn[]
 }
 
+export interface DbtTestInfo {
+  unique_id: string
+  name: string
+  depends_on: string[]
+}
+
 export interface DbtManifestResult {
   models: DbtModelInfo[]
   sources: DbtSourceInfo[]
+  tests: DbtTestInfo[]
   source_count: number
   model_count: number
   test_count: number
@@ -385,6 +394,7 @@ export interface SqlFixResult {
   error_message: string
   suggestions: SqlFixSuggestion[]
   suggestion_count: number
+  error?: string
 }
 
 // --- SQL Autocomplete ---
