@@ -394,7 +394,7 @@ export namespace Telemetry {
         timestamp: number
         session_id: string
         revision_number: number
-        action: "refine" | "approve" | "reject"
+        action: "refine" | "approve" | "reject" | "cap_reached"
       }
     // altimate_change end
     | {

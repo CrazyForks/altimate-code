@@ -68,8 +68,8 @@ describe("Plan revision tracking", () => {
     const promptTsPath = path.join(__dirname, "../../src/session/prompt.ts")
     const content = await fs.readFile(promptTsPath, "utf-8")
 
-    // The condition should check planRevisionCount < 5 to cap at 5 revisions
-    expect(content).toContain("planRevisionCount < 5")
+    // The condition should cap at 5 revisions (>= 5 check with user communication)
+    expect(content).toMatch(/planRevisionCount\s*>=\s*5/)
   })
 
   test("revision counter increments on each plan refinement", async () => {

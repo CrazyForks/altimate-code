@@ -44,41 +44,54 @@ IMPORTANT: For private key file paths, always use "private_key_path" (not "priva
       })
 
       if (result.success) {
-        // altimate_change start — append post-connect feature suggestions
+        // altimate_change start — append post-connect feature suggestions (async, non-blocking)
         let output = `Successfully added warehouse '${result.name}' (type: ${result.type}).\n\nUse warehouse_test to verify connectivity.`
+
+        // Run suggestion gathering concurrently with a timeout to avoid
+        // adding noticeable latency to the warehouse add response.
         try {
-          const schemaCache = await Dispatcher.call("schema.cache_status", {}).catch(() => null)
-          const schemaIndexed = (schemaCache?.total_tables ?? 0) > 0
-          const warehouseList = await Dispatcher.call("warehouse.list", {}).catch(() => ({ warehouses: [] }))
+          const SUGGESTION_TIMEOUT_MS = 1500
+          const suggestionPromise = (async () => {
+            const [schemaCache, warehouseList, dbtInfo] = await Promise.all([
+              Dispatcher.call("schema.cache_status", {}).catch(() => null),
+              Dispatcher.call("warehouse.list", {}).catch(() => ({ warehouses: [] })),
+              import("./project-scan")
+                .then((m) => m.detectDbtProject(process.cwd()))
+                .catch(() => ({ found: false })),
+            ])
+            const schemaIndexed = (schemaCache?.total_tables ?? 0) > 0
+            const dbtDetected = dbtInfo.found
 
-          let dbtDetected = false
-          try {
-            const { detectDbtProject } = await import("./project-scan")
-            const dbtInfo = await detectDbtProject(process.cwd())
-            dbtDetected = dbtInfo.found
-          } catch {
-            // project-scan unavailable — skip dbt detection
+            const suggestionCtx: PostConnectSuggestions.SuggestionContext = {
+              warehouseType: result.type,
+              schemaIndexed,
+              dbtDetected,
+              connectionCount: warehouseList.warehouses.length,
+              toolsUsedInSession: [],
+            }
+            return { suggestionCtx, schemaIndexed, dbtDetected }
+          })()
+
+          const timeoutPromise = new Promise<null>((resolve) =>
+            setTimeout(() => resolve(null), SUGGESTION_TIMEOUT_MS),
+          )
+          const suggestionResult = await Promise.race([suggestionPromise, timeoutPromise])
+
+          if (suggestionResult) {
+            const { suggestionCtx } = suggestionResult
+            output += PostConnectSuggestions.getPostConnectSuggestions(suggestionCtx)
+
+            // Derive suggestions list from the same context to avoid drift
+            const suggestionsShown = ["sql_execute", "sql_analyze", "lineage_check", "schema_detect_pii"]
+            if (!suggestionCtx.schemaIndexed) suggestionsShown.unshift("schema_index")
+            if (suggestionCtx.dbtDetected) suggestionsShown.push("dbt-develop", "dbt-troubleshoot")
+            if (suggestionCtx.connectionCount > 1) suggestionsShown.push("data_diff")
+            PostConnectSuggestions.trackSuggestions({
+              suggestionType: "post_warehouse_connect",
+              suggestionsShown,
+              warehouseType: result.type,
+            })
           }
-
-          const suggestionCtx: PostConnectSuggestions.SuggestionContext = {
-            warehouseType: result.type,
-            schemaIndexed,
-            dbtDetected,
-            connectionCount: warehouseList.warehouses.length,
-            toolsUsedInSession: [],
-          }
-          output += PostConnectSuggestions.getPostConnectSuggestions(suggestionCtx)
-
-          // Derive suggestions list from the same context to avoid drift
-          const suggestionsShown = ["sql_execute", "sql_analyze", "lineage_check", "schema_detect_pii"]
-          if (!suggestionCtx.schemaIndexed) suggestionsShown.unshift("schema_index")
-          if (suggestionCtx.dbtDetected) suggestionsShown.push("dbt-develop", "dbt-troubleshoot")
-          if (suggestionCtx.connectionCount > 1) suggestionsShown.push("data_diff")
-          PostConnectSuggestions.trackSuggestions({
-            suggestionType: "post_warehouse_connect",
-            suggestionsShown,
-            warehouseType: result.type,
-          })
         } catch {
           // Suggestions must never break the add flow
         }

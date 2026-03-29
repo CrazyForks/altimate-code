@@ -628,26 +628,67 @@ export namespace SessionPrompt {
           planHasWritten = await Filesystem.exists(planPath)
         }
         // If plan was already written and user sent a new message, this is a refinement
-        if (planHasWritten && step > 1 && planRevisionCount < 5) {
-          planRevisionCount++
+        if (planHasWritten && step > 1) {
           // Detect approval phrases in the last user message text
           const lastUserMsg = msgs.findLast((m) => m.info.role === "user")
           const userText = lastUserMsg?.parts
             .filter((p): p is MessageV2.TextPart => p.type === "text" && !("synthetic" in p && p.synthetic))
             .map((p) => p.text.toLowerCase())
             .join(" ") ?? ""
-          const rejectionPhrases = ["no", "don't", "stop", "reject", "not good", "undo", "abort", "start over", "wrong"]
-          const approvalPhrases = ["looks good", "proceed", "approved", "approve", "lgtm", "go ahead", "ship it", "yes", "perfect"]
-          const isRejection = rejectionPhrases.some((phrase) => userText.includes(phrase))
-          const isApproval = !isRejection && approvalPhrases.some((phrase) => userText.includes(phrase))
-          const action = isRejection ? "reject" : isApproval ? "approve" : "refine"
-          Telemetry.track({
-            type: "plan_revision",
-            timestamp: Date.now(),
-            session_id: sessionID,
-            revision_number: planRevisionCount,
-            action,
-          })
+
+          if (planRevisionCount >= 5) {
+            // Cap reached — track and inject a synthetic hint so the LLM informs the user
+            Telemetry.track({
+              type: "plan_revision",
+              timestamp: Date.now(),
+              session_id: sessionID,
+              revision_number: planRevisionCount,
+              action: "cap_reached",
+            })
+            // Append a synthetic text part to the last user message in the local msgs copy
+            // so the LLM sees the limit and can communicate it. This does not persist.
+            if (lastUserMsg) {
+              lastUserMsg.parts = [
+                ...lastUserMsg.parts,
+                {
+                  type: "text" as const,
+                  id: PartID.ascending(),
+                  sessionID,
+                  messageID: lastUserMsg.info.id,
+                  text: "\n\n[System note: This plan has reached the maximum revision limit (5). Please inform the user and suggest finalizing the plan or starting a new planning session.]",
+                  synthetic: true,
+                },
+              ]
+            }
+          } else {
+            planRevisionCount++
+
+            // Refinement qualifiers: if the user says "yes, but ..." or "approve, however ..."
+            // they intend to refine, not approve. Check for these before pure approval.
+            const refinementQualifiers = [" but ", " however ", " except ", " change ", " modify ", " update ", " instead ", " although ", " with the following", " with these"]
+            const hasRefinementQualifier = refinementQualifiers.some((q) => userText.includes(q))
+
+            const rejectionPhrases = ["don't", "stop", "reject", "not good", "undo", "abort", "start over", "wrong"]
+            // "no" as a standalone word to avoid matching "know", "notion", etc.
+            const rejectionWords = ["no"]
+            const approvalPhrases = ["looks good", "proceed", "approved", "approve", "lgtm", "go ahead", "ship it", "yes", "perfect"]
+
+            const isRejectionPhrase = rejectionPhrases.some((phrase) => userText.includes(phrase))
+            const isRejectionWord = rejectionWords.some((word) => {
+              const regex = new RegExp(`\\b${word}\\b`)
+              return regex.test(userText)
+            })
+            const isRejection = isRejectionPhrase || isRejectionWord
+            const isApproval = !isRejection && !hasRefinementQualifier && approvalPhrases.some((phrase) => userText.includes(phrase))
+            const action = isRejection ? "reject" : isApproval ? "approve" : "refine"
+            Telemetry.track({
+              type: "plan_revision",
+              timestamp: Date.now(),
+              session_id: sessionID,
+              revision_number: planRevisionCount,
+              action,
+            })
+          }
         }
       }
       // altimate_change end

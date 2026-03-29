@@ -4,6 +4,9 @@
  * After warehouse connect, users often don't know what to do next.
  * This module provides contextual suggestions based on the user's
  * environment and progressive next-step hints after tool usage.
+ *
+ * Deduplication: progressive suggestions are shown at most once per
+ * session per tool to avoid repetitive hints.
  */
 
 import { Telemetry } from "../../telemetry"
@@ -15,6 +18,17 @@ export namespace PostConnectSuggestions {
     dbtDetected: boolean
     connectionCount: number
     toolsUsedInSession: string[]
+  }
+
+  /**
+   * Set of progressive suggestion keys already shown in this process.
+   * Reset when the process restarts (per-session lifetime).
+   */
+  const shownProgressiveSuggestions = new Set<string>()
+
+  /** Reset shown suggestions (useful for testing). */
+  export function resetShownSuggestions(): void {
+    shownProgressiveSuggestions.clear()
   }
 
   export function getPostConnectSuggestions(ctx: SuggestionContext): string {
@@ -60,7 +74,8 @@ export namespace PostConnectSuggestions {
 
   /**
    * Progressive disclosure: suggest next tool based on what was just used.
-   * Returns null if no suggestion applies or tool is unknown.
+   * Returns null if no suggestion applies, tool is unknown, or the
+   * suggestion was already shown in this session (deduplication).
    */
   export function getProgressiveSuggestion(
     lastToolUsed: string,
@@ -76,7 +91,17 @@ export namespace PostConnectSuggestions {
         "Schema indexed! You can now use sql_analyze for quality checks, schema_inspect for exploration, and lineage_check for data flow analysis.",
       warehouse_add: null, // Handled by post-connect suggestions
     }
-    return progression[lastToolUsed] ?? null
+
+    const suggestion = progression[lastToolUsed] ?? null
+    if (!suggestion) return null
+
+    // Deduplicate: only show each progressive suggestion once per session
+    if (shownProgressiveSuggestions.has(lastToolUsed)) {
+      return null
+    }
+    shownProgressiveSuggestions.add(lastToolUsed)
+
+    return suggestion
   }
 
   /**
