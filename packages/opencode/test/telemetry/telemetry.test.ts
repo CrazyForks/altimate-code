@@ -1871,3 +1871,85 @@ describe("telemetry.deriveQualitySignal", () => {
     expect(Telemetry.deriveQualitySignal("error")).toBe("error")
   })
 })
+
+// ---------------------------------------------------------------------------
+// classifyTaskIntent — keyword/regex intent classifier
+// ---------------------------------------------------------------------------
+describe("telemetry.classifyTaskIntent", () => {
+  test("classifies dbt debugging with high confidence", () => {
+    expect(Telemetry.classifyTaskIntent("my dbt error won't go away")).toEqual({ intent: "debug_dbt", confidence: 1.0 })
+    expect(Telemetry.classifyTaskIntent("dbt fix this broken model")).toEqual({ intent: "debug_dbt", confidence: 1.0 })
+  })
+
+  test("classifies dbt run/build as weak dbt signal", () => {
+    expect(Telemetry.classifyTaskIntent("run dbt build")).toEqual({ intent: "debug_dbt", confidence: 0.5 })
+  })
+
+  test("classifies SQL writing with high confidence", () => {
+    expect(Telemetry.classifyTaskIntent("write a sql query to get active users")).toEqual({ intent: "write_sql", confidence: 1.0 })
+    expect(Telemetry.classifyTaskIntent("create a select statement for orders")).toEqual({ intent: "write_sql", confidence: 1.0 })
+  })
+
+  test("classifies query optimization", () => {
+    expect(Telemetry.classifyTaskIntent("optimize this slow query")).toEqual({ intent: "optimize_query", confidence: 1.0 })
+    expect(Telemetry.classifyTaskIntent("make my query faster")).toEqual({ intent: "optimize_query", confidence: 1.0 })
+  })
+
+  test("classifies model building", () => {
+    expect(Telemetry.classifyTaskIntent("create a new staging model for orders")).toEqual({ intent: "build_model", confidence: 1.0 })
+    expect(Telemetry.classifyTaskIntent("build a dbt model")).toEqual({ intent: "build_model", confidence: 1.0 })
+  })
+
+  test("classifies lineage analysis", () => {
+    expect(Telemetry.classifyTaskIntent("show me the lineage of this model")).toEqual({ intent: "analyze_lineage", confidence: 1.0 })
+    expect(Telemetry.classifyTaskIntent("what are the downstream dependencies")).toEqual({ intent: "analyze_lineage", confidence: 1.0 })
+  })
+
+  test("classifies schema exploration", () => {
+    expect(Telemetry.classifyTaskIntent("show me the tables in this database")).toEqual({ intent: "explore_schema", confidence: 1.0 })
+    expect(Telemetry.classifyTaskIntent("what columns does the orders table have")).toEqual({ intent: "explore_schema", confidence: 1.0 })
+  })
+
+  test("classifies SQL migration", () => {
+    expect(Telemetry.classifyTaskIntent("migrate this query from postgres to snowflake")).toEqual({ intent: "migrate_sql", confidence: 1.0 })
+    expect(Telemetry.classifyTaskIntent("translate SQL dialect to BigQuery")).toEqual({ intent: "migrate_sql", confidence: 1.0 })
+  })
+
+  test("classifies warehouse management", () => {
+    expect(Telemetry.classifyTaskIntent("connect to my snowflake warehouse")).toEqual({ intent: "manage_warehouse", confidence: 1.0 })
+    expect(Telemetry.classifyTaskIntent("test the database connection")).toEqual({ intent: "manage_warehouse", confidence: 1.0 })
+  })
+
+  test("classifies finops queries", () => {
+    expect(Telemetry.classifyTaskIntent("how much are we spending on Snowflake credits")).toEqual({ intent: "finops", confidence: 1.0 })
+    expect(Telemetry.classifyTaskIntent("find the most expensive queries")).toEqual({ intent: "finops", confidence: 1.0 })
+  })
+
+  test("falls back to general for unrecognized input", () => {
+    expect(Telemetry.classifyTaskIntent("hello how are you")).toEqual({ intent: "general", confidence: 1.0 })
+    expect(Telemetry.classifyTaskIntent("what is the meaning of life")).toEqual({ intent: "general", confidence: 1.0 })
+  })
+
+  test("is case insensitive", () => {
+    expect(Telemetry.classifyTaskIntent("OPTIMIZE THIS SLOW QUERY")).toEqual({ intent: "optimize_query", confidence: 1.0 })
+    expect(Telemetry.classifyTaskIntent("Write A SQL Query")).toEqual({ intent: "write_sql", confidence: 1.0 })
+  })
+
+  test("strong matches take priority over weak matches", () => {
+    // "dbt error" is a strong debug_dbt match, even though "query" is a weak write_sql match
+    expect(Telemetry.classifyTaskIntent("dbt error in my query")).toEqual({ intent: "debug_dbt", confidence: 1.0 })
+  })
+
+  test("task_classified event can be tracked", () => {
+    expect(() => {
+      Telemetry.track({
+        type: "task_classified",
+        timestamp: Date.now(),
+        session_id: "s1",
+        intent: "write_sql",
+        confidence: 1.0,
+        warehouse_type: "snowflake",
+      })
+    }).not.toThrow()
+  })
+})

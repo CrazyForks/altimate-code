@@ -687,6 +687,29 @@ export namespace SessionPrompt {
           agent: lastUser.agent,
           project_id: Instance.project?.id ?? "",
         })
+        // Task intent classification — keyword/regex, zero LLM cost
+        const userMsg = msgs.find((m) => m.info.id === lastUser!.id)
+        if (userMsg) {
+          const userText = userMsg.parts
+            .filter((p): p is MessageV2.TextPart => p.type === "text" && !p.ignored && !p.synthetic)
+            .map((p) => p.text)
+            .join("\n")
+          if (userText.length > 0) {
+            const { intent, confidence } = Telemetry.classifyTaskIntent(userText)
+            const fp = Fingerprint.get()
+            const warehouseType = fp?.tags.find((t) =>
+              ["snowflake", "bigquery", "redshift", "databricks", "postgres", "mysql", "sqlite", "duckdb", "trino", "spark", "clickhouse"].includes(t),
+            ) ?? "unknown"
+            Telemetry.track({
+              type: "task_classified",
+              timestamp: Date.now(),
+              session_id: sessionID,
+              intent: intent as any,
+              confidence,
+              warehouse_type: warehouseType,
+            })
+          }
+        }
         // altimate_change end
       }
 

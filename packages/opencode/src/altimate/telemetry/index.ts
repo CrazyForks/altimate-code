@@ -439,7 +439,94 @@ export namespace Telemetry {
         /** Last tool category the agent used (or "none") */
         last_tool_category: string
       }
+    // task intent classification for understanding DE problem distribution
+    | {
+        type: "task_classified"
+        timestamp: number
+        session_id: string
+        /** Classified intent category */
+        intent:
+          | "debug_dbt"
+          | "write_sql"
+          | "optimize_query"
+          | "build_model"
+          | "analyze_lineage"
+          | "explore_schema"
+          | "migrate_sql"
+          | "manage_warehouse"
+          | "finops"
+          | "general"
+        /** Keyword match confidence: 1.0 for strong match, 0.5 for weak */
+        confidence: number
+        /** Detected warehouse type from fingerprint (or "unknown") */
+        warehouse_type: string
+      }
   // altimate_change end
+
+  /** Classify user intent from the first message text.
+   *  Pure regex/keyword matcher — zero LLM cost, <1ms. */
+  export function classifyTaskIntent(
+    text: string,
+  ): { intent: string; confidence: number } {
+    const lower = text.toLowerCase()
+
+    // Order matters: more specific patterns first
+    const patterns: Array<{ intent: string; strong: RegExp[]; weak: RegExp[] }> = [
+      {
+        intent: "debug_dbt",
+        strong: [/dbt\s+(error|fail|bug|issue|broken|fix|debug|not\s+work)/],
+        weak: [/dbt\s+(run|build|test|compile|parse)/, /dbt_project/, /ref\s*\(/, /source\s*\(/],
+      },
+      {
+        intent: "build_model",
+        strong: [/(?:create|build|write|add|new)\s+.*?(?:dbt\s+)?model/, /(?:create|build)\s+.*?(?:staging|mart|dim|fact)/],
+        weak: [/\bmodel\b/, /materialization/, /incremental/],
+      },
+      {
+        intent: "optimize_query",
+        strong: [/optimiz|performance|slow\s+query|speed\s+up|make.*faster|too\s+slow|query\s+cost/],
+        weak: [/index|partition|cluster|explain\s+plan/],
+      },
+      {
+        intent: "write_sql",
+        strong: [/(?:write|create|build|generate)\s+(?:a\s+)?(?:sql|query)/, /(?:write|create)\s+(?:a\s+)?(?:select|insert|update|delete)/],
+        weak: [/\bsql\b/, /\bquery\b/, /\bjoin\b/, /\bwhere\b/],
+      },
+      {
+        intent: "analyze_lineage",
+        strong: [/lineage|upstream|downstream|dependency|depends\s+on|impact\s+analysis/],
+        weak: [/dag|graph|flow|trace/],
+      },
+      {
+        intent: "explore_schema",
+        strong: [/(?:show|list|describe|inspect|explore)\s+.*?(?:schema|tables?|columns?|database)/, /what\s+.*?(?:tables|columns|schemas)/],
+        weak: [/\bschema\b/, /\btable\b/, /\bcolumn\b/, /introspect/],
+      },
+      {
+        intent: "migrate_sql",
+        strong: [/migrat|convert.*(?:to|from)\s+(?:snowflake|bigquery|postgres|redshift|databricks)/, /translate.*(?:sql|dialect)/],
+        weak: [/dialect|transpile|port\s+(?:to|from)/],
+      },
+      {
+        intent: "manage_warehouse",
+        strong: [/(?:connect|setup|configure|add|test)\s+.*?(?:warehouse|connection|database)/, /warehouse.*(?:config|setting)/],
+        weak: [/\bwarehouse\b/, /connection\s+string/, /\bcredentials\b/],
+      },
+      {
+        intent: "finops",
+        strong: [/cost|spend|bill|credits|usage|expensive\s+quer|warehouse\s+size/],
+        weak: [/resource|utilization|idle/],
+      },
+    ]
+
+    for (const { intent, strong, weak } of patterns) {
+      if (strong.some((r) => r.test(lower))) return { intent, confidence: 1.0 }
+    }
+    for (const { intent, weak } of patterns) {
+      if (weak.some((r) => r.test(lower))) return { intent, confidence: 0.5 }
+    }
+    return { intent: "general", confidence: 1.0 }
+  }
 
   /** Derive a quality signal from the agent outcome.
    *  Exported so tests can verify the derivation logic without
