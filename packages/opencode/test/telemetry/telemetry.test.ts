@@ -2012,3 +2012,54 @@ describe("telemetry.tool_chain_outcome", () => {
     }).not.toThrow()
   })
 })
+
+// ---------------------------------------------------------------------------
+// error_fingerprint event and hashError utility
+// ---------------------------------------------------------------------------
+describe("telemetry.error_fingerprint", () => {
+  test("hashError produces consistent 16-char hex string", () => {
+    const hash1 = Telemetry.hashError("connection refused")
+    const hash2 = Telemetry.hashError("connection refused")
+    expect(hash1).toBe(hash2)
+    expect(hash1).toHaveLength(16)
+    expect(/^[0-9a-f]{16}$/.test(hash1)).toBe(true)
+  })
+
+  test("hashError produces different hashes for different messages", () => {
+    const h1 = Telemetry.hashError("timeout error")
+    const h2 = Telemetry.hashError("parse error")
+    expect(h1).not.toBe(h2)
+  })
+
+  test("accepts valid error_fingerprint event", () => {
+    const event: Telemetry.Event = {
+      type: "error_fingerprint",
+      timestamp: Date.now(),
+      session_id: "s1",
+      error_hash: Telemetry.hashError("connection refused"),
+      error_class: "connection",
+      tool_name: "sql_execute",
+      tool_category: "sql",
+      recovery_successful: true,
+      recovery_tool: "sql_execute",
+    }
+    expect(event.type).toBe("error_fingerprint")
+    expect(event.recovery_successful).toBe(true)
+  })
+
+  test("event can be tracked for unrecovered errors", () => {
+    expect(() => {
+      Telemetry.track({
+        type: "error_fingerprint",
+        timestamp: Date.now(),
+        session_id: "s1",
+        error_hash: Telemetry.hashError("syntax error near ?"),
+        error_class: "parse_error",
+        tool_name: "sql_analyze",
+        tool_category: "sql",
+        recovery_successful: false,
+        recovery_tool: "",
+      })
+    }).not.toThrow()
+  })
+})

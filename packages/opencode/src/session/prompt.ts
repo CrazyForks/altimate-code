@@ -328,6 +328,10 @@ export namespace SessionPrompt {
     let toolErrorCount = 0
     let errorRecoveryCount = 0
     let lastToolWasError = false
+    // Error fingerprint tracking
+    interface ErrorRecord { toolName: string; toolCategory: string; errorClass: string; errorHash: string; recovered: boolean; recoveryTool: string }
+    const errorRecords: ErrorRecord[] = []
+    let pendingError: Omit<ErrorRecord, "recovered" | "recoveryTool"> | null = null
     const emergencySessionEnd = () => {
       if (emergencySessionEndFired) return
       emergencySessionEndFired = true
@@ -826,23 +830,43 @@ export namespace SessionPrompt {
       const stepParts = await MessageV2.parts(processor.message.id)
       toolCallCount += stepParts.filter((p) => p.type === "tool").length
       if (processor.message.error) sessionHadError = true
-      // Quality signal + tool chain: track tools, errors, recoveries
+      // Quality signal + tool chain + error fingerprints
       const toolParts = stepParts.filter((p) => p.type === "tool")
       for (const part of toolParts) {
         if (part.type !== "tool") continue
         const toolType = part.tool.startsWith("mcp__") ? "mcp" as const : "standard" as const
-        lastToolCategory = Telemetry.categorizeToolName(part.tool, toolType)
+        const toolCategory = Telemetry.categorizeToolName(part.tool, toolType)
+        lastToolCategory = toolCategory
         if (toolChain.length < 50) toolChain.push(part.tool)
         const isError = part.state?.status === "error"
         if (isError) {
           toolErrorCount++
+          // Flush previous unrecovered error before recording new one
+          if (pendingError) {
+            errorRecords.push({ ...pendingError, recovered: false, recoveryTool: "" })
+          }
           lastToolWasError = true
-        } else if (lastToolWasError) {
-          errorRecoveryCount++
-          lastToolWasError = false
+          const errorMsg = typeof part.state?.error === "string" ? part.state.error : "unknown"
+          const masked = Telemetry.maskString(errorMsg).slice(0, 500)
+          pendingError = {
+            toolName: part.tool,
+            toolCategory,
+            errorClass: Telemetry.classifyError(errorMsg),
+            errorHash: Telemetry.hashError(masked),
+          }
         } else {
+          if (lastToolWasError && pendingError) {
+            errorRecoveryCount++
+            errorRecords.push({ ...pendingError, recovered: true, recoveryTool: part.tool })
+            pendingError = null
+          }
           lastToolWasError = false
         }
+      }
+      // Flush unrecovered error at end of step
+      if (pendingError && !lastToolWasError) {
+        errorRecords.push({ ...pendingError, recovered: false, recoveryTool: "" })
+        pendingError = null
       }
       // altimate_change end
 
@@ -894,6 +918,24 @@ export namespace SessionPrompt {
         final_outcome: outcome,
         total_duration_ms: Date.now() - sessionStartTime,
         total_cost: sessionTotalCost,
+      })
+    }
+    // Flush any pending unrecovered error
+    if (pendingError) {
+      errorRecords.push({ ...pendingError, recovered: false, recoveryTool: "" })
+    }
+    // Error fingerprints — one event per unique error (capped at 20)
+    for (const err of errorRecords.slice(0, 20)) {
+      Telemetry.track({
+        type: "error_fingerprint",
+        timestamp: Date.now(),
+        session_id: sessionID,
+        error_hash: err.errorHash,
+        error_class: err.errorClass,
+        tool_name: err.toolName,
+        tool_category: err.toolCategory,
+        recovery_successful: err.recovered,
+        recovery_tool: err.recoveryTool,
       })
     }
     // altimate_change end

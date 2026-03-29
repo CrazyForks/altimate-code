@@ -461,6 +461,24 @@ export namespace Telemetry {
         /** Detected warehouse type from fingerprint (or "unknown") */
         warehouse_type: string
       }
+    // error pattern fingerprint — hashed error grouping with recovery data
+    | {
+        type: "error_fingerprint"
+        timestamp: number
+        session_id: string
+        /** SHA256 hash of normalized (masked) error message for grouping */
+        error_hash: string
+        /** Classification from classifyError() */
+        error_class: string
+        /** Tool that produced the error */
+        tool_name: string
+        /** Tool category */
+        tool_category: string
+        /** Whether a subsequent tool call succeeded (error was recovered) */
+        recovery_successful: boolean
+        /** Tool that succeeded after the error (if recovered) */
+        recovery_tool: string
+      }
     // tool chain effectiveness — aggregated tool sequence + outcome at session end
     | {
         type: "tool_chain_outcome"
@@ -482,6 +500,11 @@ export namespace Telemetry {
         total_cost: number
       }
   // altimate_change end
+
+  /** SHA256 hash a masked error message for anonymous grouping. */
+  export function hashError(maskedMessage: string): string {
+    return createHash("sha256").update(maskedMessage).digest("hex").slice(0, 16)
+  }
 
   /** Classify user intent from the first message text.
    *  Pure regex/keyword matcher — zero LLM cost, <1ms. */
