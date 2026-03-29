@@ -264,7 +264,7 @@ describe.skipIf(!DOCKER && !CH_USE_CI)("ClickHouse Driver E2E", () => {
     )
     const result = await connector.execute("SELECT * FROM testdb.type_test")
     expect(result.row_count).toBe(1)
-    expect(result.rows[0][0]).toBe("1") // UInt64 comes as string in JSON
+    expect(String(result.rows[0][0])).toBe("1") // UInt64 may be string or number in JSON
     expect(result.rows[0][1]).toBe("test")
 
     const columns = await connector.describeTable("testdb", "type_test")
@@ -363,6 +363,7 @@ describe.skipIf(!DOCKER && !CH_LTS_USE_CI)("ClickHouse Driver E2E — LTS 23.8",
         `-d --name ${CH_LTS_CONTAINER} ` +
           `-p ${CH_LTS_PORT}:8123 ` +
           `-e CLICKHOUSE_DB=testdb ` +
+          `-e CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1 ` +
           `clickhouse/clickhouse-server:23.8`,
       )
     }
@@ -627,6 +628,7 @@ describe.skipIf(!DOCKER && !CH_USE_CI)("ClickHouse Driver E2E — Connection Str
           `-d --name ${CH_CONTAINER} ` +
             `-p ${CH_PORT}:8123 ` +
             `-e CLICKHOUSE_DB=testdb ` +
+            `-e CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1 ` +
             `clickhouse/clickhouse-server:latest`,
         )
       }

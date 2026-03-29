@@ -64,8 +64,17 @@ export async function connect(config: ConnectionConfig): Promise<Connector> {
       const effectiveLimit = limit ?? 1000
       let query = sql
       const isSelectLike = /^\s*(SELECT|WITH|SHOW|DESCRIBE|EXPLAIN|EXISTS)\b/i.test(sql)
+      const isDDL =
+        /^\s*(INSERT|CREATE|DROP|ALTER|TRUNCATE|RENAME|ATTACH|DETACH|OPTIMIZE|SYSTEM|SET|USE|GRANT|REVOKE)\b/i.test(sql)
       const hasDML = /\b(INSERT|CREATE|DROP|ALTER|TRUNCATE|RENAME|ATTACH|DETACH|OPTIMIZE|SYSTEM)\b/i.test(sql)
 
+      // DDL/DML: use client.command() — no result set expected
+      if (isDDL) {
+        await client.command({ query: sql.replace(/;\s*$/, "") })
+        return { columns: [], rows: [], row_count: 0, truncated: false }
+      }
+
+      // Read queries: use client.query() with JSONEachRow format
       if (isSelectLike && !hasDML && effectiveLimit && !/\bLIMIT\b/i.test(sql)) {
         query = `${sql.replace(/;\s*$/, "")} LIMIT ${effectiveLimit + 1}`
       }
