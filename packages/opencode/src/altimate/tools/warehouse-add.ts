@@ -3,6 +3,7 @@ import { Tool } from "../../tool/tool"
 import { Dispatcher } from "../native"
 // altimate_change start — post-connect feature suggestions
 import { PostConnectSuggestions } from "./post-connect-suggestions"
+import { Telemetry } from "../../telemetry"
 // altimate_change end
 
 export const WarehouseAddTool = Tool.define("warehouse_add", {
@@ -92,8 +93,23 @@ IMPORTANT: For private key file paths, always use "private_key_path" (not "priva
               warehouseType: result.type,
             })
           }
-        } catch {
-          // Suggestions must never break the add flow
+        } catch (e) {
+          // Suggestions must never break the add flow — but track the failure
+          try {
+            Telemetry.track({
+              type: "core_failure",
+              timestamp: Date.now(),
+              session_id: Telemetry.getContext().sessionId || "unknown-session",
+              tool_name: "warehouse_add",
+              tool_category: "warehouse",
+              error_class: "internal",
+              error_message: Telemetry.maskString(e instanceof Error ? e.message : String(e)),
+              input_signature: "post_connect_suggestions",
+              duration_ms: 0,
+            })
+          } catch {
+            // Telemetry itself failed — truly nothing we can do
+          }
         }
         // altimate_change end
 
