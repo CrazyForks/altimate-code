@@ -4,7 +4,6 @@ export namespace SkillFollowups {
     skill: string // skill name to suggest
     label: string // short display label
     description: string // why this is a good next step
-    condition?: string // optional: when this suggestion applies
   }
 
   // Map from skill name to follow-up suggestions

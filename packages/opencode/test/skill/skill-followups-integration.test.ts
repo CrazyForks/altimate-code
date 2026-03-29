@@ -5,7 +5,7 @@ import { Instance } from "../../src/project/instance"
 import { tmpdir } from "../fixture/fixture"
 import path from "path"
 
-test("skill tool output includes follow-up suggestions for skills with followups", async () => {
+test("SkillFollowups.format returns follow-up suggestions for skills with followups", async () => {
   await using tmp = await tmpdir({
     git: true,
     init: async (dir) => {
@@ -40,7 +40,7 @@ Instructions here.
   })
 })
 
-test("skill tool output has no follow-ups for skills without followups defined", async () => {
+test("SkillFollowups.format returns empty for skills without followups defined", async () => {
   await using tmp = await tmpdir({
     git: true,
     init: async (dir) => {
