@@ -337,6 +337,68 @@ describe.skipIf(!DOCKER && !CH_USE_CI)("ClickHouse Driver E2E", () => {
     expect(result.row_count).toBeGreaterThan(0)
   })
 
+  // --- Regression tests from adversarial suite (167 tests, 3 real bugs found) ---
+
+  test("regression: DESCRIBE TABLE does not get LIMIT appended", async () => {
+    // Bug: DESCRIBE matched isSelectLike regex, got LIMIT 1001 appended,
+    // but ClickHouse DESCRIBE doesn't support LIMIT syntax
+    const result = await connector.execute("DESCRIBE TABLE testdb.test_items")
+    expect(result.row_count).toBeGreaterThan(0)
+    expect(result.columns.length).toBeGreaterThan(0)
+  })
+
+  test("regression: EXISTS TABLE does not get LIMIT appended", async () => {
+    // Bug: EXISTS matched isSelectLike regex, got LIMIT 1001 appended,
+    // but ClickHouse EXISTS doesn't support LIMIT syntax
+    const result = await connector.execute("EXISTS TABLE testdb.test_items")
+    expect(result.row_count).toBe(1)
+  })
+
+  test("regression: limit=0 returns all rows (no truncation)", async () => {
+    // Bug: limit=0 caused truncated=true and sliced rows to 0
+    // because rows.length > 0 was always true
+    await connector.execute(
+      `CREATE TABLE IF NOT EXISTS testdb.regression_limit0 (id UInt32) ENGINE = MergeTree() ORDER BY id`,
+    )
+    await connector.execute("INSERT INTO testdb.regression_limit0 VALUES (1), (2), (3), (4), (5)")
+    const result = await connector.execute("SELECT * FROM testdb.regression_limit0 ORDER BY id", 0)
+    expect(result.row_count).toBe(5)
+    expect(result.truncated).toBe(false)
+    await connector.execute("DROP TABLE IF EXISTS testdb.regression_limit0")
+  })
+
+  test("regression: INSERT uses client.command() not client.query()", async () => {
+    // Bug: INSERT with VALUES was sent via client.query() with JSONEachRow format,
+    // causing ClickHouse to try parsing VALUES as JSON → CANNOT_PARSE_INPUT error
+    await connector.execute(
+      `CREATE TABLE IF NOT EXISTS testdb.regression_insert (id UInt32, val String) ENGINE = MergeTree() ORDER BY id`,
+    )
+    await connector.execute("INSERT INTO testdb.regression_insert VALUES (1, 'a'), (2, 'b')")
+    const result = await connector.execute("SELECT * FROM testdb.regression_insert ORDER BY id")
+    expect(result.row_count).toBe(2)
+    expect(result.rows[0][1]).toBe("a")
+    await connector.execute("DROP TABLE IF EXISTS testdb.regression_insert")
+  })
+
+  test("regression: WITH...INSERT does not get LIMIT appended", async () => {
+    // Bug: WITH clause matched isSelectLike, causing LIMIT to be appended
+    // to INSERT...SELECT queries, breaking them
+    await connector.execute(
+      `CREATE TABLE IF NOT EXISTS testdb.regression_cte_insert (id UInt32, val String) ENGINE = MergeTree() ORDER BY id`,
+    )
+    await connector.execute(
+      `CREATE TABLE IF NOT EXISTS testdb.regression_cte_source (id UInt32, val String) ENGINE = MergeTree() ORDER BY id`,
+    )
+    await connector.execute("INSERT INTO testdb.regression_cte_source VALUES (1, 'x'), (2, 'y')")
+    await connector.execute(
+      "INSERT INTO testdb.regression_cte_insert SELECT * FROM testdb.regression_cte_source WHERE id <= 2",
+    )
+    const result = await connector.execute("SELECT count() FROM testdb.regression_cte_insert")
+    expect(Number(result.rows[0][0])).toBe(2)
+    await connector.execute("DROP TABLE IF EXISTS testdb.regression_cte_insert")
+    await connector.execute("DROP TABLE IF EXISTS testdb.regression_cte_source")
+  })
+
   test("close", async () => {
     // Clean up all remaining test tables
     await connector.execute("DROP TABLE IF EXISTS testdb.test_items")

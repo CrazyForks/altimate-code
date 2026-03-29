@@ -61,9 +61,10 @@ export async function connect(config: ConnectionConfig): Promise<Connector> {
     },
 
     async execute(sql: string, limit?: number, _binds?: any[]): Promise<ConnectorResult> {
-      const effectiveLimit = limit ?? 1000
+      const effectiveLimit = limit === undefined ? 1000 : limit
       let query = sql
-      const isSelectLike = /^\s*(SELECT|WITH|SHOW|DESCRIBE|EXPLAIN|EXISTS)\b/i.test(sql)
+      // Only SELECT and WITH...SELECT support LIMIT — SHOW/DESCRIBE/EXPLAIN/EXISTS do not
+      const supportsLimit = /^\s*(SELECT|WITH)\b/i.test(sql)
       const isDDL =
         /^\s*(INSERT|CREATE|DROP|ALTER|TRUNCATE|RENAME|ATTACH|DETACH|OPTIMIZE|SYSTEM|SET|USE|GRANT|REVOKE)\b/i.test(sql)
       const hasDML = /\b(INSERT|CREATE|DROP|ALTER|TRUNCATE|RENAME|ATTACH|DETACH|OPTIMIZE|SYSTEM)\b/i.test(sql)
@@ -75,7 +76,8 @@ export async function connect(config: ConnectionConfig): Promise<Connector> {
       }
 
       // Read queries: use client.query() with JSONEachRow format
-      if (isSelectLike && !hasDML && effectiveLimit && !/\bLIMIT\b/i.test(sql)) {
+      // Only append LIMIT for SELECT/WITH queries (not SHOW/DESCRIBE/EXPLAIN/EXISTS)
+      if (supportsLimit && !hasDML && effectiveLimit > 0 && !/\bLIMIT\b/i.test(sql)) {
         query = `${sql.replace(/;\s*$/, "")} LIMIT ${effectiveLimit + 1}`
       }
 
@@ -91,7 +93,7 @@ export async function connect(config: ConnectionConfig): Promise<Connector> {
       }
 
       const columns = Object.keys(rows[0])
-      const truncated = rows.length > effectiveLimit
+      const truncated = effectiveLimit > 0 && rows.length > effectiveLimit
       const limitedRows = truncated ? rows.slice(0, effectiveLimit) : rows
 
       return {
