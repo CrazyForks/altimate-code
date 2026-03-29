@@ -35,6 +35,7 @@ const { values: args } = parseArgs({
     version: { type: "string", short: "v" },
     branding: { type: "boolean", default: false },
     markers: { type: "boolean", default: false },
+    "audit-fixes": { type: "boolean", default: false },
     strict: { type: "boolean", default: false },
     base: { type: "string" },
     verbose: { type: "boolean", default: false },
@@ -475,6 +476,43 @@ function printMarkerAnalysis(config: MergeConfig): void {
 }
 
 // ---------------------------------------------------------------------------
+// Upstream fix audit (--audit-fixes)
+// ---------------------------------------------------------------------------
+
+function auditUpstreamFixes(config: MergeConfig): void {
+  const markers = findMarkers(config)
+  const fixes = markers.filter((m) => m.startComment.includes("upstream_fix:"))
+
+  console.log()
+  console.log(bold("=== Upstream Bug Fixes We're Carrying ==="))
+  console.log()
+
+  if (fixes.length === 0) {
+    console.log(`  ${GREEN}No upstream_fix: markers found.${RESET}`)
+    console.log(`  All our markers are feature additions, not bug fixes.`)
+    console.log()
+    return
+  }
+
+  console.log(`  Found ${bold(String(fixes.length))} upstream bug fix(es) to review before merge:\n`)
+
+  for (const fix of fixes) {
+    // Extract description after "upstream_fix:"
+    const desc = fix.startComment.replace(/.*upstream_fix:\s*/, "").replace(/\s*\*\/\s*$/, "")
+    const lines = fix.endLine ? `${fix.line}-${fix.endLine}` : `${fix.line}`
+    console.log(`  ${YELLOW}fix${RESET}  ${fix.file}:${lines}`)
+    console.log(`        ${desc}`)
+    console.log()
+  }
+
+  console.log(`  ${bold("Before each upstream merge:")}`)
+  console.log(`    1. Check if upstream fixed each issue in their release`)
+  console.log(`    2. If fixed upstream: accept their version, remove our marker`)
+  console.log(`    3. If not fixed: keep our marker (it will survive the merge)`)
+  console.log()
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -490,6 +528,7 @@ function printUsage(): void {
     --version, -v <tag>   Upstream version to analyze
     --branding            Scan codebase for upstream branding leaks
     --markers             Check changed files for missing altimate_change markers
+    --audit-fixes         List all upstream_fix: markers (bug fixes we made to upstream code)
     --base <branch>       Base branch for --markers comparison (default: HEAD)
     --strict              Exit with code 1 on warnings (for CI)
     --verbose             Show all results (not just top 20)
@@ -508,6 +547,9 @@ function printUsage(): void {
 
     ${dim("# Check PR for missing markers (CI)")}
     bun run script/upstream/analyze.ts --markers --base main --strict
+
+    ${dim("# List upstream bug fixes we're carrying (review before merge)")}
+    bun run script/upstream/analyze.ts --audit-fixes
 
     ${dim("# Machine-readable output for CI")}
     bun run script/upstream/analyze.ts --branding --json
@@ -770,8 +812,9 @@ async function main(): Promise<void> {
   const hasVersion = Boolean(args.version)
   const hasBranding = Boolean(args.branding)
   const hasMarkers = Boolean(args.markers)
+  const hasAuditFixes = Boolean(args["audit-fixes"])
 
-  if (!hasVersion && !hasBranding && !hasMarkers) {
+  if (!hasVersion && !hasBranding && !hasMarkers && !hasAuditFixes) {
     // Default: run marker analysis
     printMarkerAnalysis(config)
 
@@ -779,7 +822,14 @@ async function main(): Promise<void> {
     logger.info("Use --version <tag> to analyze an upstream version")
     logger.info("Use --branding to audit for branding leaks")
     logger.info("Use --markers --base main to check for missing markers")
+    logger.info("Use --audit-fixes to list upstream bug fixes we're carrying")
     return
+  }
+
+  // ─── Upstream fix audit ──────────────────────────────────────────────────
+  if (hasAuditFixes) {
+    auditUpstreamFixes(config)
+    if (!hasVersion && !hasBranding && !hasMarkers) return
   }
 
   // ─── Version analysis ──────────────────────────────────────────────────────
