@@ -321,17 +321,16 @@ export namespace SessionPrompt {
     let sessionAgentName = ""
     let sessionHadError = false
     let emergencySessionEndFired = false
-    // Quality signal tracking
+    // altimate_change start — quality signal, tool chain, error fingerprint tracking
     let lastToolCategory = ""
-    // Tool chain tracking
     const toolChain: string[] = []
     let toolErrorCount = 0
     let errorRecoveryCount = 0
     let lastToolWasError = false
-    // Error fingerprint tracking
     interface ErrorRecord { toolName: string; toolCategory: string; errorClass: string; errorHash: string; recovered: boolean; recoveryTool: string }
     const errorRecords: ErrorRecord[] = []
     let pendingError: Omit<ErrorRecord, "recovered" | "recoveryTool"> | null = null
+    // altimate_change end
     const emergencySessionEnd = () => {
       if (emergencySessionEndFired) return
       emergencySessionEndFired = true
@@ -696,7 +695,7 @@ export namespace SessionPrompt {
           agent: lastUser.agent,
           project_id: Instance.project?.id ?? "",
         })
-        // Task intent classification — keyword/regex, zero LLM cost
+        // altimate_change start — task intent classification (keyword/regex, zero LLM cost)
         const userMsg = msgs.find((m) => m.info.id === lastUser!.id)
         if (userMsg) {
           const userText = userMsg.parts
@@ -719,6 +718,7 @@ export namespace SessionPrompt {
             })
           }
         }
+        // altimate_change end — task intent classification
         // altimate_change end
       }
 
@@ -830,7 +830,7 @@ export namespace SessionPrompt {
       const stepParts = await MessageV2.parts(processor.message.id)
       toolCallCount += stepParts.filter((p) => p.type === "tool").length
       if (processor.message.error) sessionHadError = true
-      // Quality signal + tool chain + error fingerprints
+      // altimate_change start — quality signal + tool chain + error fingerprints
       const toolParts = stepParts.filter((p) => p.type === "tool")
       for (const part of toolParts) {
         if (part.type !== "tool") continue
@@ -843,7 +843,7 @@ export namespace SessionPrompt {
           toolErrorCount++
           // Flush previous unrecovered error before recording new one
           if (pendingError) {
-            errorRecords.push({ ...pendingError, recovered: false, recoveryTool: "" })
+            if (errorRecords.length < 200) errorRecords.push({ ...pendingError, recovered: false, recoveryTool: "" })
           }
           lastToolWasError = true
           const errorMsg = part.state.status === "error" && typeof part.state.error === "string" ? part.state.error : "unknown"
@@ -857,7 +857,7 @@ export namespace SessionPrompt {
         } else {
           if (lastToolWasError && pendingError) {
             errorRecoveryCount++
-            errorRecords.push({ ...pendingError, recovered: true, recoveryTool: part.tool })
+            if (errorRecords.length < 200) errorRecords.push({ ...pendingError, recovered: true, recoveryTool: part.tool })
             pendingError = null
           }
           lastToolWasError = false
@@ -868,6 +868,7 @@ export namespace SessionPrompt {
         errorRecords.push({ ...pendingError, recovered: false, recoveryTool: "" })
         pendingError = null
       }
+      // altimate_change end — quality signal + tool chain + error fingerprints
       // altimate_change end
 
       if (result === "stop") break
@@ -894,7 +895,7 @@ export namespace SessionPrompt {
         : sessionTotalCost === 0 && toolCallCount === 0
           ? "abandoned"
           : "completed"
-    // altimate_change start — implicit quality signal
+    // altimate_change start — emit quality signal, tool chain, and error fingerprint events
     Telemetry.track({
       type: "task_outcome_signal",
       timestamp: Date.now(),
@@ -938,7 +939,7 @@ export namespace SessionPrompt {
         recovery_tool: err.recoveryTool,
       })
     }
-    // altimate_change end
+    // altimate_change end — emit quality signal, tool chain, and error fingerprint events
     Telemetry.track({
       type: "agent_outcome",
       timestamp: Date.now(),

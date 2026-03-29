@@ -4,7 +4,7 @@ import { Dispatcher } from "../native"
 import type { SqlExecuteResult } from "../native/types"
 // altimate_change start - SQL write access control + fingerprinting
 import { classifyAndCheck, computeSqlFingerprint } from "./sql-classify"
-import { Telemetry } from "../../altimate/telemetry"
+import { Telemetry } from "../telemetry"
 // altimate_change end
 
 export const SqlExecuteTool = Tool.define("sql_execute", {

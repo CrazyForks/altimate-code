@@ -555,7 +555,7 @@ export namespace Telemetry {
   export function classifyTaskIntent(
     text: string,
   ): { intent: string; confidence: number } {
-    const lower = text.toLowerCase()
+    const lower = text.slice(0, 2000).toLowerCase()
 
     // Order matters: more specific patterns first
     const patterns: Array<{ intent: string; strong: RegExp[]; weak: RegExp[] }> = [
