@@ -461,6 +461,28 @@ export namespace Telemetry {
         /** Detected warehouse type from fingerprint (or "unknown") */
         warehouse_type: string
       }
+    // sql structure fingerprint — AST shape without content
+    | {
+        type: "sql_fingerprint"
+        timestamp: number
+        session_id: string
+        /** JSON-encoded statement types, e.g. ["SELECT"] */
+        statement_types: string
+        /** Broad categories, e.g. ["query"] */
+        categories: string
+        /** Number of tables referenced */
+        table_count: number
+        /** Number of functions used */
+        function_count: number
+        /** Whether the query has subqueries */
+        has_subqueries: boolean
+        /** Whether the query uses aggregation */
+        has_aggregation: boolean
+        /** Whether the query uses window functions */
+        has_window_functions: boolean
+        /** AST node count — proxy for complexity */
+        node_count: number
+      }
     // error pattern fingerprint — hashed error grouping with recovery data
     | {
         type: "error_fingerprint"

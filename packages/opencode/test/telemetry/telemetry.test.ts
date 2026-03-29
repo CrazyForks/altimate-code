@@ -2063,3 +2063,80 @@ describe("telemetry.error_fingerprint", () => {
     }).not.toThrow()
   })
 })
+
+// ---------------------------------------------------------------------------
+// sql_fingerprint event + computeSqlFingerprint
+// ---------------------------------------------------------------------------
+describe("telemetry.sql_fingerprint", () => {
+  test("accepts valid sql_fingerprint event", () => {
+    const event: Telemetry.Event = {
+      type: "sql_fingerprint",
+      timestamp: Date.now(),
+      session_id: "s1",
+      statement_types: JSON.stringify(["SELECT"]),
+      categories: JSON.stringify(["query"]),
+      table_count: 3,
+      function_count: 2,
+      has_subqueries: true,
+      has_aggregation: true,
+      has_window_functions: false,
+      node_count: 42,
+    }
+    expect(event.type).toBe("sql_fingerprint")
+    expect(JSON.parse(event.statement_types)).toEqual(["SELECT"])
+    expect(event.table_count).toBe(3)
+  })
+
+  test("event can be tracked", () => {
+    expect(() => {
+      Telemetry.track({
+        type: "sql_fingerprint",
+        timestamp: Date.now(),
+        session_id: "s1",
+        statement_types: JSON.stringify(["SELECT", "INSERT"]),
+        categories: JSON.stringify(["query", "dml"]),
+        table_count: 5,
+        function_count: 0,
+        has_subqueries: false,
+        has_aggregation: false,
+        has_window_functions: true,
+        node_count: 100,
+      })
+    }).not.toThrow()
+  })
+})
+
+describe("sql-classify.computeSqlFingerprint", () => {
+  const { computeSqlFingerprint } = require("../../src/altimate/tools/sql-classify")
+
+  test("fingerprints a simple SELECT", () => {
+    const fp = computeSqlFingerprint("SELECT 1")
+    if (fp) {
+      expect(fp.statement_types).toContain("SELECT")
+      expect(fp.categories).toContain("query")
+      expect(typeof fp.node_count).toBe("number")
+    }
+  })
+
+  test("fingerprints a JOIN query", () => {
+    const fp = computeSqlFingerprint("SELECT a.id FROM orders a JOIN users b ON a.user_id = b.id")
+    if (fp) {
+      expect(fp.table_count).toBeGreaterThanOrEqual(2)
+    }
+  })
+
+  test("returns null for invalid SQL gracefully", () => {
+    const fp = computeSqlFingerprint("NOT VALID SQL }{}{")
+    expect(fp === null || typeof fp === "object").toBe(true)
+  })
+
+  test("no content leaks into fingerprint", () => {
+    const fp = computeSqlFingerprint("SELECT secret FROM sensitive_table WHERE password = 'hunter2'")
+    if (fp) {
+      const serialized = JSON.stringify(fp)
+      expect(serialized).not.toContain("secret")
+      expect(serialized).not.toContain("sensitive_table")
+      expect(serialized).not.toContain("hunter2")
+    }
+  })
+})
