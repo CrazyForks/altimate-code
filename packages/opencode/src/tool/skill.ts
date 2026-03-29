@@ -33,10 +33,7 @@ export const SkillTool = Tool.define("skill", async (ctx) => {
   const cfg = await Config.get()
   let allAllowed: Skill.Info[]
   if (cfg.experimental?.env_fingerprint_skill_selection === true) {
-    allAllowed = await selectSkillsWithLLM(
-      list,
-      Fingerprint.get(),
-    )
+    allAllowed = await selectSkillsWithLLM(list, Fingerprint.get())
   } else {
     allAllowed = list
   }
@@ -70,12 +67,7 @@ export const SkillTool = Tool.define("skill", async (ctx) => {
           ]),
           "</available_skills>",
           // altimate_change start - add hint when skills are truncated
-          ...(hasMore
-            ? [
-                "",
-                `Note: Showing ${displaySkills.length} of ${allAllowed.length} available skills.`,
-              ]
-            : []),
+          ...(hasMore ? ["", `Note: Showing ${displaySkills.length} of ${allAllowed.length} available skills.`] : []),
           // altimate_change end
         ].join("\n")
   // altimate_change end
@@ -179,7 +171,9 @@ export const SkillTool = Tool.define("skill", async (ctx) => {
           files,
           "</skill_files>",
           "</skill_content>",
+          // altimate_change start — append follow-up suggestions
           followups,
+          // altimate_change end
         ].join("\n"),
         metadata: {
           name: skill.name,

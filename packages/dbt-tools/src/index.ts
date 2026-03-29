@@ -198,7 +198,9 @@ async function main() {
         result = { error: `Unknown command: ${cmd}`, usage: USAGE }
     }
   } finally {
-    try { await adapter.dispose() } catch {}
+    try {
+      await adapter.dispose()
+    } catch {}
   }
 
   return result
