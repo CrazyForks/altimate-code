@@ -172,7 +172,7 @@ describe("detectAuthMethod", () => {
   })
 
   test("returns 'password' for config with password", () => {
-    expect(detectAuthMethod({ type: "postgres", password: "secret" } as any)).toBe("password")
+    expect(detectAuthMethod({ type: "postgres", password: "test-fake-password" } as any)).toBe("password")
   })
 
   test("returns 'file' for duckdb", () => {
@@ -188,7 +188,7 @@ describe("detectAuthMethod", () => {
   })
 
   test("returns 'password' for mongo with password", () => {
-    expect(detectAuthMethod({ type: "mongo", password: "secret" } as any)).toBe("password")
+    expect(detectAuthMethod({ type: "mongo", password: "test-fake-password" } as any)).toBe("password")
   })
 
   test("returns 'unknown' for null/undefined", () => {
@@ -207,7 +207,7 @@ describe("detectAuthMethod", () => {
 
 describe("CredentialStore", () => {
   test("storeCredential returns false when keytar unavailable", async () => {
-    const result = await CredentialStore.storeCredential("mydb", "password", "secret")
+    const result = await CredentialStore.storeCredential("mydb", "password", "test-fake-password")
     expect(result).toBe(false)
   })
 
@@ -267,7 +267,7 @@ describe("CredentialStore", () => {
   })
 
   test("saveConnection strips OAuth credentials as sensitive", async () => {
-    const config = { type: "snowflake", authenticator: "oauth", token: "access-token-123", oauth_client_secret: "secret" } as any
+    const config = { type: "snowflake", authenticator: "oauth", token: "test-fake-token", oauth_client_secret: "test-fake-password" } as any
     const { sanitized } = await CredentialStore.saveConnection("sf_oauth", config)
     expect(sanitized.token).toBeUndefined()
     expect(sanitized.oauth_client_secret).toBeUndefined()
@@ -279,12 +279,12 @@ describe("CredentialStore", () => {
       type: "snowflake",
       account: "abc123",
       user: "svc_user",
-      password: "pw123",
+      password: "test-fake-pw",
       private_key: "-----BEGIN PRIVATE KEY-----",
       private_key_passphrase: "passphrase",
       token: "oauth-token",
       oauth_client_secret: "client-secret",
-      ssh_password: "ssh-pw",
+      ssh_password: "test-fake-ssh-pw",
       connection_string: "mongodb://...",
     } as any
     const { sanitized, warnings } = await CredentialStore.saveConnection("complex", config)
@@ -651,7 +651,7 @@ describe("Docker discovery", () => {
       host: "127.0.0.1",
       port: 5432,
       user: "admin",
-      password: "secret",
+      password: "test-fake-password",
       database: "mydb",
       status: "running",
     }
@@ -660,7 +660,7 @@ describe("Docker discovery", () => {
     expect(config.host).toBe("127.0.0.1")
     expect(config.port).toBe(5432)
     expect(config.user).toBe("admin")
-    expect(config.password).toBe("secret")
+    expect(config.password).toBe("test-fake-password")
     expect(config.database).toBe("mydb")
   })
 

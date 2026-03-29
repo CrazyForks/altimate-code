@@ -8,6 +8,7 @@ const trackedEvents: any[] = []
 
 beforeEach(() => {
   trackedEvents.length = 0
+  PostConnectSuggestions.resetShownSuggestions()
   spyOn(Telemetry, "track").mockImplementation((event: any) => {
     trackedEvents.push(event)
   })
