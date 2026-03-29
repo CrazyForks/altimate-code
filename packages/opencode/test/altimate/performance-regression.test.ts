@@ -7,33 +7,30 @@
  * so generous thresholds are used to prevent CI flakes.
  */
 
-import { describe, test, expect, beforeEach } from "bun:test"
+import { describe, test, expect, beforeEach, afterEach, spyOn, mock } from "bun:test"
+import { Telemetry } from "../../src/telemetry"
+import { PostConnectSuggestions } from "../../src/altimate/tools/post-connect-suggestions"
 
 // ---------------------------------------------------------------------------
-// Mock telemetry to avoid heavy dependency chain
+// Capture telemetry via spyOn instead of mock.module to avoid
+// Bun's process-global mock.module leaking into other test files.
 // ---------------------------------------------------------------------------
 const trackedEvents: any[] = []
-const mockTelemetry = {
-  Telemetry: {
-    track: (event: any) => {
-      trackedEvents.push(event)
-    },
-    getContext: () => ({ sessionId: "perf-test-session" }),
-    maskString: (s: string) => s,
-  },
-}
-
-const { mock } = await import("bun:test")
-mock.module("@/telemetry", () => mockTelemetry)
-mock.module("../../src/telemetry", () => mockTelemetry)
-
-const { PostConnectSuggestions } = await import(
-  "../../src/altimate/tools/post-connect-suggestions"
-)
 
 beforeEach(() => {
   trackedEvents.length = 0
   PostConnectSuggestions.resetShownSuggestions()
+  spyOn(Telemetry, "track").mockImplementation((event: any) => {
+    trackedEvents.push(event)
+  })
+  spyOn(Telemetry, "getContext").mockReturnValue({
+    sessionId: "perf-test-session",
+    projectId: "",
+  } as any)
+})
+
+afterEach(() => {
+  mock.restore()
 })
 
 // ===========================================================================

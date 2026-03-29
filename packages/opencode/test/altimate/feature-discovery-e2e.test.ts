@@ -13,26 +13,9 @@ import fs from "fs/promises"
 import path from "path"
 
 // ---------------------------------------------------------------------------
-// Mock telemetry before importing any module under test
-// ---------------------------------------------------------------------------
-const trackedEvents: any[] = []
-const mockTelemetry = {
-  Telemetry: {
-    track: (event: any) => {
-      trackedEvents.push(event)
-    },
-    getContext: () => ({ sessionId: "test-session-e2e" }),
-    maskString: (s: string) => s,
-  },
-}
-
-const { mock: bunMock } = await import("bun:test")
-bunMock.module("@/telemetry", () => mockTelemetry)
-bunMock.module("../../src/telemetry", () => mockTelemetry)
-
-// ---------------------------------------------------------------------------
 // Import modules under test and dependencies
 // ---------------------------------------------------------------------------
+import { Telemetry } from "../../src/telemetry"
 import * as Dispatcher from "../../src/altimate/native/dispatcher"
 import { WarehouseAddTool } from "../../src/altimate/tools/warehouse-add"
 import { SqlExecuteTool } from "../../src/altimate/tools/sql-execute"
@@ -41,6 +24,12 @@ import { SchemaInspectTool } from "../../src/altimate/tools/schema-inspect"
 import { SchemaIndexTool } from "../../src/altimate/tools/schema-index"
 import { PostConnectSuggestions } from "../../src/altimate/tools/post-connect-suggestions"
 import { SessionID, MessageID } from "../../src/session/schema"
+
+// ---------------------------------------------------------------------------
+// Capture telemetry via spyOn instead of mock.module to avoid
+// Bun's process-global mock.module leaking into other test files.
+// ---------------------------------------------------------------------------
+const trackedEvents: any[] = []
 
 // ---------------------------------------------------------------------------
 // Shared test context (matches pattern from sql-analyze-tool.test.ts)
@@ -67,10 +56,18 @@ beforeEach(() => {
   trackedEvents.length = 0
   process.env.ALTIMATE_TELEMETRY_DISABLED = "true"
   PostConnectSuggestions.resetShownSuggestions()
+  spyOn(Telemetry, "track").mockImplementation((event: any) => {
+    trackedEvents.push(event)
+  })
+  spyOn(Telemetry, "getContext").mockReturnValue({
+    sessionId: "test-session-e2e",
+    projectId: "",
+  } as any)
 })
 
 afterEach(() => {
   dispatcherSpy?.mockRestore()
+  mock.restore()
 })
 
 afterAll(() => {
@@ -144,34 +141,9 @@ describe("warehouse-add e2e: post-connect suggestions", () => {
   })
 
   test("warehouse add with dbt detected includes dbt skill suggestions", async () => {
-    mockDispatcherCall(async (method: string) => {
-      if (method === "warehouse.add") {
-        return { success: true, name: "test_wh", type: "postgres" }
-      }
-      if (method === "schema.cache_status") {
-        return { total_tables: 0 }
-      }
-      if (method === "warehouse.list") {
-        return { warehouses: [{ name: "test_wh" }] }
-      }
-      throw new Error(`Unexpected method: ${method}`)
-    })
-
-    // Mock detectDbtProject to return found: true
-    bunMock.module("../../src/altimate/tools/project-scan", () => ({
-      detectDbtProject: async () => ({ found: true, name: "my_dbt_project" }),
-    }))
-
-    const tool = await WarehouseAddTool.init()
-    const result = await tool.execute(
-      { name: "test_wh", config: { type: "postgres", host: "localhost", database: "db" } },
-      ctx as any,
-    )
-
-    // dbt suggestions appear in output when dbt is detected
-    expect(result.output).toContain("Successfully added warehouse")
-    // The output should contain dbt-related text if dbt was detected
-    // Note: dbt detection depends on dynamic import, so we check the PostConnectSuggestions directly too
+    // Test PostConnectSuggestions directly to verify dbt suggestions appear
+    // when dbt is detected. Avoids mock.module("project-scan") which leaks
+    // across test files in Bun's shared process.
     const directResult = PostConnectSuggestions.getPostConnectSuggestions({
       warehouseType: "postgres",
       schemaIndexed: false,
@@ -181,6 +153,7 @@ describe("warehouse-add e2e: post-connect suggestions", () => {
     })
     expect(directResult).toContain("/dbt-develop")
     expect(directResult).toContain("/dbt-troubleshoot")
+    expect(directResult).toContain("dbt project detected")
   })
 
   test("warehouse add failure does not include suggestions", async () => {

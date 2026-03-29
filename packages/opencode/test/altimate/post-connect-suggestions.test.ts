@@ -1,30 +1,24 @@
-import { describe, test, expect, beforeEach } from "bun:test"
+import { describe, test, expect, beforeEach, afterEach, spyOn, mock } from "bun:test"
+import { Telemetry } from "../../src/telemetry"
+import { PostConnectSuggestions } from "../../src/altimate/tools/post-connect-suggestions"
 
-// Mock Telemetry before importing the module under test.
-// This avoids pulling in the full dependency chain (db, xdg-basedir, etc.).
+// Capture tracked events via spyOn instead of mock.module to avoid
+// Bun's process-global mock.module leaking into other test files.
 const trackedEvents: any[] = []
-const mockTelemetry = {
-  Telemetry: {
-    track: (event: any) => {
-      trackedEvents.push(event)
-    },
-    getContext: () => ({ sessionId: "test-session-123" }),
-    maskString: (s: string) => s,
-  },
-}
-
-// Register mocks for modules that would pull heavy deps
-const { mock } = await import("bun:test")
-mock.module("@/telemetry", () => mockTelemetry)
-mock.module("../../src/telemetry", () => mockTelemetry)
-
-// Now import the module under test
-const { PostConnectSuggestions } = await import(
-  "../../src/altimate/tools/post-connect-suggestions"
-)
 
 beforeEach(() => {
   trackedEvents.length = 0
+  spyOn(Telemetry, "track").mockImplementation((event: any) => {
+    trackedEvents.push(event)
+  })
+  spyOn(Telemetry, "getContext").mockReturnValue({
+    sessionId: "test-session-123",
+    projectId: "",
+  } as any)
+})
+
+afterEach(() => {
+  mock.restore()
 })
 
 describe("PostConnectSuggestions.getPostConnectSuggestions", () => {
