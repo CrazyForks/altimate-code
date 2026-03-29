@@ -36,6 +36,9 @@ import { TraceCommand } from "./cli/cmd/trace"
 // altimate_change start — top-level skill command
 import { SkillCommand } from "./cli/cmd/skill"
 // altimate_change end
+// altimate_change start — kit: top-level kit command
+import { KitCommand } from "./cli/cmd/kit"
+// altimate_change end
 // altimate_change start — check: deterministic SQL check command
 import { CheckCommand } from "./cli/cmd/check"
 // altimate_change end
@@ -207,6 +210,9 @@ let cli = yargs(hideBin(process.argv))
   // altimate_change end
   // altimate_change start — top-level skill command
   .command(SkillCommand)
+  // altimate_change end
+  // altimate_change start — kit: register kit command
+  .command(KitCommand)
   // altimate_change end
   // altimate_change start — check: register deterministic SQL check command
   .command(CheckCommand)

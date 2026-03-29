@@ -1076,6 +1076,9 @@ export namespace Config {
         .optional()
         .describe("Command configuration, see https://altimate.ai/docs/commands"),
       skills: Skills.optional().describe("Additional skill folder paths"),
+      // altimate_change start — kit: config schema for kit paths and URLs
+      kits: Skills.optional().describe("Additional kit folder paths and URLs (same shape as skills config)"),
+      // altimate_change end
       watcher: z
         .object({
           ignore: z.array(z.string()).optional(),

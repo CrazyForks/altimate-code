@@ -387,6 +387,42 @@ export namespace Telemetry {
         source: "cli" | "tui"
       }
     // altimate_change end
+    // altimate_change start — kit: telemetry events for kit management
+    | {
+        type: "kit_created"
+        timestamp: number
+        session_id: string
+        kit_name: string
+        source: "cli" | "tui"
+      }
+    | {
+        type: "kit_installed"
+        timestamp: number
+        session_id: string
+        install_source: string
+        kit_count: number
+        kit_names: string[]
+        source: "cli" | "tui"
+      }
+    | {
+        type: "kit_applied"
+        timestamp: number
+        session_id: string
+        kit_name: string
+        skill_count: number
+        mcp_count: number
+        plugin_count: number
+        has_instructions: boolean
+        source: "cli" | "tui"
+      }
+    | {
+        type: "kit_removed"
+        timestamp: number
+        session_id: string
+        kit_name: string
+        source: "cli" | "tui"
+      }
+    // altimate_change end
     | {
         type: "sql_execute_failure"
         timestamp: number

@@ -14,6 +14,10 @@ import type { EventSource } from "./context/sdk"
 import { win32DisableProcessedInput, win32InstallCtrlCGuard } from "./win32"
 import { TuiConfig } from "@/config/tui"
 import { Instance } from "@/project/instance"
+// altimate_change start — kit: import Kit for startup detection nudge
+import { Kit } from "@/kit/kit"
+import { EOL } from "os"
+// altimate_change end
 
 declare global {
   const OPENCODE_WORKER_PATH: string
@@ -172,6 +176,27 @@ export const TuiThreadCommand = cmd({
         directory: cwd,
         fn: () => TuiConfig.get(),
       })
+
+      // altimate_change start — kit: non-blocking kit detection nudge on TUI startup
+      Instance.provide({
+        directory: cwd,
+        fn: async () => {
+          try {
+            const activeKits = await Kit.active()
+            if (activeKits.length > 0) return // already has active kits, no nudge needed
+            const detected = await Kit.detect()
+            if (detected.length > 0) {
+              const first = detected[0]
+              process.stderr.write(
+                `\x1b[2m\u{1F4A1} Kit available: ${first.kit.name} \u2014 run /kit activate ${first.kit.name}\x1b[0m` + EOL,
+              )
+            }
+          } catch {
+            // Kit detection is best-effort; never block startup
+          }
+        },
+      }).catch(() => {})
+      // altimate_change end
 
       const network = await resolveNetworkOptions(args)
       const external =
