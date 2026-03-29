@@ -461,6 +461,26 @@ export namespace Telemetry {
         /** Detected warehouse type from fingerprint (or "unknown") */
         warehouse_type: string
       }
+    // tool chain effectiveness — aggregated tool sequence + outcome at session end
+    | {
+        type: "tool_chain_outcome"
+        timestamp: number
+        session_id: string
+        /** JSON-encoded ordered tool names (capped at 50) */
+        chain: string
+        /** Number of tools in the chain */
+        chain_length: number
+        /** Whether any tool call errored */
+        had_errors: boolean
+        /** Number of errors followed by successful tool calls */
+        error_recovery_count: number
+        /** Final session outcome */
+        final_outcome: string
+        /** Total session duration in ms */
+        total_duration_ms: number
+        /** Total LLM cost */
+        total_cost: number
+      }
   // altimate_change end
 
   /** Classify user intent from the first message text.

@@ -323,6 +323,11 @@ export namespace SessionPrompt {
     let emergencySessionEndFired = false
     // Quality signal tracking
     let lastToolCategory = ""
+    // Tool chain tracking
+    const toolChain: string[] = []
+    let toolErrorCount = 0
+    let errorRecoveryCount = 0
+    let lastToolWasError = false
     const emergencySessionEnd = () => {
       if (emergencySessionEndFired) return
       emergencySessionEndFired = true
@@ -821,13 +826,22 @@ export namespace SessionPrompt {
       const stepParts = await MessageV2.parts(processor.message.id)
       toolCallCount += stepParts.filter((p) => p.type === "tool").length
       if (processor.message.error) sessionHadError = true
-      // Quality signal: track last tool category used
+      // Quality signal + tool chain: track tools, errors, recoveries
       const toolParts = stepParts.filter((p) => p.type === "tool")
-      if (toolParts.length > 0) {
-        const lastTool = toolParts[toolParts.length - 1]
-        if (lastTool.type === "tool") {
-          const toolType = lastTool.tool.startsWith("mcp__") ? "mcp" as const : "standard" as const
-          lastToolCategory = Telemetry.categorizeToolName(lastTool.tool, toolType)
+      for (const part of toolParts) {
+        if (part.type !== "tool") continue
+        const toolType = part.tool.startsWith("mcp__") ? "mcp" as const : "standard" as const
+        lastToolCategory = Telemetry.categorizeToolName(part.tool, toolType)
+        if (toolChain.length < 50) toolChain.push(part.tool)
+        const isError = part.state?.status === "error"
+        if (isError) {
+          toolErrorCount++
+          lastToolWasError = true
+        } else if (lastToolWasError) {
+          errorRecoveryCount++
+          lastToolWasError = false
+        } else {
+          lastToolWasError = false
         }
       }
       // altimate_change end
@@ -867,6 +881,21 @@ export namespace SessionPrompt {
       duration_ms: Date.now() - sessionStartTime,
       last_tool_category: lastToolCategory || "none",
     })
+    // Tool chain effectiveness — aggregated tool sequence + outcome
+    if (toolChain.length > 0) {
+      Telemetry.track({
+        type: "tool_chain_outcome",
+        timestamp: Date.now(),
+        session_id: sessionID,
+        chain: JSON.stringify(toolChain),
+        chain_length: toolChain.length,
+        had_errors: toolErrorCount > 0,
+        error_recovery_count: errorRecoveryCount,
+        final_outcome: outcome,
+        total_duration_ms: Date.now() - sessionStartTime,
+        total_cost: sessionTotalCost,
+      })
+    }
     // altimate_change end
     Telemetry.track({
       type: "agent_outcome",

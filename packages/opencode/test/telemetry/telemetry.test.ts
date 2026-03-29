@@ -1953,3 +1953,62 @@ describe("telemetry.classifyTaskIntent", () => {
     }).not.toThrow()
   })
 })
+
+// ---------------------------------------------------------------------------
+// tool_chain_outcome event type validation
+// ---------------------------------------------------------------------------
+describe("telemetry.tool_chain_outcome", () => {
+  test("accepts valid tool_chain_outcome event", () => {
+    const chain = ["schema_inspect", "sql_execute", "dbt_build"]
+    const event: Telemetry.Event = {
+      type: "tool_chain_outcome",
+      timestamp: Date.now(),
+      session_id: "test-session",
+      chain: JSON.stringify(chain),
+      chain_length: chain.length,
+      had_errors: false,
+      error_recovery_count: 0,
+      final_outcome: "completed",
+      total_duration_ms: 45000,
+      total_cost: 0.15,
+    }
+    expect(event.type).toBe("tool_chain_outcome")
+    expect(JSON.parse(event.chain)).toEqual(chain)
+    expect(event.chain_length).toBe(3)
+    expect(event.had_errors).toBe(false)
+  })
+
+  test("event with errors and recoveries tracks correctly", () => {
+    const event: Telemetry.Event = {
+      type: "tool_chain_outcome",
+      timestamp: Date.now(),
+      session_id: "s1",
+      chain: JSON.stringify(["sql_execute", "sql_execute", "dbt_build"]),
+      chain_length: 3,
+      had_errors: true,
+      error_recovery_count: 1,
+      final_outcome: "completed",
+      total_duration_ms: 60000,
+      total_cost: 0.25,
+    }
+    expect(event.had_errors).toBe(true)
+    expect(event.error_recovery_count).toBe(1)
+  })
+
+  test("event can be passed to Telemetry.track", () => {
+    expect(() => {
+      Telemetry.track({
+        type: "tool_chain_outcome",
+        timestamp: Date.now(),
+        session_id: "s1",
+        chain: JSON.stringify(["read", "edit", "bash"]),
+        chain_length: 3,
+        had_errors: false,
+        error_recovery_count: 0,
+        final_outcome: "completed",
+        total_duration_ms: 10000,
+        total_cost: 0.05,
+      })
+    }).not.toThrow()
+  })
+})
