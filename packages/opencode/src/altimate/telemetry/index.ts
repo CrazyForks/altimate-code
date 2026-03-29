@@ -468,6 +468,21 @@ export namespace Telemetry {
         /** Detected warehouse type from fingerprint (or "unknown") */
         warehouse_type: string
       }
+    // schema complexity signal — structural metrics from warehouse introspection
+    | {
+        type: "schema_complexity"
+        timestamp: number
+        session_id: string
+        warehouse_type: string
+        /** Bucketed table count */
+        table_count_bucket: string
+        /** Bucketed total column count across all tables */
+        column_count_bucket: string
+        /** Bucketed schema count */
+        schema_count_bucket: string
+        /** Average columns per table (rounded to integer) */
+        avg_columns_per_table: number
+      }
     // sql structure fingerprint — AST shape without content
     | {
         type: "sql_fingerprint"

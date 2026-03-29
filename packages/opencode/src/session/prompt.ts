@@ -846,7 +846,7 @@ export namespace SessionPrompt {
             errorRecords.push({ ...pendingError, recovered: false, recoveryTool: "" })
           }
           lastToolWasError = true
-          const errorMsg = typeof part.state?.error === "string" ? part.state.error : "unknown"
+          const errorMsg = part.state.status === "error" && typeof part.state.error === "string" ? part.state.error : "unknown"
           const masked = Telemetry.maskString(errorMsg).slice(0, 500)
           pendingError = {
             toolName: part.tool,
