@@ -1,15 +1,1 @@
-feat: add task intent classification telemetry event
-
-Add `task_classified` event emitted at session start with keyword/regex
-classification of the first user message. Categories: debug_dbt, write_sql,
-optimize_query, build_model, analyze_lineage, explore_schema, migrate_sql,
-manage_warehouse, finops, general.
-
-- `classifyTaskIntent()` — pure regex matcher, zero LLM cost, <1ms
-- Includes warehouse type from fingerprint cache
-- Strong/weak confidence levels (1.0 vs 0.5)
-- 15 unit tests covering all intent categories + edge cases
-
-Closes AI-6029
-
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+feat: add ClickHouse warehouse driver
