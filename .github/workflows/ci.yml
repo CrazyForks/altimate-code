@@ -84,13 +84,44 @@ jobs:
         run: bun install
 
       - name: Run tests
-        run: bun test --timeout 30000
         working-directory: packages/opencode
         # Cloud E2E tests (Snowflake, BigQuery, Databricks) auto-skip when
         # ALTIMATE_CODE_CONN_* env vars are not set. Docker E2E tests auto-skip
         # when Docker is not available. No exclusion needed — skipIf handles it.
         # --timeout 30000: matches package.json "test" script; prevents 5s default
         # from cutting off tests that run bun install or bootstrap git instances.
+        #
+        # Bun 1.3.x has a known segfault during process cleanup after all tests
+        # pass (exit code 143/SIGTERM or 134/SIGABRT). We capture test output and
+        # check for real failures vs Bun crashes to avoid false CI failures.
+        run: |
+          set +e
+          bun test --timeout 30000 2>&1 | tee /tmp/test-output.txt
+          TEST_EXIT=$?
+          set -e
+
+          # Extract pass/fail counts from Bun test summary
+          PASS_COUNT=$(grep -E '^\s+\d+ pass' /tmp/test-output.txt | awk '{print $1}' || echo "")
+          FAIL_COUNT=$(grep -E '^\s+\d+ fail' /tmp/test-output.txt | awk '{print $1}' || echo "")
+
+          # If no summary at all, Bun crashed before running tests — real failure
+          if [ -z "$PASS_COUNT" ] && [ -z "$FAIL_COUNT" ]; then
+            echo "::error::Bun crashed before producing test results (exit code $TEST_EXIT)"
+            exit 1
+          fi
+
+          # Real test failures
+          if [ "$FAIL_COUNT" != "" ] && [ "$FAIL_COUNT" != "0" ]; then
+            echo "::error::$FAIL_COUNT test(s) failed"
+            exit 1
+          fi
+
+          echo "Tests passed: $PASS_COUNT pass, $FAIL_COUNT fail"
+
+          # If bun exited non-zero but all tests passed, it's a Bun crash during cleanup
+          if [ "$TEST_EXIT" -ne 0 ]; then
+            echo "::warning::Bun exited with code $TEST_EXIT after all tests passed (known Bun 1.3.x segfault during cleanup — not a test failure)"
+          fi
 
   # ---------------------------------------------------------------------------
   # Driver E2E tests — only when driver code changes.
