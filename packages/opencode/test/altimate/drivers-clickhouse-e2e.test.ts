@@ -519,12 +519,13 @@ describe.skipIf(!DOCKER && !CH_LTS_USE_CI)("ClickHouse Driver E2E — LTS 23.8",
 
 const CH_243_CONTAINER = "altimate-test-clickhouse-243"
 const CH_243_PORT = Number(process.env.TEST_CLICKHOUSE_243_PORT) || 18125
+const CH_243_USE_CI = !!process.env.TEST_CLICKHOUSE_243_HOST
 
-describe.skipIf(!DOCKER && !CH_USE_CI)("ClickHouse Driver E2E — LTS 24.3", () => {
+describe.skipIf(!DOCKER && !CH_243_USE_CI)("ClickHouse Driver E2E — LTS 24.3", () => {
   let connector: any
 
   beforeAll(async () => {
-    if (!CH_USE_CI) {
+    if (!CH_243_USE_CI) {
       dockerRm(CH_243_CONTAINER)
       dockerRun(
         `-d --name ${CH_243_CONTAINER} ` +
@@ -540,7 +541,7 @@ describe.skipIf(!DOCKER && !CH_USE_CI)("ClickHouse Driver E2E — LTS 24.3", () 
     connector = await waitForDbReady(async () => {
       const c = await connect({
         type: "clickhouse",
-        host: CH_HOST,
+        host: process.env.TEST_CLICKHOUSE_243_HOST || "127.0.0.1",
         port: CH_243_PORT,
         user: "default",
         database: "testdb",
@@ -596,12 +597,13 @@ describe.skipIf(!DOCKER && !CH_USE_CI)("ClickHouse Driver E2E — LTS 24.3", () 
 
 const CH_248_CONTAINER = "altimate-test-clickhouse-248"
 const CH_248_PORT = Number(process.env.TEST_CLICKHOUSE_248_PORT) || 18126
+const CH_248_USE_CI = !!process.env.TEST_CLICKHOUSE_248_HOST
 
-describe.skipIf(!DOCKER && !CH_USE_CI)("ClickHouse Driver E2E — LTS 24.8", () => {
+describe.skipIf(!DOCKER && !CH_248_USE_CI)("ClickHouse Driver E2E — LTS 24.8", () => {
   let connector: any
 
   beforeAll(async () => {
-    if (!CH_USE_CI) {
+    if (!CH_248_USE_CI) {
       dockerRm(CH_248_CONTAINER)
       dockerRun(
         `-d --name ${CH_248_CONTAINER} ` +
@@ -617,7 +619,7 @@ describe.skipIf(!DOCKER && !CH_USE_CI)("ClickHouse Driver E2E — LTS 24.8", () 
     connector = await waitForDbReady(async () => {
       const c = await connect({
         type: "clickhouse",
-        host: CH_HOST,
+        host: process.env.TEST_CLICKHOUSE_248_HOST || "127.0.0.1",
         port: CH_248_PORT,
         user: "default",
         database: "testdb",
