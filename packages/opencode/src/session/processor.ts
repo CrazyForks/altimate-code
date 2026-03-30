@@ -191,12 +191,14 @@ export namespace SessionProcessor {
                     }
 
                     // altimate_change start — per-tool repeat counter (catches varied-input loops like todowrite 2,080x)
-                    // Counter is scoped to the processor lifetime (create() call), so it accumulates
-                    // across multiple process() invocations within a session. This is intentional:
-                    // cross-turn accumulation catches slow-burn loops that stay under the threshold
-                    // per-turn but add up over the session.
-                    toolCallCounts[value.toolName] = (toolCallCounts[value.toolName] ?? 0) + 1
-                    if (toolCallCounts[value.toolName] >= TOOL_REPEAT_THRESHOLD) {
+                    // Skip read-only file tools — read/glob/grep/bash legitimately exceed 30 calls
+                    // in normal refactoring sessions. Only count tools where high repetition is suspicious.
+                    const toolLower = value.toolName.toLowerCase()
+                    const isReadOnlyFileTool = toolLower === "read" || toolLower === "glob" || toolLower === "grep" || toolLower === "bash"
+                    if (!isReadOnlyFileTool) {
+                      toolCallCounts[value.toolName] = (toolCallCounts[value.toolName] ?? 0) + 1
+                    }
+                    if (!isReadOnlyFileTool && toolCallCounts[value.toolName] >= TOOL_REPEAT_THRESHOLD) {
                       Telemetry.track({
                         type: "doom_loop_detected",
                         timestamp: Date.now(),
