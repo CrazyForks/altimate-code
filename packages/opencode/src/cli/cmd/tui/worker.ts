@@ -34,6 +34,12 @@ process.on("uncaughtException", (e) => {
   Log.Default.error("exception", {
     e: e instanceof Error ? e.message : e,
   })
+  // altimate_change start — crash: flush traces on uncaught exception
+  // After logging, write all active traces to disk so crash context is preserved.
+  // The process may continue or exit depending on the exception — either way the
+  // trace snapshot will reflect the crash.
+  flushAllTracesSync(`Uncaught exception: ${e instanceof Error ? e.message : String(e)}`)
+  // altimate_change end
 })
 
 // Subscribe to global events and forward them via RPC
@@ -324,6 +330,29 @@ export const rpc = {
 }
 
 Rpc.listen(rpc)
+
+// altimate_change start — crash: flush active traces on unexpected exit
+// When the worker is terminated (via worker.terminate() from the main thread,
+// or on uncaught exceptions), write all in-flight traces to disk synchronously.
+//
+// NOTE: Bun Workers do NOT receive OS signals (SIGINT, SIGTERM, SIGHUP) —
+// those are delivered only to the main thread. Signal-based flush is handled
+// in thread.ts by terminating the worker, which triggers the "exit" event here.
+let hasFlushed = false
+function flushAllTracesSync(reason: string) {
+  if (hasFlushed) return
+  hasFlushed = true
+  for (const [, trace] of sessionTraces) {
+    try {
+      trace.flushSync(reason)
+    } catch {
+      // flushSync is best-effort — must never throw in an exit handler
+    }
+  }
+}
+
+process.once("exit", () => { flushAllTracesSync("Process exited") })
+// altimate_change end
 
 function getAuthorizationHeader(): string | undefined {
   const password = Flag.OPENCODE_SERVER_PASSWORD

@@ -46,6 +46,9 @@ import { Database } from "./storage/db"
 // altimate_change start - telemetry import
 import { Telemetry } from "./telemetry"
 // altimate_change end
+// altimate_change start — crash: import Trace for crash handlers
+import { Trace } from "./altimate/observability/tracing"
+// altimate_change end
 // altimate_change start - welcome banner
 import { showWelcomeBannerIfNeeded } from "./cli/welcome"
 // altimate_change end
@@ -60,12 +63,32 @@ process.on("uncaughtException", (e) => {
   Log.Default.error("exception", {
     e: e instanceof Error ? e.message : e,
   })
+  // altimate_change start — crash: flush active trace on uncaught exception
+  // Trace.active is set by run.ts (headless mode only — TUI traces live in
+  // the worker's isolated memory and are flushed via worker.terminate()).
+  // This is a safety net for the headless path where run.ts registers its
+  // own handlers but an exception could bubble past them.
+  try {
+    Trace.active?.flushSync(`Uncaught exception: ${e instanceof Error ? e.message : String(e)}`)
+  } catch {
+    // Trace module may not be initialized — best-effort
+  }
+  // altimate_change end
 })
 
 // Ensure the process exits on terminal hangup (eg. closing the terminal tab).
 // Without this, long-running commands like `serve` block on a never-resolving
 // promise and survive as orphaned processes.
-process.on("SIGHUP", () => process.exit())
+// altimate_change start — crash: flush active trace before SIGHUP exit
+process.on("SIGHUP", () => {
+  try {
+    Trace.active?.flushSync("Terminal hangup (SIGHUP)")
+  } catch {
+    // best-effort
+  }
+  process.exit()
+})
+// altimate_change end
 
 let cli = yargs(hideBin(process.argv))
   .parserConfiguration({ "populate--": true })

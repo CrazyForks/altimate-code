@@ -152,6 +152,25 @@ export const TuiThreadCommand = cmd({
       process.on("unhandledRejection", error)
       process.on("SIGUSR2", reload)
 
+      // altimate_change start — crash: flush worker traces on signals
+      // Bun Workers don't receive OS signals — only the main thread does.
+      // On SIGINT/SIGTERM/SIGHUP, terminate the worker and briefly wait so
+      // its "exit" handler fires and flushes all active session traces to disk.
+      // Bun.sleepSync gives the worker thread time to process the termination
+      // before the main thread continues to process.exit().
+      const emergencyTerminate = () => {
+        try {
+          worker.terminate()
+          Bun.sleepSync(50)
+        } catch {
+          // best-effort — crash handler must never throw
+        }
+      }
+      process.on("SIGINT", emergencyTerminate)
+      process.on("SIGTERM", emergencyTerminate)
+      process.on("SIGHUP", emergencyTerminate)
+      // altimate_change end
+
       let stopped = false
       const stop = async () => {
         if (stopped) return
@@ -159,6 +178,11 @@ export const TuiThreadCommand = cmd({
         process.off("uncaughtException", error)
         process.off("unhandledRejection", error)
         process.off("SIGUSR2", reload)
+        // altimate_change start — crash: remove emergency handlers on clean shutdown
+        process.off("SIGINT", emergencyTerminate)
+        process.off("SIGTERM", emergencyTerminate)
+        process.off("SIGHUP", emergencyTerminate)
+        // altimate_change end
         await withTimeout(client.call("shutdown", undefined), 5000).catch((error) => {
           Log.Default.warn("worker shutdown failed", {
             error: error instanceof Error ? error.message : String(error),
