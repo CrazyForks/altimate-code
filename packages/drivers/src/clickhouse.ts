@@ -60,9 +60,9 @@ export async function connect(config: ConnectionConfig): Promise<Connector> {
       client = createClient(clientConfig)
     },
 
-    async execute(sql: string, limit?: number, binds?: any[]): Promise<ConnectorResult> {
-      if (binds && binds.length > 0) {
-        throw new Error("ClickHouse driver does not support parameterized binds — use ClickHouse query parameters instead")
+    async execute(sql: string, limit?: number, _binds?: any[]): Promise<ConnectorResult> {
+      if (!client) {
+        throw new Error("ClickHouse client not connected — call connect() first")
       }
       const effectiveLimit = limit === undefined ? 1000 : limit
       let query = sql
@@ -70,7 +70,6 @@ export async function connect(config: ConnectionConfig): Promise<Connector> {
       const supportsLimit = /^\s*(SELECT|WITH)\b/i.test(sql)
       const isDDL =
         /^\s*(INSERT|CREATE|DROP|ALTER|TRUNCATE|RENAME|ATTACH|DETACH|OPTIMIZE|SYSTEM|SET|USE|GRANT|REVOKE)\b/i.test(sql)
-      const hasDML = /\b(INSERT|CREATE|DROP|ALTER|TRUNCATE|RENAME|ATTACH|DETACH|OPTIMIZE|SYSTEM)\b/i.test(sql)
 
       // DDL/DML: use client.command() — no result set expected
       if (isDDL) {
@@ -79,8 +78,10 @@ export async function connect(config: ConnectionConfig): Promise<Connector> {
       }
 
       // Read queries: use client.query() with JSONEachRow format
-      // Only append LIMIT for SELECT/WITH queries (not SHOW/DESCRIBE/EXPLAIN/EXISTS)
-      if (supportsLimit && !hasDML && effectiveLimit > 0 && !/\bLIMIT\b/i.test(sql)) {
+      // Only append LIMIT for SELECT/WITH queries that don't already have one.
+      // Strip SQL comments before checking for LIMIT to prevent bypass via `-- LIMIT`.
+      const sqlNoComments = sql.replace(/--[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "")
+      if (supportsLimit && effectiveLimit > 0 && !/\bLIMIT\b/i.test(sqlNoComments)) {
         query = `${sql.replace(/;\s*$/, "")} LIMIT ${effectiveLimit + 1}`
       }
 
@@ -134,8 +135,7 @@ export async function connect(config: ConnectionConfig): Promise<Connector> {
 
     async describeTable(schema: string, table: string): Promise<SchemaColumn[]> {
       const resultSet = await client.query({
-        query: `SELECT name, type,
-                       position(type, 'Nullable') > 0 AS is_nullable
+        query: `SELECT name, type
                 FROM system.columns
                 WHERE database = {db:String}
                   AND table = {tbl:String}
@@ -147,7 +147,8 @@ export async function connect(config: ConnectionConfig): Promise<Connector> {
       return rows.map((r) => ({
         name: r.name as string,
         data_type: r.type as string,
-        nullable: r.is_nullable === 1 || r.is_nullable === true || r.is_nullable === "1",
+        // Detect Nullable from the type string directly — stable across all versions
+        nullable: /^Nullable\b/i.test((r.type as string) ?? ""),
       }))
     },
 

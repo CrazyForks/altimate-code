@@ -1,6 +1,6 @@
 # Warehouses
 
-Altimate Code connects to 10 warehouse types. Configure them in `.altimate-code/connections.json` (project-local) or `~/.altimate-code/connections.json` (global).
+Altimate Code connects to 12 warehouse types. Configure them in `.altimate-code/connections.json` (project-local) or `~/.altimate-code/connections.json` (global).
 
 ## Configuration
 
