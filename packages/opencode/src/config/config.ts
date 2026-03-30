@@ -1300,6 +1300,16 @@ export namespace Config {
             .default(true)
             .describe("Auto-discover MCP servers from VS Code, Claude Code, Copilot, and Gemini configs at startup. Set to false to disable."),
           // altimate_change end
+          // altimate_change start - modular domain prompts
+          modular_prompts: z
+            .boolean()
+            .optional()
+            .describe("Compose agent prompts from domain-specific modules based on detected environment (default: false). When enabled, the system prompt only includes instructions relevant to the detected databases and tools."),
+          domains: z
+            .array(z.string())
+            .optional()
+            .describe("Explicit list of domain tags to use for prompt composition (e.g., [\"dbt\", \"snowflake\", \"mongodb\"]). Overrides auto-detection when set. Only used when modular_prompts is true."),
+          // altimate_change end
         })
         .optional(),
     })

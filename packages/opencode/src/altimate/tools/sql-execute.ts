@@ -22,7 +22,13 @@ export const SqlExecuteTool = Tool.define("sql_execute", {
     // Permission checks OUTSIDE try/catch so denial errors propagate to the framework
     const { queryType, blocked } = classifyAndCheck(args.query)
     if (blocked) {
-      throw new Error("DROP DATABASE, DROP SCHEMA, and TRUNCATE are blocked for safety. This cannot be overridden.")
+      // altimate_change start — MQL-aware blocked message
+      const isJson = args.query.trim().startsWith("{")
+      const blockedMsg = isJson
+        ? "This MongoDB command (e.g., dropCollection) is blocked for safety. This cannot be overridden."
+        : "DROP DATABASE, DROP SCHEMA, and TRUNCATE are blocked for safety. This cannot be overridden."
+      throw new Error(blockedMsg)
+      // altimate_change end
     }
     if (queryType === "write") {
       await ctx.ask({

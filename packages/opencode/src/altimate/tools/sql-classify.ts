@@ -51,12 +51,56 @@ function classifyFallback(sql: string): { queryType: "read" | "write"; blocked: 
   return { queryType, blocked }
 }
 
+// altimate_change start - MQL write command classification
+// MongoDB commands known to be read-only — everything else defaults to "write" (fail-safe)
+const MQL_READ_COMMANDS = new Set([
+  "find", "aggregate", "countDocuments", "distinct",
+  "listCollections", "listIndexes", "listDatabases",
+  "ping", "dbStats", "collStats", "serverStatus",
+])
+// MongoDB commands that are destructive — blocked entirely
+const MQL_HARD_DENY_COMMANDS = new Set(["dropCollection", "dropDatabase"])
+
+/**
+ * Classify a MongoDB JSON command as "read" or "write".
+ * Returns undefined if the input is not a valid MQL JSON command.
+ */
+function classifyMql(input: string): { queryType: "read" | "write"; blocked: boolean; mqlCommand?: string } | undefined {
+  const trimmed = input.trim()
+  if (!trimmed.startsWith("{")) return undefined
+  try {
+    const parsed = JSON.parse(trimmed)
+    if (typeof parsed.command !== "string") return undefined
+    const cmd = parsed.command
+    const blocked = MQL_HARD_DENY_COMMANDS.has(cmd)
+    // Fail-safe: unknown commands default to "write" — only whitelisted reads are safe
+    let queryType: "read" | "write" = MQL_READ_COMMANDS.has(cmd) ? "read" : "write"
+
+    // Aggregate pipelines with $out or $merge are writes
+    if (cmd === "aggregate" && Array.isArray(parsed.pipeline)) {
+      const hasWriteStage = parsed.pipeline.some(
+        (stage: Record<string, unknown>) => stage["$out"] !== undefined || stage["$merge"] !== undefined,
+      )
+      if (hasWriteStage) queryType = "write"
+    }
+
+    return { queryType, blocked, mqlCommand: cmd }
+  } catch {
+    return undefined
+  }
+}
+// altimate_change end
+
 /**
  * Classify a SQL string as "read" or "write" using AST parsing.
  * If ANY statement is a write, returns "write".
  */
 export function classify(sql: string): "read" | "write" {
   if (!sql || typeof sql !== "string") return "read"
+  // altimate_change start - check MQL first
+  const mql = classifyMql(sql)
+  if (mql) return mql.queryType
+  // altimate_change end
   if (!getStatementTypes) return classifyFallback(sql).queryType
   try {
     const result = getStatementTypes(sql)
@@ -81,6 +125,10 @@ export function classifyMulti(sql: string): "read" | "write" {
  */
 export function classifyAndCheck(sql: string): { queryType: "read" | "write"; blocked: boolean } {
   if (!sql || typeof sql !== "string") return { queryType: "read", blocked: false }
+  // altimate_change start - check MQL first
+  const mql = classifyMql(sql)
+  if (mql) return mql
+  // altimate_change end
   if (!getStatementTypes) return classifyFallback(sql)
   try {
     const result = getStatementTypes(sql)

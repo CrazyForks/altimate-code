@@ -1,0 +1,70 @@
+## MongoDB Operations
+
+You are working with a MongoDB database. MongoDB is a document database — think collections (not tables), documents (not rows), and flexible schemas (not fixed DDL).
+
+### Executing Commands
+
+Use `sql_execute` with JSON command format for all MongoDB operations:
+
+```json
+{"command": "find", "collection": "users", "filter": {"status": "active"}, "limit": 10}
+```
+
+```json
+{"command": "aggregate", "collection": "orders", "pipeline": [{"$match": {"year": 2026}}, {"$group": {"_id": "$region", "total": {"$sum": "$amount"}}}]}
+```
+
+```json
+{"command": "countDocuments", "collection": "events", "filter": {"type": "click"}}
+```
+
+### Key Operations
+- **find** — Query documents with filters, projections, sorting, and limits
+- **aggregate** — Build multi-stage pipelines for complex transformations ($match, $group, $project, $lookup, $unwind, $sort, $limit)
+- **countDocuments** — Count documents matching a filter
+- **distinct** — Get unique values for a field
+- **createIndex** / **listIndexes** / **dropIndex** — Index management
+- **insertOne** / **insertMany** / **updateOne** / **updateMany** / **deleteOne** / **deleteMany** — CRUD operations (builder mode only)
+
+### Schema Inspection
+
+MongoDB has flexible schemas — documents in the same collection can have different fields. Use `schema_inspect` to sample documents and infer field types. Always inspect before writing queries:
+- Field names may vary between documents
+- Types may be inconsistent (string vs number for the same field)
+- Nested documents and arrays are common — use dot notation for access
+
+### BSON Type Awareness
+
+MongoDB uses BSON types that differ from SQL:
+- **ObjectId** — 12-byte unique identifiers (not auto-increment integers)
+- **Decimal128** — Exact decimal for financial data (not FLOAT/DOUBLE)
+- **Date** — Millisecond-precision timestamps (not DATE/TIMESTAMP strings)
+- **Long** — 64-bit integers
+- **Binary** — Binary data (UUIDs often stored as Binary subtype 4)
+
+When querying, be aware that type mismatches silently return no results. `{"_id": "abc123"}` won't match if `_id` is an ObjectId.
+
+### Cross-Database Queries
+
+MongoDB supports querying across databases. Specify the `database` field in your command:
+```json
+{"command": "find", "collection": "users", "database": "analytics", "limit": 5}
+```
+
+### Aggregation Pipeline Patterns
+
+Prefer aggregation pipelines over multiple find queries when you need:
+- Grouping and summarization ($group)
+- Joining collections ($lookup)
+- Reshaping documents ($project, $addFields)
+- Filtering at multiple stages ($match)
+
+Always place $match stages as early as possible in the pipeline to reduce the working set.
+
+### MongoDB-Specific Pitfalls
+
+- **No SQL** — MongoDB uses MQL (MongoDB Query Language), not SQL. Do not write SQL queries against MongoDB connections.
+- **No column-level lineage** — Document databases don't have fixed columns. `lineage_check` and `dbt_lineage` do not apply.
+- **No dbt** — dbt is for SQL warehouses. Do not use `altimate-dbt` commands against MongoDB.
+- **Index awareness** — Large collections without proper indexes will be slow. Check `listIndexes` before querying unfamiliar collections.
+- **Limit by default** — Always use `limit` in exploratory queries to avoid pulling millions of documents.

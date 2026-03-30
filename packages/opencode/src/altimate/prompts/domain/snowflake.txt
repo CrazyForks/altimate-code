@@ -1,0 +1,24 @@
+## Snowflake FinOps & Governance
+
+You have access to Snowflake-specific FinOps and governance tools:
+
+### Cost & Performance Tools
+- `finops_query_history` — Query execution history
+- `finops_analyze_credits` — Credit consumption analysis
+- `finops_expensive_queries` — Identify expensive queries
+- `finops_warehouse_advice` — Warehouse sizing recommendations
+- `finops_unused_resources` — Find stale tables and idle warehouses
+
+### RBAC & Governance Tools
+- `finops_role_grants`, `finops_role_hierarchy`, `finops_user_roles` — RBAC analysis
+- `schema_detect_pii` — Scan for PII columns
+- `schema_tags`, `schema_tags_list` — Metadata tag queries
+
+### Snowflake Skills
+
+| Skill | Invoke When |
+|-------|-------------|
+| `/cost-report` | User asks about Snowflake costs, expensive queries, or warehouse optimization. Includes unused resource detection and query history analysis. |
+
+### Proactive Snowflake Skill Invocation
+- User says "how much are we spending" -> invoke `/cost-report`

@@ -55,6 +55,9 @@ import { Fingerprint } from "../altimate/fingerprint"
 import { Config } from "../config/config"
 import { Tracer } from "../altimate/observability/tracing"
 // altimate_change end
+// altimate_change start - modular domain prompts
+import { composeAgentPrompt } from "../altimate/prompts/compose"
+// altimate_change end
 import { Telemetry } from "@/telemetry" // altimate_change — session telemetry
 
 // @ts-ignore
@@ -303,11 +306,20 @@ export namespace SessionPrompt {
     let step = 0
     const session = await Session.get(sessionID)
     // altimate_change start - detect environment fingerprint at session start
+    // Runs when either skill selection or modular prompts needs environment tags
     const altCfg = await Config.get()
-    if (altCfg.experimental?.env_fingerprint_skill_selection === true) {
+    if (altCfg.experimental?.env_fingerprint_skill_selection === true || altCfg.experimental?.modular_prompts === true) {
       await Fingerprint.detect(Instance.directory, Instance.worktree).catch((e) => {
         log.warn("fingerprint detection failed", { error: e })
       })
+    }
+    // Cache composed prompts once per session (tags don't change mid-session)
+    const composedPromptCache = new Map<string, string>()
+    if (altCfg.experimental?.modular_prompts === true) {
+      for (const name of ["builder", "analyst"] as const) {
+        const composed = await composeAgentPrompt(name)
+        if (composed) composedPromptCache.set(name, composed)
+      }
     }
     // altimate_change end
     // altimate_change start — session telemetry tracking
@@ -622,7 +634,13 @@ export namespace SessionPrompt {
       }
 
       // normal processing
-      const agent = await Agent.get(lastUser.agent)
+      let agent = await Agent.get(lastUser.agent)
+      // altimate_change start - apply cached modular domain prompt if available
+      const cachedPrompt = composedPromptCache.get(agent.name)
+      if (cachedPrompt) {
+        agent = { ...agent, prompt: cachedPrompt }
+      }
+      // altimate_change end
       const maxSteps = agent.steps ?? Infinity
       const isLastStep = step >= maxSteps
       msgs = await insertReminders({

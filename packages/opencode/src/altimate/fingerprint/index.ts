@@ -2,7 +2,9 @@ import { Filesystem } from "../../util/filesystem"
 import { Glob } from "../../util/glob"
 import { Log } from "../../util/log"
 import { Tracer } from "../observability/tracing"
+import { normalizeTag } from "../prompts/tags"
 import path from "path"
+import os from "os"
 
 const log = Log.create({ service: "fingerprint" })
 
@@ -39,12 +41,16 @@ export namespace Fingerprint {
 
     const dirs = root && root !== cwd ? [cwd, root] : [cwd]
 
-    await Promise.all(
-      dirs.map((dir) => detectDir(dir, tags)),
-    )
+    await Promise.all([
+      ...dirs.map((dir) => detectDir(dir, tags)),
+      ...dirs.map((dir) => detectDependencies(dir, tags)),
+      detectConnections(tags),
+      detectDbtProfiles(tags),
+      detectEnvVars(tags),
+    ])
 
-    // Deduplicate
-    const unique = [...new Set(tags)]
+    // Deduplicate and normalize
+    const unique = [...new Set(tags.map(normalizeTag))]
 
     const result: Result = {
       tags: unique,
@@ -137,6 +143,128 @@ export namespace Fingerprint {
     // Databricks
     if (hasDatabricksYml) {
       tags.push("databricks")
+    }
+  }
+
+  /** Signal 2: Detect warehouse types from the connection registry.
+   *  Uses listTypes() to avoid triggering the one-time telemetry census. */
+  async function detectConnections(tags: string[]): Promise<void> {
+    try {
+      const { listTypes } = await import("../native/connections/registry")
+      for (const t of listTypes()) {
+        tags.push(t.toLowerCase())
+      }
+    } catch (e) {
+      log.debug("connection registry not available for fingerprint", { error: e })
+    }
+  }
+
+  /**
+   * Signal 3: Detect warehouse adapter types from ~/.dbt/profiles.yml.
+   * Only infers adapter types (snowflake, postgres, etc.), NOT the "dbt" tag.
+   * The "dbt" tag is only added by detectDir when dbt_project.yml exists
+   * in the project directory — global profiles are machine-wide, not project evidence.
+   */
+  async function detectDbtProfiles(tags: string[]): Promise<void> {
+    try {
+      const profilesPath = path.join(os.homedir(), ".dbt", "profiles.yml")
+      const exists = await Filesystem.exists(profilesPath)
+      if (!exists) return
+
+      const { parseDbtProfiles } = await import("../native/connections/dbt-profiles")
+      const connections = await parseDbtProfiles(profilesPath)
+      for (const conn of connections) {
+        if (conn.type) {
+          tags.push(conn.type.toLowerCase())
+        }
+      }
+    } catch (e) {
+      log.debug("dbt profiles detection failed", { error: e })
+    }
+  }
+
+  /** Signal 5: Detect technologies from dependency manifests.
+   *  Greps for unambiguous package names across all common manifest formats.
+   *  Higher signal than env vars — dependencies are intentional declarations. */
+  const DEPENDENCY_MANIFESTS = [
+    "requirements.txt", "pyproject.toml", "setup.cfg", "Pipfile",
+    "package.json", "go.mod", "Cargo.toml", "Gemfile",
+    "build.gradle", "build.gradle.kts", "pom.xml",
+  ]
+  const DEPENDENCY_SIGNALS: [RegExp, string][] = [
+    [/snowflake[-_]connector|snowflake[-_]sdk|gosnowflake|snowflake[-_]sqlalchemy/i, "snowflake"],
+    [/psycopg|asyncpg|pg8000|node-postgres|jackc\/pgx/i, "postgres"],
+    [/pymongo|mongoengine|mongoose|mongoc|mongo[-_]driver/i, "mongodb"],
+    [/dbt[-_]core/i, "dbt"],
+    [/dbt[-_]snowflake/i, "snowflake"],
+    [/dbt[-_]bigquery/i, "bigquery"],
+    [/dbt[-_]postgres/i, "postgres"],
+    [/dbt[-_]redshift/i, "redshift"],
+    [/dbt[-_]databricks/i, "databricks"],
+    [/dbt[-_]mysql/i, "mysql"],
+    [/dbt[-_]sqlserver/i, "sqlserver"],
+    [/apache[-_]airflow\b/i, "airflow"],
+    [/airflow[-_]providers[-_]snowflake/i, "snowflake"],
+    [/airflow[-_]providers[-_]google/i, "bigquery"],
+    [/airflow[-_]providers[-_]postgres/i, "postgres"],
+    [/airflow[-_]providers[-_]databricks/i, "databricks"],
+    [/google[-_]cloud[-_]bigquery|@google-cloud\/bigquery/i, "bigquery"],
+    [/databricks[-_]sdk|databricks[-_]connect/i, "databricks"],
+    [/mysqlclient|PyMySQL|mysql2|mysql[-_]connector/i, "mysql"],
+    [/clickhouse[-_]connect|clickhouse[-_]driver/i, "clickhouse"],
+    [/oracledb|cx[-_]Oracle/i, "oracle"],
+    [/redshift[-_]connector/i, "redshift"],
+  ]
+
+  async function detectDependencies(dir: string, tags: string[]): Promise<void> {
+    try {
+      const found = await Promise.all(
+        DEPENDENCY_MANIFESTS.map((f) => Filesystem.readText(path.join(dir, f)).catch(() => null)),
+      )
+      const content = found.filter(Boolean).join("\n")
+      if (!content) return
+
+      for (const [pattern, tag] of DEPENDENCY_SIGNALS) {
+        if (pattern.test(content)) tags.push(tag)
+      }
+    } catch (e) {
+      log.debug("dependency scanning failed", { dir, error: e })
+    }
+  }
+
+  /** Signal 4: Detect warehouse types from well-known environment variables. */
+  async function detectEnvVars(tags: string[]): Promise<void> {
+    const checks: [string[], string][] = [
+      [["SNOWFLAKE_ACCOUNT"], "snowflake"],
+      [["PGHOST", "PGDATABASE"], "postgres"],
+      [["DATABRICKS_HOST", "DATABRICKS_SERVER_HOSTNAME"], "databricks"],
+      [["BIGQUERY_PROJECT", "GCP_PROJECT"], "bigquery"],
+      [["MYSQL_HOST", "MYSQL_DATABASE"], "mysql"],
+      [["ORACLE_HOST", "ORACLE_SID"], "oracle"],
+      [["MONGODB_URI", "MONGO_URI"], "mongodb"],
+      [["REDSHIFT_HOST"], "redshift"],
+      [["MSSQL_HOST", "SQLSERVER_HOST"], "sqlserver"],
+    ]
+    for (const [vars, tag] of checks) {
+      if (vars.some((v) => process.env[v])) {
+        tags.push(tag)
+      }
+    }
+
+    // DATABASE_URL scheme parsing
+    const dbUrl = process.env.DATABASE_URL
+    if (dbUrl) {
+      const scheme = dbUrl.split("://")[0]?.toLowerCase()
+      const schemeMap: Record<string, string> = {
+        postgres: "postgres",
+        postgresql: "postgres",
+        mysql: "mysql",
+        mongodb: "mongodb",
+        "mongodb+srv": "mongodb",
+      }
+      if (scheme && schemeMap[scheme]) {
+        tags.push(schemeMap[scheme])
+      }
     }
   }
 }

@@ -1,0 +1,25 @@
+## dbt Context (Read-Only)
+
+This project uses dbt (data build tool). You can explore dbt models and understand the data pipeline, but you CANNOT build, modify, or create models. Use the builder agent for write operations.
+
+### Querying dbt Data
+
+Use `altimate-dbt execute` to query the database:
+```
+altimate-dbt execute --query "SELECT * FROM ..." --limit 100
+altimate-dbt columns --model <name>     # Inspect model columns
+altimate-dbt info                       # Project metadata
+```
+
+### Understanding the Project
+
+- Staging models live in `staging/`, intermediate in `intermediate/`, marts in `marts/`
+- Check `schema.yml` files for column descriptions and test definitions
+- Run `lineage_check` to trace column-level data flow through transformations
+- Use `/dbt-analyze` to understand downstream impact of changes
+
+### dbt Analysis Skills (read-only)
+
+| Skill | Invoke When |
+|-------|-------------|
+| `/dbt-analyze` | User wants to understand impact — downstream consumers, breaking changes, blast radius. Uses `dbt_lineage` for column-level analysis. |

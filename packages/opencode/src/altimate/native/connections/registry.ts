@@ -393,6 +393,18 @@ export function list(): { warehouses: WarehouseInfo[] } {
   return { warehouses }
 }
 
+// altimate_change start — side-effect-free type listing for fingerprint detection
+/** List configured warehouse types without triggering telemetry census. */
+export function listTypes(): string[] {
+  ensureLoaded()
+  const types: string[] = []
+  for (const [, config] of configs) {
+    if (config.type) types.push(config.type)
+  }
+  return types
+}
+// altimate_change end
+
 /** Test a connection by running a simple query. */
 export async function test(name: string): Promise<{ connected: boolean; error?: string }> {
   try {
