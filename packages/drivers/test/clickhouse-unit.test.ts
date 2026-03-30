@@ -109,6 +109,18 @@ describe("ClickHouse driver unit tests", () => {
   // --- LIMIT injection ---
 
   describe("LIMIT injection", () => {
+    test("appends LIMIT to WITH...SELECT without one", async () => {
+      mockQueryResult = [{ id: 1 }]
+      await connector.execute("WITH cte AS (SELECT * FROM t) SELECT * FROM cte", 10)
+      expect(mockQueryCalls[0].query).toContain("LIMIT 11")
+    })
+
+    test("does NOT double-LIMIT WITH...SELECT that already has one", async () => {
+      mockQueryResult = [{ id: 1 }]
+      await connector.execute("WITH cte AS (SELECT * FROM t) SELECT * FROM cte LIMIT 5", 10)
+      expect(mockQueryCalls[0].query).not.toContain("LIMIT 11")
+    })
+
     test("appends LIMIT to SELECT without one", async () => {
       mockQueryResult = [{ id: 1 }]
       await connector.execute("SELECT * FROM t", 10)
