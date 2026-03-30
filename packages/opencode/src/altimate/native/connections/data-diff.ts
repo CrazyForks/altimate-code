@@ -213,19 +213,22 @@ interface ColumnInfo {
  * auto-timestamp defaults without an extra query.
  */
 function buildColumnDiscoverySQL(tableName: string, dialect: string): string {
+  // Escape single quotes for safe interpolation into SQL string literals.
+  const esc = (s: string) => s.replace(/'/g, "''")
+
   // Parse schema.table or db.schema.table
   const parts = tableName.split(".")
   let schemaFilter = ""
   let tableFilter = ""
 
   if (parts.length === 3) {
-    schemaFilter = `table_schema = '${parts[1]}'`
-    tableFilter = `table_name = '${parts[2]}'`
+    schemaFilter = `table_schema = '${esc(parts[1])}'`
+    tableFilter = `table_name = '${esc(parts[2])}'`
   } else if (parts.length === 2) {
-    schemaFilter = `table_schema = '${parts[0]}'`
-    tableFilter = `table_name = '${parts[1]}'`
+    schemaFilter = `table_schema = '${esc(parts[0])}'`
+    tableFilter = `table_name = '${esc(parts[1])}'`
   } else {
-    tableFilter = `table_name = '${parts[0]}'`
+    tableFilter = `table_name = '${esc(parts[0])}'`
   }
 
   switch (dialect) {
@@ -390,6 +393,9 @@ function dateTruncExpr(granularity: string, column: string, dialect: string): st
       const fmt = { day: "%Y-%m-%d", week: "%Y-%u", month: "%Y-%m-01", year: "%Y-01-01" }[g] ?? "%Y-%m-01"
       return `DATE_FORMAT(${column}, '${fmt}')`
     }
+    case "oracle":
+      // Oracle uses TRUNC(), not DATE_TRUNC()
+      return `TRUNC(${column}, '${g.toUpperCase()}')`
     default:
       // Postgres, Snowflake, Redshift, DuckDB, etc.
       return `DATE_TRUNC('${g}', ${column})`
