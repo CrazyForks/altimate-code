@@ -10,9 +10,9 @@ describe("telemetry.classifySkillTrigger", () => {
     expect(Telemetry.classifySkillTrigger(undefined)).toBe("llm_selected")
   })
 
-  test("returns 'llm_selected' when extra has no trigger field", () => {
-    expect(Telemetry.classifySkillTrigger({})).toBe("llm_selected")
-    expect(Telemetry.classifySkillTrigger({ foo: "bar" })).toBe("llm_selected")
+  test("returns 'unknown' when extra has no trigger field", () => {
+    expect(Telemetry.classifySkillTrigger({})).toBe("unknown")
+    expect(Telemetry.classifySkillTrigger({ foo: "bar" })).toBe("unknown")
   })
 
   test("returns 'user_command' when extra.trigger is 'user_command'", () => {
@@ -27,9 +27,9 @@ describe("telemetry.classifySkillTrigger", () => {
     expect(Telemetry.classifySkillTrigger({ trigger: "llm_selected" })).toBe("llm_selected")
   })
 
-  test("returns 'llm_selected' for unrecognized trigger values", () => {
-    expect(Telemetry.classifySkillTrigger({ trigger: "something_else" })).toBe("llm_selected")
-    expect(Telemetry.classifySkillTrigger({ trigger: 42 })).toBe("llm_selected")
+  test("returns 'unknown' for unrecognized trigger values", () => {
+    expect(Telemetry.classifySkillTrigger({ trigger: "something_else" })).toBe("unknown")
+    expect(Telemetry.classifySkillTrigger({ trigger: 42 })).toBe("unknown")
   })
 })
 
