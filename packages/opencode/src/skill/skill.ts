@@ -230,6 +230,23 @@ export namespace Skill {
       }
     }
 
+    // altimate_change start — auto-discover skills/commands from external AI tool configs
+    if (config.experimental?.auto_skill_discovery === true) {
+      try {
+        const { discoverExternalSkills } = await import("./discover-external")
+        const { skills: externalSkills } = await discoverExternalSkills(Instance.worktree)
+        for (const skill of externalSkills) {
+          if (!skills[skill.name]) {
+            skills[skill.name] = skill
+            dirs.add(path.dirname(skill.location))
+          }
+        }
+      } catch (error) {
+        log.error("external skill discovery failed", { error })
+      }
+    }
+    // altimate_change end
+
     return {
       skills,
       dirs: Array.from(dirs),

@@ -45,6 +45,9 @@ import { WarehouseAddTool } from "../altimate/tools/warehouse-add"
 import { WarehouseRemoveTool } from "../altimate/tools/warehouse-remove"
 import { WarehouseDiscoverTool } from "../altimate/tools/warehouse-discover"
 import { McpDiscoverTool } from "../altimate/tools/mcp-discover"
+// altimate_change start — skill discovery tool
+import { SkillDiscoverTool } from "../altimate/tools/skill-discover"
+// altimate_change end
 
 import { DbtManifestTool } from "../altimate/tools/dbt-manifest"
 import { DbtProfilesTool } from "../altimate/tools/dbt-profiles"
@@ -218,8 +221,9 @@ export namespace ToolRegistry {
       WarehouseAddTool,
       WarehouseRemoveTool,
       WarehouseDiscoverTool,
-      // altimate_change start - register MCP discovery tool
+      // altimate_change start - register MCP and skill discovery tools
       McpDiscoverTool,
+      SkillDiscoverTool,
       // altimate_change end
 
       DbtManifestTool,

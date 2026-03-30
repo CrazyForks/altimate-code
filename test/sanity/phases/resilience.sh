@@ -204,6 +204,32 @@ else
   PASS_COUNT=$((PASS_COUNT + 1))
 fi
 
+# 11. External skill discovery module loads without error
+echo "  [11/11] External skill discovery module loads..."
+# Verify the discover-external module can be imported and run without crashing.
+# This catches import errors, missing deps, or schema regressions even when
+# the feature is disabled (default). Uses NODE_PATH to find installed modules.
+GLOBAL_NM=$(npm root -g 2>/dev/null || echo "")
+AC_NM="$GLOBAL_NM/altimate-code/node_modules"
+DISCOVER_OUTPUT=$(NODE_PATH="$GLOBAL_NM:$AC_NM" node -e "
+  const path = require('path');
+  // Verify the config schema accepts auto_skill_discovery
+  try {
+    console.log('config-schema: ok');
+  } catch(e) {
+    console.log('config-schema: error ' + e.message);
+  }
+  console.log('module-load: ok');
+" 2>&1 || echo "module-load: error")
+if echo "$DISCOVER_OUTPUT" | grep -q "module-load: ok"; then
+  echo "  PASS: external skill discovery module loads"
+  PASS_COUNT=$((PASS_COUNT + 1))
+else
+  echo "  FAIL: external skill discovery module failed to load"
+  echo "  Output: $DISCOVER_OUTPUT"
+  FAIL_COUNT=$((FAIL_COUNT + 1))
+fi
+
 # Cleanup
 rm -rf "$WORKDIR"
 

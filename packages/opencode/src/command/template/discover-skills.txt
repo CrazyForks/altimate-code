@@ -1,0 +1,15 @@
+Discover skills and commands from other AI tools (Claude Code, Codex CLI, Gemini CLI) and load them into the current session.
+
+## Instructions
+
+1. First, call the `skill_discover` tool with `action: "list"` to see what's available.
+
+2. Show the user the results — which skills are new and which are already loaded.
+
+3. If there are new skills, ask the user which ones they want to add.
+
+4. Call `skill_discover` with `action: "add"` and the selected `skills` array (or omit to add all).
+
+5. Report what was added and how to use them (e.g., `/skill-name`).
+
+If $ARGUMENTS contains specific skill names, filter to just those.

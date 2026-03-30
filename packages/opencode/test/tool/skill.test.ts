@@ -299,6 +299,7 @@ Do custom things.
         experimental: {
           env_fingerprint_skill_selection: false,
           auto_mcp_discovery: true,
+          auto_skill_discovery: true,
         },
       },
       init: async (dir) => {
@@ -336,6 +337,7 @@ Do custom things.
         experimental: {
           env_fingerprint_skill_selection: true,
           auto_mcp_discovery: true,
+          auto_skill_discovery: true,
         },
       },
       init: async (dir) => {

@@ -12,6 +12,7 @@ import PROMPT_FEEDBACK from "./template/feedback.txt"
 import PROMPT_CONFIGURE_CLAUDE from "./template/configure-claude.txt"
 import PROMPT_CONFIGURE_CODEX from "./template/configure-codex.txt"
 import PROMPT_DISCOVER_MCPS from "./template/discover-and-add-mcps.txt"
+import PROMPT_DISCOVER_SKILLS from "./template/discover-skills.txt"
 // altimate_change end
 import { MCP } from "../mcp"
 import { Skill } from "../skill"
@@ -72,6 +73,7 @@ export namespace Command {
     CONFIGURE_CLAUDE: "configure-claude",
     CONFIGURE_CODEX: "configure-codex",
     DISCOVER_MCPS: "discover-and-add-mcps",
+    DISCOVER_SKILLS: "discover-skills",
     // altimate_change end
   } as const
 
@@ -144,6 +146,15 @@ export namespace Command {
         },
         hints: hints(PROMPT_DISCOVER_MCPS),
       },
+      [Default.DISCOVER_SKILLS]: {
+        name: Default.DISCOVER_SKILLS,
+        description: "discover skills/commands from Claude Code, Codex, and Gemini configs",
+        source: "command",
+        get template() {
+          return PROMPT_DISCOVER_SKILLS
+        },
+        hints: hints(PROMPT_DISCOVER_SKILLS),
+      },
       // altimate_change end
     }
 
@@ -206,7 +217,7 @@ export namespace Command {
           get template() {
             return skill.content
           },
-          hints: [],
+          hints: hints(skill.content),
         }
       }
     } catch (e) {

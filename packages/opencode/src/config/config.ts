@@ -1300,6 +1300,12 @@ export namespace Config {
             .default(true)
             .describe("Auto-discover MCP servers from VS Code, Claude Code, Copilot, and Gemini configs at startup. Set to false to disable."),
           // altimate_change end
+          // altimate_change start - auto skill/command discovery toggle
+          auto_skill_discovery: z
+            .boolean()
+            .default(false)
+            .describe("Auto-discover skills and commands from Claude Code, Codex, and Gemini configs at startup. Opt-in — set to true to enable."),
+          // altimate_change end
         })
         .optional(),
     })
