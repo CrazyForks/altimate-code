@@ -151,14 +151,14 @@ describe("ClickHouse driver unit tests", () => {
     test("LIMIT in SQL comment does NOT prevent LIMIT injection", async () => {
       mockQueryResult = [{ id: 1 }]
       await connector.execute("SELECT * FROM t -- LIMIT 100", 10)
-      // Should still append LIMIT because the comment-stripped SQL has no LIMIT
-      expect(mockQueryCalls[0].query).toContain("LIMIT 11")
+      // Injected LIMIT must be on its own line, NOT inside the trailing comment
+      expect(mockQueryCalls[0].query).toBe("SELECT * FROM t -- LIMIT 100\nLIMIT 11")
     })
 
     test("LIMIT in block comment does NOT prevent LIMIT injection", async () => {
       mockQueryResult = [{ id: 1 }]
       await connector.execute("SELECT * FROM t /* LIMIT 50 */", 10)
-      expect(mockQueryCalls[0].query).toContain("LIMIT 11")
+      expect(mockQueryCalls[0].query).toBe("SELECT * FROM t /* LIMIT 50 */\nLIMIT 11")
     })
 
     test("real LIMIT in SQL still prevents double LIMIT", async () => {
@@ -275,7 +275,7 @@ describe("ClickHouse driver unit tests", () => {
     test("execute before connect throws clear error", async () => {
       const freshConnector = await connect({ host: "localhost" })
       // Don't call connect()
-      expect(freshConnector.execute("SELECT 1")).rejects.toThrow("not connected")
+      await expect(freshConnector.execute("SELECT 1")).rejects.toThrow("not connected")
     })
 
     test("close is idempotent", async () => {

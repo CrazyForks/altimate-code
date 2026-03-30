@@ -348,6 +348,53 @@ If you're already authenticated via `gcloud`, omit `credentials_path`:
 !!! info "Server compatibility"
     The ClickHouse driver supports ClickHouse server versions 23.3 and later, covering all non-EOL releases. This includes LTS releases 23.8, 24.3, 24.8, and all stable releases through the current version.
 
+## Oracle
+
+```json
+{
+  "oracle-prod": {
+    "type": "oracle",
+    "host": "localhost",
+    "port": 1521,
+    "service_name": "ORCL",
+    "user": "analyst",
+    "password": "{env:ORACLE_PASSWORD}"
+  }
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `connection_string` | No | Full connect string (alternative to individual fields, e.g. `host:1521/ORCL`) |
+| `host` | No | Hostname (default: `127.0.0.1`) |
+| `port` | No | Port (default: `1521`) |
+| `service_name` | No | Oracle service name (default: `ORCL`) |
+| `database` | No | Alias for `service_name` |
+| `user` | No | Username |
+| `password` | No | Password |
+
+!!! info "Pure JavaScript driver"
+    The Oracle driver uses `oracledb` in thin mode (pure JavaScript) — no Oracle Instant Client installation is required.
+
+## SQLite
+
+```json
+{
+  "dev-sqlite": {
+    "type": "sqlite",
+    "path": "./dev.sqlite"
+  }
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `path` | No | Database file path. Omit or use `":memory:"` for in-memory |
+| `readonly` | No | Open in read-only mode (default: `false`) |
+
+!!! note
+    SQLite uses Bun's built-in `bun:sqlite` driver. WAL journal mode is enabled automatically for writable databases.
+
 ## SQL Server
 
 ```json
