@@ -82,10 +82,9 @@ describe("telemetry.new-event-types", () => {
   })
 
   test("feature_suggestion supports all suggestion_type values", () => {
-    const types: Array<"post_warehouse_connect" | "dbt_detected" | "schema_not_indexed" | "progressive_disclosure"> = [
+    const types: Array<"post_warehouse_connect" | "dbt_detected" | "progressive_disclosure"> = [
       "post_warehouse_connect",
       "dbt_detected",
-      "schema_not_indexed",
       "progressive_disclosure",
     ]
     for (const suggestion_type of types) {
