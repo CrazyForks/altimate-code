@@ -116,6 +116,9 @@ export async function connect(config: ConnectionConfig): Promise<Connector> {
     },
 
     async listSchemas(): Promise<string[]> {
+      if (!client) {
+        throw new Error("ClickHouse client not connected — call connect() first")
+      }
       const resultSet = await client.query({
         query: "SHOW DATABASES",
         format: "JSONEachRow",
@@ -125,6 +128,9 @@ export async function connect(config: ConnectionConfig): Promise<Connector> {
     },
 
     async listTables(schema: string): Promise<Array<{ name: string; type: string }>> {
+      if (!client) {
+        throw new Error("ClickHouse client not connected — call connect() first")
+      }
       const resultSet = await client.query({
         query: `SELECT name, engine
                 FROM system.tables
@@ -141,6 +147,9 @@ export async function connect(config: ConnectionConfig): Promise<Connector> {
     },
 
     async describeTable(schema: string, table: string): Promise<SchemaColumn[]> {
+      if (!client) {
+        throw new Error("ClickHouse client not connected — call connect() first")
+      }
       const resultSet = await client.query({
         query: `SELECT name, type
                 FROM system.columns
