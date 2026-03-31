@@ -46,8 +46,15 @@ export function resolveTableSources(
   }
 
   // At least one is a query — wrap both in CTEs
-  const srcExpr = source_is_query ? source : `SELECT * FROM ${source}`
-  const tgtExpr = target_is_query ? target : `SELECT * FROM ${target}`
+  // Quote identifier parts so table names with special chars don't inject SQL.
+  // Use double-quote escaping (ANSI SQL standard, works in Postgres/Snowflake/DuckDB/etc.)
+  const quoteIdent = (name: string) =>
+    name
+      .split(".")
+      .map((p) => `"${p.replace(/"/g, '""')}"`)
+      .join(".")
+  const srcExpr = source_is_query ? source : `SELECT * FROM ${quoteIdent(source)}`
+  const tgtExpr = target_is_query ? target : `SELECT * FROM ${quoteIdent(target)}`
 
   const ctePrefix = `WITH __diff_source AS (\n${srcExpr}\n), __diff_target AS (\n${tgtExpr}\n)`
   return {
@@ -247,16 +254,16 @@ function buildColumnDiscoverySQL(tableName: string, dialect: string): string {
     }
     case "oracle": {
       // Oracle uses ALL_TAB_COLUMNS (no information_schema)
-      const oracleTable = parts[parts.length - 1]
+      const oracleTable = esc(parts[parts.length - 1])
       const conditions = [`TABLE_NAME = '${oracleTable.toUpperCase()}'`]
       if (parts.length >= 2) {
-        conditions.push(`OWNER = '${parts[parts.length - 2].toUpperCase()}'`)
+        conditions.push(`OWNER = '${esc(parts[parts.length - 2]).toUpperCase()}'`)
       }
       return `SELECT COLUMN_NAME, DATA_DEFAULT FROM ALL_TAB_COLUMNS WHERE ${conditions.join(" AND ")} ORDER BY COLUMN_ID`
     }
     case "sqlite": {
       // PRAGMA table_info returns: cid, name, type, notnull, dflt_value, pk
-      const table = parts[parts.length - 1]
+      const table = esc(parts[parts.length - 1])
       return `PRAGMA table_info('${table}')`
     }
     default: {
@@ -393,9 +400,19 @@ function dateTruncExpr(granularity: string, column: string, dialect: string): st
       const fmt = { day: "%Y-%m-%d", week: "%Y-%u", month: "%Y-%m-01", year: "%Y-01-01" }[g] ?? "%Y-%m-01"
       return `DATE_FORMAT(${column}, '${fmt}')`
     }
-    case "oracle":
-      // Oracle uses TRUNC(), not DATE_TRUNC()
-      return `TRUNC(${column}, '${g.toUpperCase()}')`
+    case "oracle": {
+      // Oracle uses TRUNC() with format models — 'WEEK' is invalid, use 'IW' for ISO week
+      const oracleFmt: Record<string, string> = {
+        day: "DDD",
+        week: "IW",
+        month: "MM",
+        year: "YYYY",
+        quarter: "Q",
+        hour: "HH",
+        minute: "MI",
+      }
+      return `TRUNC(${column}, '${oracleFmt[g] ?? g.toUpperCase()}')`
+    }
     default:
       // Postgres, Snowflake, Redshift, DuckDB, etc.
       return `DATE_TRUNC('${g}', ${column})`
@@ -455,21 +472,23 @@ function buildPartitionWhereClause(
   dialect: string,
 ): string {
   const mode = partitionMode(granularity, bucketSize)
+  // Quote the column identifier to handle special characters and reserved words
+  const quotedCol = `"${partitionColumn.replace(/"/g, '""')}"`
 
   if (mode === "numeric") {
     const lo = Number(partitionValue)
     const hi = lo + bucketSize!
-    return `${partitionColumn} >= ${lo} AND ${partitionColumn} < ${hi}`
+    return `${quotedCol} >= ${lo} AND ${quotedCol} < ${hi}`
   }
 
   if (mode === "categorical") {
     // Quote the value — works for strings, enums, booleans
     const escaped = partitionValue.replace(/'/g, "''")
-    return `${partitionColumn} = '${escaped}'`
+    return `${quotedCol} = '${escaped}'`
   }
 
   // date mode
-  const expr = dateTruncExpr(granularity!, partitionColumn, dialect)
+  const expr = dateTruncExpr(granularity!, quotedCol, dialect)
 
   // Cast the literal appropriately per dialect
   switch (dialect) {
@@ -779,20 +798,31 @@ export async function runDataDiff(params: DataDiffParams): Promise<DataDiffResul
 
     // Execute all SQL tasks in parallel
     const tasks = action.tasks ?? []
-    const responses = await Promise.all(
+    const taskResults = await Promise.all(
       tasks.map(async (task) => {
         const warehouse = warehouseFor(task.table_side)
         // Inject CTE definitions if we're in query-comparison mode
         const sql = ctePrefix ? injectCte(task.sql, ctePrefix) : task.sql
         try {
           const rows = await executeQuery(sql, warehouse)
-          return { id: task.id, rows }
+          return { id: task.id, rows, error: null }
         } catch (e) {
-          // Return error shape — engine will produce an Error action on next step
-          return { id: task.id, rows: [], error: String(e) }
+          return { id: task.id, rows: [] as (string | null)[][], error: String(e) }
         }
       }),
     )
+
+    // Surface any SQL execution errors before feeding to the engine
+    const sqlError = taskResults.find((r) => r.error !== null)
+    if (sqlError) {
+      return {
+        success: false,
+        error: `SQL execution failed for task ${sqlError.id}: ${sqlError.error}`,
+        steps: stepCount,
+      }
+    }
+
+    const responses = taskResults.map(({ id, rows }) => ({ id, rows }))
 
     actionJson = session.step(JSON.stringify(responses))
   }
