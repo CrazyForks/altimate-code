@@ -7,9 +7,8 @@ export { type Config as OpencodeClientConfig, OpencodeClient }
 
 export function createOpencodeClient(config?: Config & { directory?: string; experimental_workspaceID?: string }) {
   if (!config?.fetch) {
-    const customFetch: any = (req: any) => {
-      // @ts-ignore
-      req.timeout = false
+    const customFetch = (req: Request) => {
+      ;(req as Request & { timeout: boolean }).timeout = false
       return fetch(req)
     }
     config = {
