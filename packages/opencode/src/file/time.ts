@@ -26,7 +26,12 @@ export namespace FileTime {
     log.info("read", { sessionID, file })
     const { read } = state()
     read[sessionID] = read[sessionID] || {}
-    read[sessionID][file] = new Date()
+    // Use the file's actual mtime instead of wall-clock time to avoid
+    // clock drift between Node.js and the filesystem (especially on WSL,
+    // networked drives, and macOS APFS). This eliminates the race condition
+    // where mtime > new Date() due to filesystem clock skew.
+    const mtime = Filesystem.stat(file)?.mtime
+    read[sessionID][file] = mtime ?? new Date()
   }
 
   export function get(sessionID: string, file: string) {
@@ -61,8 +66,11 @@ export namespace FileTime {
     const time = get(sessionID, filepath)
     if (!time) throw new Error(`You must read file ${filepath} before overwriting it. Use the Read tool first`)
     const mtime = Filesystem.stat(filepath)?.mtime
-    // Allow a 50ms tolerance for Windows NTFS timestamp fuzziness / async flushing
-    if (mtime && mtime.getTime() > time.getTime() + 50) {
+    // Allow a 2s tolerance for filesystem clock drift.
+    // WSL (NTFS-over-9P) and networked drives routinely show 400ms–1.2s gaps
+    // between Node.js Date.now() and filesystem mtime. The previous 50ms
+    // tolerance caused massive retry loops (782 retries in one session).
+    if (mtime && mtime.getTime() > time.getTime() + 2000) {
       throw new Error(
         `File ${filepath} has been modified since it was last read.\nLast modification: ${mtime.toISOString()}\nLast read: ${time.toISOString()}\n\nPlease read the file again before modifying it.`,
       )

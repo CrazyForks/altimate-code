@@ -112,11 +112,10 @@ describe("file/time", () => {
         fn: async () => {
           FileTime.read(sessionID, filepath)
 
-          // Wait to ensure different timestamps
-          await new Promise((resolve) => setTimeout(resolve, 100))
-
-          // Modify file after reading
+          // Modify file and set mtime 5s in the future to exceed 2s tolerance
           await fs.writeFile(filepath, "modified content", "utf-8")
+          const future = new Date(Date.now() + 5000)
+          await fs.utimes(filepath, future, future)
 
           await expect(FileTime.assert(sessionID, filepath)).rejects.toThrow("modified since it was last read")
         },
@@ -132,8 +131,10 @@ describe("file/time", () => {
         directory: tmp.path,
         fn: async () => {
           FileTime.read(sessionID, filepath)
-          await new Promise((resolve) => setTimeout(resolve, 100))
           await fs.writeFile(filepath, "modified", "utf-8")
+          // Set mtime 5 seconds in the future to exceed the 2s tolerance
+          const future = new Date(Date.now() + 5000)
+          await fs.utimes(filepath, future, future)
 
           let error: Error | undefined
           try {
@@ -346,9 +347,10 @@ describe("file/time", () => {
 
           const originalStat = Filesystem.stat(filepath)
 
-          // Wait and modify
-          await new Promise((resolve) => setTimeout(resolve, 100))
           await fs.writeFile(filepath, "modified", "utf-8")
+          // Set mtime 5 seconds in the future to exceed the 2s tolerance
+          const future = new Date(Date.now() + 5000)
+          await fs.utimes(filepath, future, future)
 
           const newStat = Filesystem.stat(filepath)
           expect(newStat!.mtime.getTime()).toBeGreaterThan(originalStat!.mtime.getTime())

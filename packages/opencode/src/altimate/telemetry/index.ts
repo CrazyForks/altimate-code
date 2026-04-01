@@ -475,7 +475,7 @@ export namespace Telemetry {
         session_id: string
         tool_name: string
         tool_category: string
-        error_class: "parse_error" | "connection" | "timeout" | "validation" | "internal" | "permission" | "http_error" | "file_not_found" | "edit_mismatch" | "not_configured" | "resource_exhausted" | "unknown"
+        error_class: "parse_error" | "connection" | "timeout" | "validation" | "internal" | "permission" | "http_error" | "file_not_found" | "file_stale" | "edit_mismatch" | "not_configured" | "resource_exhausted" | "unknown"
         error_message: string
         input_signature: string
         masked_args?: string
@@ -761,6 +761,21 @@ export namespace Telemetry {
     // altimate_change end
     { class: "timeout", keywords: ["timeout", "etimedout", "bridge timeout", "timed out"] },
     { class: "permission", keywords: ["permission", "access denied", "permission denied", "unauthorized", "forbidden", "authentication"] },
+    // altimate_change start — http_error before validation to prevent "HTTP 404" matching "invalid"/"missing"
+    {
+      class: "http_error",
+      keywords: ["status code: 4", "status code: 5", "request failed with status", "http 404", "http 410", "http 429", "http 451", "http 403"],
+    },
+    // altimate_change end
+    // altimate_change start — split file_stale out of validation; remove "does not exist" (was catching HTTP 404s)
+    {
+      class: "file_stale",
+      keywords: [
+        "must read file",
+        "has been modified since",
+        "before overwriting",
+      ],
+    },
     {
       class: "validation",
       keywords: [
@@ -768,12 +783,9 @@ export namespace Telemetry {
         "invalid",
         "missing",
         "required",
-        "must read file",
-        "has been modified since",
-        "does not exist",
-        "before overwriting",
       ],
     },
+    // altimate_change end
     { class: "internal", keywords: ["internal", "assertion"] },
     // altimate_change start — resource_exhausted class for OOM/quota errors
     {
@@ -788,10 +800,6 @@ export namespace Telemetry {
       ],
     },
     // altimate_change end
-    {
-      class: "http_error",
-      keywords: ["status code: 4", "status code: 5", "request failed with status"],
-    },
   ]
   // altimate_change end
 
