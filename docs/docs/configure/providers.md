@@ -23,6 +23,28 @@ Each provider has a key in the `provider` object:
 !!! tip
     Use `{env:...}` substitution for API keys so you never commit secrets to version control.
 
+## Altimate LLM Gateway
+
+Managed LLM access with dynamic routing across Sonnet 4.6, Opus 4.6, GPT-5.4, GPT-5.3, and more. No API keys to manage — 10M tokens free to get started.
+
+```json
+{
+  "provider": {
+    "altimate": {}
+  },
+  "model": "altimate/auto"
+}
+```
+
+The gateway dynamically routes each request to the best model for the task. You pay a flat token price regardless of which model handles your request.
+
+- Zero data retention — prompts and responses are never stored
+- Uses Azure Foundry and AWS Bedrock as subprocessors with ZDR
+- BYOK is always free and unlimited alongside the gateway
+- Stores only metadata (token counts, latency) to improve model ranking and routing
+
+For full pricing tiers and details, see the [Altimate LLM Gateway guide](https://datamates-docs.myaltimate.com/user-guide/components/llm-gateway/).
+
 ## Anthropic
 
 ```json
