@@ -481,6 +481,34 @@ export namespace Telemetry {
         masked_args?: string
         duration_ms: number
       }
+    // altimate_change start — FileTime observability: drift + assertion outcome tracking
+    // Tracks the gap between Node.js wall-clock and filesystem mtime at read time.
+    // Use to monitor whether the mtime clock-source change (PR #611) is preventing
+    // false stale-file errors, and detect environments with significant drift.
+    // KQL: customEvents | where name == "filetime_drift" | extend drift = todouble(customMeasurements.drift_ms)
+    | {
+        type: "filetime_drift"
+        timestamp: number
+        session_id: string
+        /** Absolute difference in ms between Date.now() and filesystem mtime */
+        drift_ms: number
+        /** True if filesystem mtime is ahead of wall-clock (the problematic direction) */
+        mtime_ahead: boolean
+      }
+    // Tracks FileTime.assert() outcomes: "stale" when a file fails the check.
+    // High volume of "stale" with low delta_ms suggests tolerance is too tight.
+    // KQL: customEvents | where name == "filetime_assert" | extend delta = todouble(customMeasurements.delta_ms)
+    | {
+        type: "filetime_assert"
+        timestamp: number
+        session_id: string
+        outcome: "stale"
+        /** mtime - readTime in ms (how far ahead the file's mtime is) */
+        delta_ms: number
+        /** Current tolerance threshold in ms */
+        tolerance_ms: number
+      }
+    // altimate_change end
     // altimate_change start — sql quality telemetry for issue prevention metrics
     | {
         type: "sql_quality"

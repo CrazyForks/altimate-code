@@ -112,7 +112,9 @@ describe("file/time", () => {
         fn: async () => {
           FileTime.read(sessionID, filepath)
 
-          // Modify file and set mtime 5s in the future to exceed 2s tolerance
+          // Simulate external modification by setting mtime 5s ahead of the
+          // file's current mtime (read() stores mtime, assert() compares
+          // against current mtime — both from filesystem clock).
           await fs.writeFile(filepath, "modified content", "utf-8")
           const future = new Date(Date.now() + 5000)
           await fs.utimes(filepath, future, future)
@@ -122,7 +124,7 @@ describe("file/time", () => {
       })
     })
 
-    test("includes timestamps in error message", async () => {
+    test("includes timestamps and delta in error message", async () => {
       await using tmp = await tmpdir()
       const filepath = path.join(tmp.path, "file.txt")
       await fs.writeFile(filepath, "content", "utf-8")
@@ -132,7 +134,6 @@ describe("file/time", () => {
         fn: async () => {
           FileTime.read(sessionID, filepath)
           await fs.writeFile(filepath, "modified", "utf-8")
-          // Set mtime 5 seconds in the future to exceed the 2s tolerance
           const future = new Date(Date.now() + 5000)
           await fs.utimes(filepath, future, future)
 
@@ -145,6 +146,8 @@ describe("file/time", () => {
           expect(error).toBeDefined()
           expect(error!.message).toContain("Last modification:")
           expect(error!.message).toContain("Last read:")
+          expect(error!.message).toContain("Delta:")
+          expect(error!.message).toContain("tolerance:")
         },
       })
     })
@@ -347,8 +350,8 @@ describe("file/time", () => {
 
           const originalStat = Filesystem.stat(filepath)
 
+          // Simulate external modification with mtime far ahead
           await fs.writeFile(filepath, "modified", "utf-8")
-          // Set mtime 5 seconds in the future to exceed the 2s tolerance
           const future = new Date(Date.now() + 5000)
           await fs.utimes(filepath, future, future)
 
@@ -356,6 +359,24 @@ describe("file/time", () => {
           expect(newStat!.mtime.getTime()).toBeGreaterThan(originalStat!.mtime.getTime())
 
           await expect(FileTime.assert(sessionID, filepath)).rejects.toThrow()
+        },
+      })
+    })
+
+    test("read() stores filesystem mtime, not wall-clock time", async () => {
+      await using tmp = await tmpdir()
+      const filepath = path.join(tmp.path, "file.txt")
+      await fs.writeFile(filepath, "content", "utf-8")
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const statBefore = Filesystem.stat(filepath)
+          FileTime.read(sessionID, filepath)
+          const readTime = FileTime.get(sessionID, filepath)
+
+          // read() should store the file's mtime, not wall-clock
+          expect(readTime!.getTime()).toBe(statBefore!.mtime.getTime())
         },
       })
     })

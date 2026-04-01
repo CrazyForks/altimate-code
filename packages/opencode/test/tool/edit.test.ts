@@ -239,7 +239,7 @@ describe("tool.edit", () => {
           FileTime.read(ctx.sessionID, filepath)
 
           // Simulate external modification with mtime 5s in the future
-          // to exceed the 2s tolerance in FileTime.assert()
+          // to exceed the 50ms tolerance in FileTime.assert()
           await fs.writeFile(filepath, "modified externally", "utf-8")
           const future = new Date(Date.now() + 5000)
           await fs.utimes(filepath, future, future)
