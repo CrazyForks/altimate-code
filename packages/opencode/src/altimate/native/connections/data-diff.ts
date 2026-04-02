@@ -238,13 +238,31 @@ function buildColumnDiscoverySQL(tableName: string, dialect: string): string {
     tableFilter = `table_name = '${esc(parts[0])}'`
   }
 
+  // Validate table name for dialects that can't use parameterized identifiers.
+  // Reject anything that doesn't look like a safe identifier (alphanumeric, dots, underscores).
+  const SAFE_TABLE_NAME = /^[a-zA-Z0-9_.]+$/
+
   switch (dialect) {
-    case "clickhouse":
+    case "clickhouse": {
+      // DESCRIBE TABLE interpolates directly — validate to prevent injection
+      if (!SAFE_TABLE_NAME.test(tableName)) {
+        throw new Error(`Unsafe table name for ClickHouse DESCRIBE: ${tableName}`)
+      }
+      // Quote each part with backticks for ClickHouse
+      const chQuoted = tableName.split(".").map((p) => `\`${p.replace(/`/g, "``")}\``).join(".")
       // Returns: name, type, default_type, default_expression, ...
-      return `DESCRIBE TABLE ${tableName}`
-    case "snowflake":
+      return `DESCRIBE TABLE ${chQuoted}`
+    }
+    case "snowflake": {
+      // SHOW COLUMNS interpolates directly — validate to prevent injection
+      if (!SAFE_TABLE_NAME.test(tableName)) {
+        throw new Error(`Unsafe table name for Snowflake SHOW COLUMNS: ${tableName}`)
+      }
+      // Quote each part with double-quotes for Snowflake
+      const sfQuoted = tableName.split(".").map((p) => `"${p.replace(/"/g, '""')}"`).join(".")
       // Returns: table_name, schema_name, column_name, data_type, null?, default, ...
-      return `SHOW COLUMNS IN TABLE ${tableName}`
+      return `SHOW COLUMNS IN TABLE ${sfQuoted}`
+    }
     case "mysql":
     case "mariadb": {
       // MySQL puts "on update CURRENT_TIMESTAMP" in the EXTRA column, not column_default
@@ -584,10 +602,12 @@ async function runPartitionedDiff(params: DataDiffParams): Promise<DataDiffResul
   }
 
   const sourceDialect = resolveDialect(params.source_warehouse)
-  const { table1Name } = resolveTableSources(params.source, params.target)
+  const targetDialect = resolveDialect(params.target_warehouse ?? params.source_warehouse)
+  const { table1Name, table2Name } = resolveTableSources(params.source, params.target)
 
-  // Discover partition values from source
-  const discoverySql = buildPartitionDiscoverySQL(
+  // Discover partition values from BOTH source and target to catch target-only partitions.
+  // Without this, rows that exist only in target partitions are silently missed.
+  const sourceDiscoverySql = buildPartitionDiscoverySQL(
     table1Name,
     params.partition_column!,
     params.partition_granularity,
@@ -595,11 +615,32 @@ async function runPartitionedDiff(params: DataDiffParams): Promise<DataDiffResul
     sourceDialect,
     params.where_clause,
   )
+  const targetDiscoverySql = buildPartitionDiscoverySQL(
+    table2Name,
+    params.partition_column!,
+    params.partition_granularity,
+    params.partition_bucket_size,
+    targetDialect,
+    params.where_clause,
+  )
 
   let partitionValues: string[]
   try {
-    const rows = await executeQuery(discoverySql, params.source_warehouse)
-    partitionValues = rows.map((r) => String(r[0] ?? "")).filter(Boolean)
+    const [sourceRows, targetRows] = await Promise.all([
+      executeQuery(sourceDiscoverySql, params.source_warehouse),
+      executeQuery(targetDiscoverySql, params.target_warehouse ?? params.source_warehouse),
+    ])
+    // Union partition values from both sides, deduplicated
+    const allValues = new Set<string>()
+    for (const r of sourceRows) {
+      const v = r[0]
+      if (v != null) allValues.add(String(v))
+    }
+    for (const r of targetRows) {
+      const v = r[0]
+      if (v != null) allValues.add(String(v))
+    }
+    partitionValues = [...allValues].sort()
   } catch (e) {
     return { success: false, error: `Partition discovery failed: ${e}`, steps: 0 }
   }
