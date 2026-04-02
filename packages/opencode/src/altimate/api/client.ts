@@ -58,7 +58,7 @@ export namespace AltimateApi {
     if (typeof obj === "string") {
       return obj.replace(/\$\{env:([^}]+)\}/g, (_, envVar) => {
         const value = process.env[envVar]
-        if (!value) throw new Error(`Environment variable ${envVar} not found`)
+        if (value === undefined) throw new Error(`Environment variable ${envVar} not found`)
         return value
       })
     }
@@ -74,7 +74,11 @@ export namespace AltimateApi {
       throw new Error(`Altimate credentials not found at ${p}`)
     }
     const raw = resolveEnvVars(JSON.parse(await Filesystem.readText(p)))
-    return AltimateCredentials.parse(raw)
+    const creds = AltimateCredentials.parse(raw)
+    return {
+      ...creds,
+      altimateUrl: creds.altimateUrl.replace(/\/+$/, ""),
+    }
   }
 
   export function parseAltimateKey(value: string): {
@@ -98,7 +102,11 @@ export namespace AltimateApi {
     altimateApiKey: string
     mcpServerUrl?: string
   }): Promise<void> {
-    await Filesystem.writeJson(credentialsPath(), creds, 0o600)
+    await Filesystem.writeJson(
+      credentialsPath(),
+      { ...creds, altimateUrl: creds.altimateUrl.replace(/\/+$/, "") },
+      0o600,
+    )
   }
 
   const VALID_TENANT_REGEX = /^[a-z_][a-z0-9_-]*$/
@@ -139,8 +147,9 @@ export namespace AltimateApi {
         return { ok: false, error: `Connection failed (${res.status} ${res.statusText})` }
       }
       return { ok: true }
-    } catch {
-      return { ok: false, error: "Could not reach Altimate API" }
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err)
+      return { ok: false, error: `Could not reach Altimate API: ${detail}` }
     }
   }
 

@@ -200,6 +200,8 @@ export namespace Provider {
             },
           }
         } catch {
+          // Suppress stale auth so the generic Auth.all() merge doesn't leave an invalid provider
+          await Auth.remove(ProviderID.make("altimate-backend"))
           return { autoload: false }
         }
       }
@@ -219,6 +221,8 @@ export namespace Provider {
             },
           }
         }
+        // Invalid key format — remove stale auth entry
+        await Auth.remove(ProviderID.make("altimate-backend"))
       }
       return { autoload: false }
     },

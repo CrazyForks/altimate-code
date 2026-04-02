@@ -279,10 +279,14 @@ function ApiMethod(props: ApiMethodProps) {
             setValidationError(validation.error)
             return
           }
-          await AltimateApi.saveCredentials(parsed)
-          await sdk.client.instance.dispose()
-          await sync.bootstrap()
-          dialog.replace(() => <DialogModel providerID={props.providerID} />)
+          try {
+            await AltimateApi.saveCredentials(parsed)
+            await sdk.client.instance.dispose()
+            await sync.bootstrap()
+            dialog.replace(() => <DialogModel providerID={props.providerID} />)
+          } catch (err) {
+            setValidationError(err instanceof Error ? err.message : "Failed to save credentials")
+          }
           return
         }
         // altimate_change end

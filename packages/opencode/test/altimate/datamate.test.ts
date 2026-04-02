@@ -380,12 +380,12 @@ describe("TUI credential round-trip", () => {
     expect(creds.altimateApiKey).toBe("e7ad942d0e64c873074f762f409989a4")
   })
 
-  test("trailing slash in url is preserved through round-trip", async () => {
+  test("trailing slash in url is stripped through round-trip", async () => {
     const parsed = AltimateApi.parseAltimateKey("https://api.getaltimate.com/::tenant::key")
     expect(parsed).not.toBeNull()
     await AltimateApi.saveCredentials(parsed!)
     const creds = await AltimateApi.getCredentials()
-    expect(creds.altimateUrl).toBe("https://api.getaltimate.com/")
+    expect(creds.altimateUrl).toBe("https://api.getaltimate.com")
   })
 
   test("api key containing :: survives round-trip", async () => {
@@ -454,7 +454,7 @@ describe("validateCredentials", () => {
     globalThis.fetch = (async () => { throw new Error("Network error") }) as unknown as typeof fetch
     const result = await AltimateApi.validateCredentials(validCreds)
     expect(result.ok).toBe(false)
-    expect((result as { ok: false; error: string }).error).toBe("Could not reach Altimate API")
+    expect((result as { ok: false; error: string }).error).toContain("Could not reach Altimate API")
   })
 
   test("returns ok:false for instance name with uppercase letters", async () => {
