@@ -191,6 +191,26 @@ describe("getCredentials", () => {
     )
   })
 
+  test("resolves empty-string env var without throwing", async () => {
+    const altDir = path.join(testHome, ".altimate")
+    await fsp.mkdir(altDir, { recursive: true })
+    await fsp.writeFile(
+      path.join(altDir, "altimate.json"),
+      JSON.stringify({
+        altimateUrl: "https://api.myaltimate.com",
+        altimateInstanceName: "${env:TEST_EMPTY_VAR}",
+        altimateApiKey: "key",
+      }),
+    )
+    process.env.TEST_EMPTY_VAR = ""
+    try {
+      const creds = await AltimateApi.getCredentials()
+      expect(creds.altimateInstanceName).toBe("")
+    } finally {
+      delete process.env.TEST_EMPTY_VAR
+    }
+  })
+
   test("leaves literal values unchanged when no substitution syntax present", async () => {
     const altDir = path.join(testHome, ".altimate")
     await fsp.mkdir(altDir, { recursive: true })
