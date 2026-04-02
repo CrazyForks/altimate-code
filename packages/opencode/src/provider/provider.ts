@@ -204,7 +204,7 @@ export namespace Provider {
         }
       }
       // Path 2: auth store (populated by TUI entry, file not yet written)
-      const auth = await Auth.get("altimate-backend" as any)
+      const auth = await Auth.get(ProviderID.make("altimate-backend"))
       if (auth?.type === "api") {
         const parsed = AltimateApi.parseAltimateKey(auth.key)
         if (parsed) {
