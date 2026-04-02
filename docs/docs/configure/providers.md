@@ -36,13 +36,7 @@ Managed LLM access with dynamic routing across Sonnet 4.6, Opus 4.6, GPT-5.4, GP
 }
 ```
 
-The gateway dynamically routes each request to the best model for the task. You pay a flat token price regardless of which model handles your request.
-
-- Prompts and responses are not stored
-- BYOK is always free and unlimited alongside the gateway
-- Stores limited metadata (token counts, latency, model used) for billing and routing
-
-For full pricing tiers and details, see the [Altimate LLM Gateway guide](https://datamates-docs.myaltimate.com/user-guide/components/llm-gateway/).
+For pricing, security, and data handling details, see the [Altimate LLM Gateway guide](https://datamates-docs.myaltimate.com/user-guide/components/llm-gateway/).
 
 ## Anthropic
 
