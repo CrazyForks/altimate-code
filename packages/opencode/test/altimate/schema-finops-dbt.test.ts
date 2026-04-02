@@ -158,6 +158,52 @@ describe("FinOps: SQL template generation", () => {
       const built = HistoryTemplates.buildHistoryQuery("databricks", 7, 50)
       expect(built?.sql).toContain("system.query.history")
     })
+
+    test("builds ClickHouse history SQL", () => {
+      const built = HistoryTemplates.buildHistoryQuery("clickhouse", 7, 100)
+      expect(built).not.toBeNull()
+      expect(built!.sql).toContain("system.query_log")
+      expect(built!.sql).toContain("QueryFinish")
+      // ClickHouse uses string substitution, not bind params
+      expect(built!.binds).toEqual([])
+      // Verify __DAYS__ and __LIMIT__ were substituted (not left as placeholders)
+      expect(built!.sql).not.toContain("__DAYS__")
+      expect(built!.sql).not.toContain("__LIMIT__")
+      expect(built!.sql).toContain("today() - 7")
+      expect(built!.sql).toContain("LIMIT 100")
+    })
+
+    test("ClickHouse clamps NaN days to 30 and NaN limit to 100", () => {
+      const built = HistoryTemplates.buildHistoryQuery("clickhouse", NaN, NaN)
+      expect(built).not.toBeNull()
+      expect(built!.sql).toContain("today() - 30")
+      expect(built!.sql).toContain("LIMIT 100")
+    })
+
+    test("ClickHouse clamps negative inputs to minimum 1", () => {
+      const built = HistoryTemplates.buildHistoryQuery("clickhouse", -5, -10)
+      expect(built!.sql).toContain("today() - 1")
+      expect(built!.sql).toContain("LIMIT 1")
+    })
+
+    test("ClickHouse treats zero as missing input and applies defaults", () => {
+      const built = HistoryTemplates.buildHistoryQuery("clickhouse", 0, 0)
+      // 0 is falsy, so || defaultValue kicks in: days→30, limit→100
+      expect(built!.sql).toContain("today() - 30")
+      expect(built!.sql).toContain("LIMIT 100")
+    })
+
+    test("ClickHouse clamps values exceeding upper bounds", () => {
+      const built = HistoryTemplates.buildHistoryQuery("clickhouse", 999, 50000)
+      expect(built!.sql).toContain("today() - 365")
+      expect(built!.sql).toContain("LIMIT 10000")
+    })
+
+    test("ClickHouse floors fractional inputs", () => {
+      const built = HistoryTemplates.buildHistoryQuery("clickhouse", 3.9, 75.1)
+      expect(built!.sql).toContain("today() - 3")
+      expect(built!.sql).toContain("LIMIT 75")
+    })
   })
 
   describe("warehouse-advisor", () => {
