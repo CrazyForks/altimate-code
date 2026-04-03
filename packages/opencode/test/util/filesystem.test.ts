@@ -217,6 +217,20 @@ describe("filesystem", () => {
 
       expect(await fs.readFile(filepath, "utf-8")).toBe(content)
     })
+
+    test("writes with permissions when parent directory does not exist", async () => {
+      await using tmp = await tmpdir()
+      const filepath = path.join(tmp.path, "new-parent", "nested", "secret.json")
+
+      await Filesystem.write(filepath, '{"key":"value"}', 0o600)
+
+      const content = await fs.readFile(filepath, "utf-8")
+      expect(content).toBe('{"key":"value"}')
+      const stats = await fs.stat(filepath)
+      if (process.platform !== "win32") {
+        expect(stats.mode & 0o777).toBe(0o600)
+      }
+    })
   })
 
   describe("writeJson()", () => {
