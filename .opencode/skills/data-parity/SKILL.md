@@ -19,7 +19,7 @@ Here's my plan:
 6. [ ] Run column-level profile (cheap — no row scan)
 7. [ ] Ask whether to proceed with row-level diff (may be expensive for large tables)
 8. [ ] Run targeted row-level diff on diverging columns only
-9. [ ] Report findings
+9. [ ] Present findings with scope, filters, time period, columns compared/excluded, and assumptions
 ```
 
 Update each item to `[x]` as you complete it. This plan should be visible before any tool is called.
@@ -314,6 +314,76 @@ The output lists which columns were auto-excluded and why.
 **SQL queries:** When source is a SQL query (not a table name), auto-discovery cannot work. You **must** provide `extra_columns` explicitly. If you don't, only key-level matching occurs.
 
 **When to override auto-exclusion:** If the user specifically wants to compare audit columns (e.g., verifying that `created_at` was preserved during migration), pass those columns explicitly in `extra_columns`.
+
+---
+
+## Step 9: Present Findings — Always Surface Context
+
+When reporting diff results, **never present bare numbers**. Always frame the result with the full context that determines what the numbers actually mean.
+
+### Required elements in every result summary
+
+**1. Scope — what was compared**
+State exactly which tables/queries were diffed and on which warehouses:
+> "Compared `public.orders` on **postgres_prod** vs `public.orders` on **snowflake_dw**"
+
+**2. Filters and time period applied**
+If any `where_clause` or `partition_column` was used, state it explicitly:
+> "Scope limited to: `created_at >= '2024-01-01' AND created_at < '2024-04-01'` (Q1 2024 only)"
+> "Partitioned by `l_shipdate` (monthly buckets) — diff covers Jan 2023 through Mar 2024"
+
+If no filter was applied, say so:
+> "No row filter applied — full table compared"
+
+**3. Key columns used**
+> "Key: `order_id` (confirmed unique — 150,000 distinct values = 150,000 rows)"
+
+**4. Columns included and excluded**
+List what was compared and what was skipped, and why:
+> "Compared columns: `amount`, `status`, `customer_id`"
+> "Excluded (auto-timestamp defaults): `created_at`, `updated_at`, `_loaded_at`"
+> "Excluded (user request): `internal_score`"
+
+If the user confirmed exclusions in Step 4, reference that confirmation:
+> "Excluded per your confirmation: `created_at`, `updated_at`"
+
+**5. Algorithm used**
+> "Algorithm: `hashdiff` (cross-database)"
+
+### Example full result summary
+
+```
+## Data Parity Results
+
+**Compared:** `public.orders` (postgres_prod) → `public.orders` (snowflake_dw)
+**Scope:** `created_at >= '2024-01-01'` (Q1 2024 only — 42,301 rows in scope)
+**Key:** `order_id`
+**Columns compared:** `amount`, `status`, `customer_id`, `region`
+**Columns excluded:** `created_at`, `updated_at` (auto-timestamp defaults, per your confirmation)
+**Algorithm:** hashdiff
+
+### Result: ✗ DIFFER
+
+| Metric | Value |
+|--------|-------|
+| Source rows | 42,301 |
+| Target rows | 42,298 |
+| Only in source | 3 |
+| Only in target | 0 |
+| Updated rows | 47 |
+| Identical rows | 42,251 |
+
+**Findings:**
+- 3 rows exist in source but are missing in target → possible ETL delete propagation gap
+- 47 rows have value differences in `amount` or `status` → check rounding or status mapping
+```
+
+### When result is IDENTICAL — still surface the scope
+
+Even when tables match perfectly, state what was checked:
+> "✓ Tables are **identical** across 150,000 rows. Compared `amount`, `status`, `customer_id` (full table, no filter, key=`order_id`). Auto-timestamp columns `created_at`, `updated_at` were excluded."
+
+**Why this matters:** "Tables are identical" without context is meaningless — the user needs to know if you checked Q1 only, skipped 5 columns, or used a WHERE clause that covered just 1% of the data.
 
 ---
 
