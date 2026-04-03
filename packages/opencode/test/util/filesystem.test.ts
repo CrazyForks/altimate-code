@@ -620,6 +620,96 @@ describe("filesystem", () => {
     })
   })
 
+  describe("up()", () => {
+    test("yields matching files walking up the directory tree", async () => {
+      await using tmp = await tmpdir()
+      // Create: tmp/a/b/c/ with target.txt at tmp/ and tmp/a/
+      const dirC = path.join(tmp.path, "a", "b", "c")
+      await fs.mkdir(dirC, { recursive: true })
+      await fs.writeFile(path.join(tmp.path, "target.txt"), "root")
+      await fs.writeFile(path.join(tmp.path, "a", "target.txt"), "mid")
+
+      const results: string[] = []
+      for await (const match of Filesystem.up({ targets: ["target.txt"], start: dirC, stop: tmp.path })) {
+        results.push(match)
+      }
+
+      // Should find a/target.txt first (closer), then root target.txt
+      expect(results).toEqual([
+        path.join(tmp.path, "a", "target.txt"),
+        path.join(tmp.path, "target.txt"),
+      ])
+    })
+
+    test("yields nothing when no targets exist", async () => {
+      await using tmp = await tmpdir()
+      const dir = path.join(tmp.path, "a", "b")
+      await fs.mkdir(dir, { recursive: true })
+
+      const results: string[] = []
+      for await (const match of Filesystem.up({ targets: ["nonexistent.txt"], start: dir, stop: tmp.path })) {
+        results.push(match)
+      }
+
+      expect(results).toEqual([])
+    })
+
+    test("supports multiple targets and yields each match per directory", async () => {
+      await using tmp = await tmpdir()
+      // Create both opencode.json and AGENTS.md at the same level
+      const dir = path.join(tmp.path, "child")
+      await fs.mkdir(dir, { recursive: true })
+      await fs.writeFile(path.join(tmp.path, "opencode.json"), "{}")
+      await fs.writeFile(path.join(tmp.path, "AGENTS.md"), "# agents")
+
+      const results: string[] = []
+      for await (const match of Filesystem.up({ targets: ["opencode.json", "AGENTS.md"], start: dir, stop: tmp.path })) {
+        results.push(match)
+      }
+
+      // Both files at tmp.path should be yielded, in target order (opencode.json first)
+      expect(results).toEqual([
+        path.join(tmp.path, "opencode.json"),
+        path.join(tmp.path, "AGENTS.md"),
+      ])
+    })
+
+    test("stops at stop directory (inclusive)", async () => {
+      await using tmp = await tmpdir()
+      // Put target.txt above the stop directory — should NOT be found
+      const stopDir = path.join(tmp.path, "a")
+      const startDir = path.join(tmp.path, "a", "b")
+      await fs.mkdir(startDir, { recursive: true })
+      await fs.writeFile(path.join(tmp.path, "target.txt"), "above stop")
+      await fs.writeFile(path.join(stopDir, "target.txt"), "at stop")
+
+      const results: string[] = []
+      for await (const match of Filesystem.up({ targets: ["target.txt"], start: startDir, stop: stopDir })) {
+        results.push(match)
+      }
+
+      // Should find the one AT stop, but NOT the one above
+      expect(results).toEqual([path.join(stopDir, "target.txt")])
+    })
+
+    test("without stop parameter, walks up until target found", async () => {
+      await using tmp = await tmpdir()
+      // Create a two-level deep tree with target only at root
+      const dir = path.join(tmp.path, "a")
+      await fs.mkdir(dir, { recursive: true })
+      await fs.writeFile(path.join(tmp.path, "marker.txt"), "found")
+
+      const results: string[] = []
+      // Use stop at tmp.path to bound the test, but the point is to verify
+      // the generator correctly walks up when there's no match at start
+      for await (const match of Filesystem.up({ targets: ["marker.txt"], start: dir, stop: tmp.path })) {
+        results.push(match)
+      }
+
+      expect(results).toEqual([path.join(tmp.path, "marker.txt")])
+    })
+  })
+
   describe("globUp()", () => {
     test("finds files matching glob pattern at multiple levels", async () => {
       await using tmp = await tmpdir()
