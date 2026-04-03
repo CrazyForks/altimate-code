@@ -312,6 +312,15 @@ describe("detectEnvVars", () => {
       "PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD", "DATABASE_URL",
       "MYSQL_HOST", "MYSQL_TCP_PORT", "MYSQL_DATABASE", "MYSQL_USER", "MYSQL_PASSWORD",
       "REDSHIFT_HOST", "REDSHIFT_PORT", "REDSHIFT_DATABASE", "REDSHIFT_USER", "REDSHIFT_PASSWORD",
+      "MSSQL_HOST", "MSSQL_PORT", "MSSQL_DATABASE", "MSSQL_USER", "MSSQL_PASSWORD",
+      "SQLSERVER_HOST", "SQLSERVER_PORT", "SQLSERVER_DATABASE", "SQLSERVER_USER", "SQLSERVER_PASSWORD",
+      "SA_PASSWORD", "MSSQL_SA_PASSWORD",
+      "ORACLE_HOST", "ORACLE_PORT", "ORACLE_USER", "ORACLE_PASSWORD",
+      "ORACLE_SID", "ORACLE_SERVICE_NAME", "ORACLE_DATABASE",
+      "DUCKDB_PATH", "DUCKDB_DATABASE",
+      "SQLITE_PATH", "SQLITE_DATABASE",
+      "CLICKHOUSE_HOST", "CLICKHOUSE_PORT", "CLICKHOUSE_DB", "CLICKHOUSE_DATABASE",
+      "CLICKHOUSE_USER", "CLICKHOUSE_USERNAME", "CLICKHOUSE_PASSWORD", "CLICKHOUSE_URL",
     ]
     for (const v of vars) {
       delete process.env[v]
@@ -553,6 +562,164 @@ describe("detectEnvVars", () => {
       expect(conn.name).toMatch(/^env_/)
       expect(conn.name).toBe(`env_${conn.type}`)
     }
+  })
+
+  // --- ClickHouse, Oracle, DuckDB, SQLite env var detection (added with PR #574) ---
+
+  test("detects ClickHouse via CLICKHOUSE_HOST", async () => {
+    clearWarehouseEnvVars()
+    process.env.CLICKHOUSE_HOST = "ch.example.com"
+    process.env.CLICKHOUSE_PORT = "8123"
+    process.env.CLICKHOUSE_DB = "analytics"
+    process.env.CLICKHOUSE_USER = "default"
+    process.env.CLICKHOUSE_PASSWORD = "secret"
+
+    const result = await detectEnvVars()
+    const ch = result.find((r) => r.type === "clickhouse")
+    expect(ch).toBeDefined()
+    expect(ch!.name).toBe("env_clickhouse")
+    expect(ch!.source).toBe("env-var")
+    expect(ch!.signal).toBe("CLICKHOUSE_HOST")
+    expect(ch!.config.host).toBe("ch.example.com")
+    expect(ch!.config.port).toBe("8123")
+    expect(ch!.config.database).toBe("analytics")
+    expect(ch!.config.user).toBe("default")
+    expect(ch!.config.password).toBe("***")
+  })
+
+  test("detects ClickHouse via CLICKHOUSE_URL as connection_string", async () => {
+    clearWarehouseEnvVars()
+    process.env.CLICKHOUSE_URL = "http://default:secret@ch.example.com:8123/analytics"
+
+    const result = await detectEnvVars()
+    const ch = result.find((r) => r.type === "clickhouse")
+    expect(ch).toBeDefined()
+    expect(ch!.signal).toBe("CLICKHOUSE_URL")
+    expect(ch!.config.connection_string).toBe("***")
+  })
+
+  test("detects DuckDB via DUCKDB_PATH", async () => {
+    clearWarehouseEnvVars()
+    process.env.DUCKDB_PATH = "/data/warehouse.duckdb"
+
+    const result = await detectEnvVars()
+    const duck = result.find((r) => r.type === "duckdb")
+    expect(duck).toBeDefined()
+    expect(duck!.name).toBe("env_duckdb")
+    expect(duck!.signal).toBe("DUCKDB_PATH")
+    expect(duck!.config.database).toBe("/data/warehouse.duckdb")
+  })
+
+  test("detects Oracle via ORACLE_HOST", async () => {
+    clearWarehouseEnvVars()
+    process.env.ORACLE_HOST = "oracle.example.com"
+    process.env.ORACLE_PORT = "1521"
+    process.env.ORACLE_SID = "ORCL"
+    process.env.ORACLE_USER = "system"
+    process.env.ORACLE_PASSWORD = "secret"
+
+    const result = await detectEnvVars()
+    const ora = result.find((r) => r.type === "oracle")
+    expect(ora).toBeDefined()
+    expect(ora!.name).toBe("env_oracle")
+    expect(ora!.signal).toBe("ORACLE_HOST")
+    expect(ora!.config.host).toBe("oracle.example.com")
+    expect(ora!.config.port).toBe("1521")
+    expect(ora!.config.database).toBe("ORCL")
+    expect(ora!.config.user).toBe("system")
+    expect(ora!.config.password).toBe("***")
+  })
+
+  test("detects SQLite via SQLITE_PATH", async () => {
+    clearWarehouseEnvVars()
+    process.env.SQLITE_PATH = "/data/app.sqlite"
+
+    const result = await detectEnvVars()
+    const sq = result.find((r) => r.type === "sqlite")
+    expect(sq).toBeDefined()
+    expect(sq!.name).toBe("env_sqlite")
+    expect(sq!.signal).toBe("SQLITE_PATH")
+    expect(sq!.config.database).toBe("/data/app.sqlite")
+  })
+
+  test("detects SQL Server via MSSQL_HOST", async () => {
+    clearWarehouseEnvVars()
+    process.env.MSSQL_HOST = "sqlserver.example.com"
+    process.env.MSSQL_PORT = "1433"
+    process.env.MSSQL_DATABASE = "master"
+    process.env.MSSQL_USER = "sa"
+    process.env.SA_PASSWORD = "secret"
+
+    const result = await detectEnvVars()
+    const ms = result.find((r) => r.type === "sqlserver")
+    expect(ms).toBeDefined()
+    expect(ms!.name).toBe("env_sqlserver")
+    expect(ms!.signal).toBe("MSSQL_HOST")
+    expect(ms!.config.host).toBe("sqlserver.example.com")
+    expect(ms!.config.password).toBe("***")
+  })
+
+  // --- DATABASE_URL scheme parsing for all warehouse types ---
+
+  test("detects ClickHouse via DATABASE_URL with clickhouse scheme", async () => {
+    clearWarehouseEnvVars()
+    process.env.DATABASE_URL = "clickhouse://default:pass@ch.example.com:8123/db"
+
+    const result = await detectEnvVars()
+    const ch = result.find((r) => r.type === "clickhouse")
+    expect(ch).toBeDefined()
+    expect(ch!.signal).toBe("DATABASE_URL")
+    expect(ch!.config.connection_string).toBe("***")
+  })
+
+  test("detects ClickHouse via DATABASE_URL with clickhouse+http scheme", async () => {
+    clearWarehouseEnvVars()
+    process.env.DATABASE_URL = "clickhouse+http://default:pass@ch.example.com:8123/db"
+
+    const result = await detectEnvVars()
+    const ch = result.find((r) => r.type === "clickhouse")
+    expect(ch).toBeDefined()
+    expect(ch!.signal).toBe("DATABASE_URL")
+  })
+
+  test("detects DuckDB via DATABASE_URL with duckdb scheme", async () => {
+    clearWarehouseEnvVars()
+    process.env.DATABASE_URL = "duckdb:///data/warehouse.duckdb"
+
+    const result = await detectEnvVars()
+    const duck = result.find((r) => r.type === "duckdb")
+    expect(duck).toBeDefined()
+    expect(duck!.signal).toBe("DATABASE_URL")
+  })
+
+  test("detects Oracle via DATABASE_URL with oracle scheme", async () => {
+    clearWarehouseEnvVars()
+    process.env.DATABASE_URL = "oracle://system:pass@oracle.example.com:1521/ORCL"
+
+    const result = await detectEnvVars()
+    const ora = result.find((r) => r.type === "oracle")
+    expect(ora).toBeDefined()
+    expect(ora!.signal).toBe("DATABASE_URL")
+  })
+
+  test("detects SQL Server via DATABASE_URL with mssql scheme", async () => {
+    clearWarehouseEnvVars()
+    process.env.DATABASE_URL = "mssql://sa:pass@sqlserver.example.com:1433/master"
+
+    const result = await detectEnvVars()
+    const ms = result.find((r) => r.type === "sqlserver")
+    expect(ms).toBeDefined()
+    expect(ms!.signal).toBe("DATABASE_URL")
+  })
+
+  test("falls back to postgres for unknown DATABASE_URL scheme", async () => {
+    clearWarehouseEnvVars()
+    process.env.DATABASE_URL = "unknown://host:1234/db"
+
+    const result = await detectEnvVars()
+    const pg = result.find((r) => r.type === "postgres")
+    expect(pg).toBeDefined()
+    expect(pg!.signal).toBe("DATABASE_URL")
   })
 })
 
