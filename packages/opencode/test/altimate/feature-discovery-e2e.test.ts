@@ -233,6 +233,69 @@ describe("warehouse-add e2e: post-connect suggestions", () => {
     expect(result.output).toContain("type")
     expect(result.metadata.success).toBe(false)
   })
+
+  test("dispatcher non-success includes warehouse name and error in output", async () => {
+    mockDispatcherCall(async (method: string) => {
+      if (method === "warehouse.add") {
+        return { success: false, error: "Invalid credentials for account XY12345", name: "prod_wh", type: "snowflake" }
+      }
+      throw new Error(`Unexpected method: ${method}`)
+    })
+
+    const tool = await WarehouseAddTool.init()
+    const result = await tool.execute(
+      { name: "prod_wh", config: { type: "snowflake", account: "XY12345" } },
+      ctx as any,
+    )
+
+    expect(result.metadata.success).toBe(false)
+    expect(result.title).toBe("Add 'prod_wh': FAILED")
+    expect(result.output).toContain("prod_wh")
+    expect(result.output).toContain("Invalid credentials for account XY12345")
+  })
+
+  test("dispatcher exception includes error message in output", async () => {
+    mockDispatcherCall(async (method: string) => {
+      if (method === "warehouse.add") {
+        throw new Error("ECONNREFUSED 10.0.0.1:5432")
+      }
+      throw new Error(`Unexpected method: ${method}`)
+    })
+
+    const tool = await WarehouseAddTool.init()
+    const result = await tool.execute(
+      { name: "local_pg", config: { type: "postgres", host: "10.0.0.1" } },
+      ctx as any,
+    )
+
+    expect(result.metadata.success).toBe(false)
+    expect(result.title).toBe("Add 'local_pg': ERROR")
+    expect(result.output).toContain("ECONNREFUSED 10.0.0.1:5432")
+  })
+
+  test("success path returns correct title and metadata format", async () => {
+    mockDispatcherCall(async (method: string) => {
+      if (method === "warehouse.add") {
+        return { success: true, name: "analytics_dw", type: "bigquery" }
+      }
+      if (method === "schema.cache_status") return { total_tables: 0 }
+      if (method === "warehouse.list") return { warehouses: [{ name: "analytics_dw" }] }
+      throw new Error(`Unexpected method: ${method}`)
+    })
+
+    const tool = await WarehouseAddTool.init()
+    const result = await tool.execute(
+      { name: "analytics_dw", config: { type: "bigquery", project: "my-proj" } },
+      ctx as any,
+    )
+
+    expect(result.metadata.success).toBe(true)
+    expect(result.metadata.name).toBe("analytics_dw")
+    expect(result.metadata.type).toBe("bigquery")
+    expect(result.title).toBe("Add 'analytics_dw': OK")
+    expect(result.output).toContain("Successfully added warehouse 'analytics_dw'")
+    expect(result.output).toContain("warehouse_test")
+  })
 })
 
 // ===========================================================================

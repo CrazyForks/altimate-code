@@ -158,6 +158,61 @@ describe("FinOps: SQL template generation", () => {
       const built = HistoryTemplates.buildHistoryQuery("databricks", 7, 50)
       expect(built?.sql).toContain("system.query.history")
     })
+
+    test("builds ClickHouse history SQL with system.query_log", () => {
+      const built = HistoryTemplates.buildHistoryQuery("clickhouse", 7, 100)
+      expect(built).not.toBeNull()
+      expect(built?.sql).toContain("system.query_log")
+      expect(built?.sql).toContain("query_duration_ms")
+      // ClickHouse uses inline substitution, not bind parameters
+      expect(built?.binds).toEqual([])
+    })
+
+    test("ClickHouse SQL has placeholders replaced with clamped values", () => {
+      const built = HistoryTemplates.buildHistoryQuery("clickhouse", 30, 500)
+      expect(built?.sql).not.toContain("__DAYS__")
+      expect(built?.sql).not.toContain("__LIMIT__")
+      expect(built?.sql).toContain("30")
+      expect(built?.sql).toContain("500")
+    })
+
+    test("ClickHouse clamps days: negative → 1, zero → 30 (falsy default), overflow → 365, NaN → 30", () => {
+      const neg = HistoryTemplates.buildHistoryQuery("clickhouse", -5, 100)
+      expect(neg?.sql).toContain("today() - 1")
+
+      // 0 is falsy, so (Math.floor(0) || 30) → 30 (the default fallback)
+      const zero = HistoryTemplates.buildHistoryQuery("clickhouse", 0, 100)
+      expect(zero?.sql).toContain("today() - 30")
+
+      const overflow = HistoryTemplates.buildHistoryQuery("clickhouse", 999, 100)
+      expect(overflow?.sql).toContain("today() - 365")
+
+      const nan = HistoryTemplates.buildHistoryQuery("clickhouse", NaN, 100)
+      // NaN || 30 → 30 (default fallback)
+      expect(nan?.sql).toContain("today() - 30")
+    })
+
+    test("ClickHouse clamps limit: negative → 1, zero → 100 (falsy default), overflow → 10000, NaN → 100", () => {
+      const neg = HistoryTemplates.buildHistoryQuery("clickhouse", 7, -1)
+      expect(neg?.sql).toContain("LIMIT 1")
+
+      // 0 is falsy, so (Math.floor(0) || 100) → 100 (the default fallback)
+      const zero = HistoryTemplates.buildHistoryQuery("clickhouse", 7, 0)
+      expect(zero?.sql).toContain("LIMIT 100")
+
+      const overflow = HistoryTemplates.buildHistoryQuery("clickhouse", 7, 99999)
+      expect(overflow?.sql).toContain("LIMIT 10000")
+
+      const nan = HistoryTemplates.buildHistoryQuery("clickhouse", 7, NaN)
+      // NaN || 100 → 100 (default fallback)
+      expect(nan?.sql).toContain("LIMIT 100")
+    })
+
+    test("ClickHouse floors fractional days and limits", () => {
+      const built = HistoryTemplates.buildHistoryQuery("clickhouse", 7.9, 50.5)
+      expect(built?.sql).toContain("today() - 7")
+      expect(built?.sql).toContain("LIMIT 50")
+    })
   })
 
   describe("warehouse-advisor", () => {
