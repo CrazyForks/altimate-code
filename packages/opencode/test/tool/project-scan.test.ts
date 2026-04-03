@@ -312,6 +312,8 @@ describe("detectEnvVars", () => {
       "PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD", "DATABASE_URL",
       "MYSQL_HOST", "MYSQL_TCP_PORT", "MYSQL_DATABASE", "MYSQL_USER", "MYSQL_PASSWORD",
       "REDSHIFT_HOST", "REDSHIFT_PORT", "REDSHIFT_DATABASE", "REDSHIFT_USER", "REDSHIFT_PASSWORD",
+      "CLICKHOUSE_HOST", "CLICKHOUSE_URL", "CLICKHOUSE_PORT", "CLICKHOUSE_DB",
+      "CLICKHOUSE_DATABASE", "CLICKHOUSE_USER", "CLICKHOUSE_USERNAME", "CLICKHOUSE_PASSWORD",
     ]
     for (const v of vars) {
       delete process.env[v]
@@ -553,6 +555,49 @@ describe("detectEnvVars", () => {
       expect(conn.name).toMatch(/^env_/)
       expect(conn.name).toBe(`env_${conn.type}`)
     }
+  })
+
+  test("detects ClickHouse via CLICKHOUSE_HOST", async () => {
+    clearWarehouseEnvVars()
+    process.env.CLICKHOUSE_HOST = "ch.example.com"
+    process.env.CLICKHOUSE_PORT = "8123"
+    process.env.CLICKHOUSE_DATABASE = "analytics"
+    process.env.CLICKHOUSE_USER = "default"
+
+    const result = await detectEnvVars()
+    const ch = result.find((r) => r.type === "clickhouse")
+    expect(ch).toBeDefined()
+    expect(ch!.name).toBe("env_clickhouse")
+    expect(ch!.source).toBe("env-var")
+    expect(ch!.signal).toBe("CLICKHOUSE_HOST")
+    expect(ch!.config.host).toBe("ch.example.com")
+    expect(ch!.config.port).toBe("8123")
+    expect(ch!.config.database).toBe("analytics")
+    expect(ch!.config.user).toBe("default")
+  })
+
+  test("detects ClickHouse via CLICKHOUSE_URL", async () => {
+    clearWarehouseEnvVars()
+    process.env.CLICKHOUSE_URL = "https://ch.example.com:8443"
+
+    const result = await detectEnvVars()
+    const ch = result.find((r) => r.type === "clickhouse")
+    expect(ch).toBeDefined()
+    expect(ch!.name).toBe("env_clickhouse")
+    expect(ch!.source).toBe("env-var")
+    expect(ch!.signal).toBe("CLICKHOUSE_URL")
+    expect(ch!.config.connection_string).toBe("***")
+  })
+
+  test("detects ClickHouse via DATABASE_URL with clickhouse scheme", async () => {
+    clearWarehouseEnvVars()
+    process.env.DATABASE_URL = "clickhouse://user:pass@host:9000/db"
+
+    const result = await detectEnvVars()
+    const ch = result.find((r) => r.type === "clickhouse")
+    expect(ch).toBeDefined()
+    expect(ch!.signal).toBe("DATABASE_URL")
+    expect(ch!.config.connection_string).toBe("***")
   })
 })
 

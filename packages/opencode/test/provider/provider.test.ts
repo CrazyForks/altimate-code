@@ -1,5 +1,6 @@
 import { test, expect } from "bun:test"
 import path from "path"
+import fsp from "fs/promises"
 
 import { tmpdir } from "../fixture/fixture"
 import { Instance } from "../../src/project/instance"
@@ -2329,5 +2330,59 @@ test("github-copilot is excluded when CODESPACES=true and only GITHUB_TOKEN is s
       expect(providers["github-copilot"]).toBeUndefined()
     },
   })
+})
+// altimate_change end
+
+// altimate_change start — test altimate-backend provider resolver
+test("altimate-backend provider loaded from credential file", async () => {
+  await using tmp = await tmpdir({ config: {} })
+  const savedTestHome = process.env.OPENCODE_TEST_HOME
+  try {
+    process.env.OPENCODE_TEST_HOME = tmp.path
+    const credsDir = path.join(tmp.path, ".altimate")
+    await fsp.mkdir(credsDir, { recursive: true })
+    await fsp.writeFile(
+      path.join(credsDir, "altimate.json"),
+      JSON.stringify({
+        altimateUrl: "https://api.getaltimate.com/",
+        altimateInstanceName: "testco",
+        altimateApiKey: "test-key-123",
+      }),
+    )
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const providers = await Provider.list()
+        const ab = providers["altimate-backend"]
+        expect(ab).toBeDefined()
+        // getCredentials() strips trailing slash, then resolver appends /agents/v1
+        expect(ab.options.baseURL).toBe("https://api.getaltimate.com/agents/v1")
+        expect(ab.options.apiKey).toBe("test-key-123")
+        expect(ab.options.headers["x-tenant"]).toBe("testco")
+      },
+    })
+  } finally {
+    if (savedTestHome === undefined) delete process.env.OPENCODE_TEST_HOME
+    else process.env.OPENCODE_TEST_HOME = savedTestHome
+  }
+})
+
+test("altimate-backend provider not loaded when no credentials exist", async () => {
+  await using tmp = await tmpdir({ config: {} })
+  const savedTestHome = process.env.OPENCODE_TEST_HOME
+  try {
+    // Point to empty temp dir — no .altimate/altimate.json exists
+    process.env.OPENCODE_TEST_HOME = tmp.path
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const providers = await Provider.list()
+        expect(providers["altimate-backend"]).toBeUndefined()
+      },
+    })
+  } finally {
+    if (savedTestHome === undefined) delete process.env.OPENCODE_TEST_HOME
+    else process.env.OPENCODE_TEST_HOME = savedTestHome
+  }
 })
 // altimate_change end
