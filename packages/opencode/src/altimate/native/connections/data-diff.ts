@@ -646,7 +646,10 @@ async function runPartitionedDiff(params: DataDiffParams): Promise<DataDiffResul
   }
 
   if (partitionValues.length === 0) {
-    return { success: true, steps: 1, outcome: { Match: { row_count: 0, algorithm: "partitioned" } }, partition_results: [] }
+    return {
+      success: true, steps: 1, partition_results: [],
+      outcome: { mode: "diff", stats: { rows_table1: 0, rows_table2: 0, exclusive_table1: 0, exclusive_table2: 0, updated: 0, unchanged: 0 }, diff_rows: [] },
+    }
   }
 
   // Diff each partition
@@ -685,7 +688,7 @@ async function runPartitionedDiff(params: DataDiffParams): Promise<DataDiffResul
   return {
     success: true,
     steps: totalSteps,
-    outcome: aggregatedOutcome ?? { Match: { row_count: 0, algorithm: "partitioned" } },
+    outcome: aggregatedOutcome ?? { mode: "diff", stats: { rows_table1: 0, rows_table2: 0, exclusive_table1: 0, exclusive_table2: 0, updated: 0, unchanged: 0 }, diff_rows: [] },
     partition_results: partitionResults,
   }
 }
