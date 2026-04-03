@@ -158,6 +158,43 @@ describe("FinOps: SQL template generation", () => {
       const built = HistoryTemplates.buildHistoryQuery("databricks", 7, 50)
       expect(built?.sql).toContain("system.query.history")
     })
+
+    test("builds ClickHouse history SQL with substituted values and empty binds", () => {
+      const built = HistoryTemplates.buildHistoryQuery("clickhouse", 7, 100)
+      expect(built).not.toBeNull()
+      expect(built!.binds).toEqual([])
+      expect(built!.sql).toContain("system.query_log")
+      expect(built!.sql).toContain("today() - 7")
+      expect(built!.sql).toContain("LIMIT 100")
+      expect(built!.sql).not.toContain("__DAYS__")
+      expect(built!.sql).not.toContain("__LIMIT__")
+    })
+
+    test("ClickHouse: days=0 falls back to 30 via || default", () => {
+      const built = HistoryTemplates.buildHistoryQuery("clickhouse", 0, 100)
+      expect(built!.sql).toContain("today() - 30")
+    })
+
+    test("ClickHouse: days=999 clamped to 365", () => {
+      const built = HistoryTemplates.buildHistoryQuery("clickhouse", 999, 100)
+      expect(built!.sql).toContain("today() - 365")
+    })
+
+    test("ClickHouse: limit=0 falls back to 100 via || default", () => {
+      const built = HistoryTemplates.buildHistoryQuery("clickhouse", 7, 0)
+      expect(built!.sql).toContain("LIMIT 100")
+    })
+
+    test("ClickHouse: limit=99999 clamped to 10000", () => {
+      const built = HistoryTemplates.buildHistoryQuery("clickhouse", 7, 99999)
+      expect(built!.sql).toContain("LIMIT 10000")
+    })
+
+    test("ClickHouse: NaN days defaults to 30, NaN limit defaults to 100", () => {
+      const built = HistoryTemplates.buildHistoryQuery("clickhouse", NaN, NaN)
+      expect(built!.sql).toContain("today() - 30")
+      expect(built!.sql).toContain("LIMIT 100")
+    })
   })
 
   describe("warehouse-advisor", () => {
