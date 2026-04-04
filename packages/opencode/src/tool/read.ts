@@ -12,6 +12,11 @@ import { assertExternalDirectory } from "./external-directory"
 import { InstructionPrompt } from "../session/instruction"
 import { Filesystem } from "../util/filesystem"
 
+// altimate_change start — cache file-not-found paths to prevent retry loops
+const _notFoundCache = new Set<string>()
+const NOT_FOUND_CACHE_MAX = 500
+// altimate_change end
+
 const DEFAULT_READ_LIMIT = 2000
 const MAX_LINE_LENGTH = 2000
 const MAX_LINE_SUFFIX = `... (line truncated to ${MAX_LINE_LENGTH} chars)`
@@ -50,6 +55,17 @@ export const ReadTool = Tool.define("read", {
     })
 
     if (!stat) {
+      // altimate_change start — cache file-not-found to prevent retry loops
+      if (_notFoundCache.has(filepath)) {
+        throw new Error(
+          `File not found: ${filepath}\n\nThis path was already checked and does not exist. Do NOT retry. Use a different path or ask the user for the correct location.`,
+        )
+      }
+      if (_notFoundCache.size < NOT_FOUND_CACHE_MAX) {
+        _notFoundCache.add(filepath)
+      }
+      // altimate_change end
+
       const dir = path.dirname(filepath)
       const base = path.basename(filepath)
 

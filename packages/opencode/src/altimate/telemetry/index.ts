@@ -446,6 +446,20 @@ export namespace Telemetry {
         duration_ms: number
       }
   // altimate_change end
+    // altimate_change start — pre-execution SQL validation telemetry
+    | {
+        type: "sql_pre_validation"
+        timestamp: number
+        session_id: string
+        /** skipped = no cache or stale, passed = valid SQL, blocked = invalid SQL caught, error = validation itself failed */
+        outcome: "skipped" | "passed" | "blocked" | "error"
+        /** why: no_cache, stale_cache, empty_cache, valid, non_structural, structural_error, validation_exception */
+        reason: string
+        schema_columns: number
+        duration_ms: number
+        error_message?: string
+      }
+    // altimate_change end
 
   // altimate_change start — expanded error classification patterns for better triage
   // Order matters: earlier patterns take priority. Use specific phrases, not
