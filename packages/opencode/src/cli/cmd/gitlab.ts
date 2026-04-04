@@ -105,11 +105,14 @@ async function gitlabApi<T>(
     "Content-Type": "application/json",
   }
 
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 30_000)
   const res = await fetch(url, {
     method: options.method ?? "GET",
     headers,
+    signal: controller.signal,
     ...(options.body ? { body: JSON.stringify(options.body) } : {}),
-  })
+  }).finally(() => clearTimeout(timeout))
 
   if (!res.ok) {
     if (res.status === 401) {
@@ -159,11 +162,19 @@ async function fetchMRNotes(
   mrIid: number,
   token: string,
 ): Promise<GitLabNote[]> {
-  return gitlabApi<GitLabNote[]>(
-    instanceUrl,
-    `/projects/${projectId}/merge_requests/${mrIid}/notes?sort=asc&per_page=100`,
-    token,
-  )
+  const all: GitLabNote[] = []
+  let page = 1
+  while (true) {
+    const batch = await gitlabApi<GitLabNote[]>(
+      instanceUrl,
+      `/projects/${projectId}/merge_requests/${mrIid}/notes?sort=asc&per_page=100&page=${page}`,
+      token,
+    )
+    all.push(...batch)
+    if (batch.length < 100) break
+    page += 1
+  }
+  return all
 }
 
 async function postMRNote(
@@ -458,9 +469,8 @@ function subscribeSessionEvents(session: { id: SessionID; title: string; version
     if (part.type === "tool" && part.state.status === "completed") {
       const [tool, color] = TOOL[part.tool] ?? [part.tool, UI.Style.TEXT_INFO_BOLD]
       const title =
-        part.state.title || Object.keys(part.state.input).length > 0
-          ? JSON.stringify(part.state.input)
-          : "Unknown"
+        part.state.title ||
+        (Object.keys(part.state.input).length > 0 ? JSON.stringify(part.state.input) : "Unknown")
       console.log()
       printEvent(color, tool, title)
     }
