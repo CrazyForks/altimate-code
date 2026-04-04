@@ -158,6 +158,47 @@ describe("FinOps: SQL template generation", () => {
       const built = HistoryTemplates.buildHistoryQuery("databricks", 7, 50)
       expect(built?.sql).toContain("system.query.history")
     })
+
+    test("builds ClickHouse history SQL", () => {
+      const built = HistoryTemplates.buildHistoryQuery("clickhouse", 7, 100)
+      expect(built).not.toBeNull()
+      expect(built?.sql).toContain("system.query_log")
+      expect(built?.sql).toContain("QueryFinish")
+      // ClickHouse uses string substitution, not bind params
+      expect(built?.binds).toEqual([])
+      // Verify placeholders were replaced with clamped values
+      expect(built?.sql).not.toContain("__DAYS__")
+      expect(built?.sql).not.toContain("__LIMIT__")
+      expect(built?.sql).toContain("7")   // days value
+      expect(built?.sql).toContain("100") // limit value
+    })
+
+    test("ClickHouse buildHistoryQuery clamps out-of-range days and limit values", () => {
+      const lowDays = HistoryTemplates.buildHistoryQuery("clickhouse", -5, 50)
+      expect(lowDays?.sql).toContain("today() - 1")  // days clamped to 1
+
+      const highDays = HistoryTemplates.buildHistoryQuery("clickhouse", 9999, 50)
+      expect(highDays?.sql).toContain("today() - 365")  // days clamped to 365
+
+      const lowLimit = HistoryTemplates.buildHistoryQuery("clickhouse", 7, -10)
+      expect(lowLimit?.sql).toContain("LIMIT 1")  // limit clamped to 1
+
+      const highLimit = HistoryTemplates.buildHistoryQuery("clickhouse", 7, 99999)
+      expect(highLimit?.sql).toContain("LIMIT 10000")  // limit clamped to 10000
+    })
+
+    test("returns null for unknown warehouse types", () => {
+      expect(HistoryTemplates.buildHistoryQuery("mysql", 7, 50)).toBeNull()
+      expect(HistoryTemplates.buildHistoryQuery("sqlserver", 7, 50)).toBeNull()
+      expect(HistoryTemplates.buildHistoryQuery("oracle", 7, 50)).toBeNull()
+      expect(HistoryTemplates.buildHistoryQuery("unknown", 7, 50)).toBeNull()
+    })
+
+    test("builds Snowflake history SQL with warehouse filter", () => {
+      const built = HistoryTemplates.buildHistoryQuery("snowflake", 7, 100, undefined, "COMPUTE_WH")
+      expect(built?.sql).toContain("warehouse_name = ?")
+      expect(built?.binds).toEqual([-7, "COMPUTE_WH", 100])
+    })
   })
 
   describe("warehouse-advisor", () => {
