@@ -938,6 +938,9 @@ function getSyntaxRules(theme: Theme) {
       scope: ["markup.raw", "markup.raw.block"],
       style: {
         foreground: theme.markdownCode,
+        // altimate_change start — upstream_fix: add background to prevent invisible code blocks on light themes
+        background: theme.backgroundElement,
+        // altimate_change end
       },
     },
     {
