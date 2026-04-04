@@ -222,7 +222,7 @@ describe("tool.glob", () => {
       directory: tmp.path,
       fn: async () => {
         const glob = await GlobTool.init()
-        const result = await glob.execute({ pattern: "*.txt" }, { ...ctx, abort: undefined })
+        const result = await glob.execute({ pattern: "*.txt" }, ctx)
         expect(result.metadata.count).toBe(1)
         expect(result.metadata.truncated).toBe(false)
         expect(result.output).not.toContain("timed out")
