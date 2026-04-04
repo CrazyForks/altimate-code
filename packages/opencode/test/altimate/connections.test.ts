@@ -257,6 +257,12 @@ describe("CredentialStore", () => {
     expect(CredentialStore.isSensitiveField("ssl_ca")).toBe(true)
     expect(CredentialStore.isSensitiveField("ssh_password")).toBe(true)
   })
+
+  test("isSensitiveField covers ClickHouse TLS credential fields", () => {
+    expect(CredentialStore.isSensitiveField("tls_key")).toBe(true)
+    expect(CredentialStore.isSensitiveField("tls_cert")).toBe(true)
+    expect(CredentialStore.isSensitiveField("tls_ca_cert")).toBe(true)
+  })
   // altimate_change end
 
   test("saveConnection strips inline private_key as sensitive", async () => {
