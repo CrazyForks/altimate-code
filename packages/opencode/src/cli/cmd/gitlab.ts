@@ -181,30 +181,19 @@ async function postMRNote(
   )
 }
 
-interface DiscussionPosition {
-  position_type: "text"
-  base_sha: string
-  head_sha: string
-  start_sha: string
-  new_path: string
-  old_path: string
-  new_line: number | null
-  old_line: number | null
-}
-
-async function postMRDiscussion(
+async function updateMRNote(
   instanceUrl: string,
   projectId: string,
   mrIid: number,
   token: string,
+  noteId: number,
   body: string,
-  position: DiscussionPosition,
-): Promise<unknown> {
-  return gitlabApi(
+): Promise<GitLabNote> {
+  return gitlabApi<GitLabNote>(
     instanceUrl,
-    `/projects/${projectId}/merge_requests/${mrIid}/discussions`,
+    `/projects/${projectId}/merge_requests/${mrIid}/notes/${noteId}`,
     token,
-    { method: "POST", body: { body, position } },
+    { method: "PUT", body: { body } },
   )
 }
 
@@ -273,10 +262,6 @@ function resolveToken(): string {
   return token
 }
 
-function resolveInstanceUrl(): string {
-  return (process.env["GITLAB_INSTANCE_URL"] || "https://gitlab.com").replace(/\/+$/, "")
-}
-
 // ---------------------------------------------------------------------------
 // CLI command
 // ---------------------------------------------------------------------------
@@ -315,16 +300,17 @@ export const GitlabReviewCommand = cmd({
       // Parse MR URL
       const parsed = parseGitLabMRUrl(mrUrl)
       if (!parsed) {
-        UI.error(`Invalid GitLab MR URL: ${mrUrl}`)
-        UI.error("Expected format: https://gitlab.com/org/repo/-/merge_requests/123")
-        process.exit(1)
+        throw new Error(
+          `Invalid GitLab MR URL: ${mrUrl}\nExpected format: https://gitlab.com/org/repo/-/merge_requests/123`,
+        )
       }
 
       // Resolve auth and instance
       const token = resolveToken()
-      const envInstanceUrl = resolveInstanceUrl()
-      // Prefer instance URL from the MR URL itself
-      const instanceUrl = parsed.instanceUrl || envInstanceUrl
+      // GITLAB_INSTANCE_URL env var overrides the URL parsed from the MR link,
+      // allowing self-hosted proxies or internal mirrors to reroute API calls.
+      const envInstanceUrl = process.env["GITLAB_INSTANCE_URL"]?.replace(/\/+$/, "")
+      const instanceUrl = envInstanceUrl || parsed.instanceUrl
       const projectId = encodeURIComponent(parsed.projectPath)
       const mrIid = parsed.mrIid
 
@@ -335,8 +321,9 @@ export const GitlabReviewCommand = cmd({
         args.model || process.env["MODEL"] || process.env["ALTIMATE_MODEL"] || "anthropic/claude-sonnet-4-20250514"
       const { providerID, modelID } = Provider.parseModel(modelStr)
       if (!providerID.length || !modelID.length) {
-        UI.error(`Invalid model format: ${modelStr}. Use "provider/model" (e.g. anthropic/claude-sonnet-4-20250514).`)
-        process.exit(1)
+        throw new Error(
+          `Invalid model format: ${modelStr}. Use "provider/model" (e.g. anthropic/claude-sonnet-4-20250514).`,
+        )
       }
 
       // Fetch MR data
@@ -344,10 +331,7 @@ export const GitlabReviewCommand = cmd({
       const [mrData, notes] = await Promise.all([
         fetchMRChanges(instanceUrl, projectId, mrIid, token),
         fetchMRNotes(instanceUrl, projectId, mrIid, token),
-      ]).catch((err: unknown) => {
-        UI.error(err instanceof Error ? err.message : String(err))
-        return process.exit(1) as never
-      })
+      ])
 
       UI.println(`  Title: ${mrData.title}`)
       UI.println(`  Author: ${mrData.author.username}`)
@@ -373,27 +357,24 @@ export const GitlabReviewCommand = cmd({
       // Subscribe to session events for live output
       subscribeSessionEvents(session)
 
-      const reviewText = await runReview(session.id, variant, providerID, modelID, reviewPrompt).catch(
-        (err: unknown) => {
-          UI.error(err instanceof Error ? err.message : String(err))
-          return process.exit(1) as never
-        },
-      )
+      // subscribeSessionEvents() already renders the completed assistant message,
+      // so we only need the text for posting — no duplicate printing here.
+      const reviewText = await runReview(session.id, variant, providerID, modelID, reviewPrompt)
 
-      // Output review
-      UI.empty()
-      UI.println(UI.markdown(reviewText))
-      UI.empty()
-
-      // Post to GitLab
+      // Post to GitLab (deduplicate: update existing review note if present)
       if (shouldPost) {
-        UI.println("Posting review to GitLab MR...")
         const commentBody = `<!-- altimate-code-review -->\n${reviewText}`
-        const note = await postMRNote(instanceUrl, projectId, mrIid, token, commentBody).catch((err: unknown) => {
-          UI.error(`Failed to post review: ${err instanceof Error ? err.message : String(err)}`)
-          return process.exit(1) as never
-        })
-        UI.println(`Review posted as note #${note.id}: ${mrData.web_url}#note_${note.id}`)
+        const existingReview = notes.find((n) => n.body.startsWith("<!-- altimate-code-review -->"))
+
+        if (existingReview) {
+          UI.println("Updating existing review note on GitLab MR...")
+          const note = await updateMRNote(instanceUrl, projectId, mrIid, token, existingReview.id, commentBody)
+          UI.println(`Review updated (note #${note.id}): ${mrData.web_url}#note_${note.id}`)
+        } else {
+          UI.println("Posting review to GitLab MR...")
+          const note = await postMRNote(instanceUrl, projectId, mrIid, token, commentBody)
+          UI.println(`Review posted as note #${note.id}: ${mrData.web_url}#note_${note.id}`)
+        }
       }
 
       UI.println("Done.")
@@ -499,4 +480,4 @@ function subscribeSessionEvents(session: { id: SessionID; title: string; version
 }
 
 // Re-export API helpers for potential use in CI/CD integrations
-export { fetchMRMetadata, fetchMRChanges, fetchMRNotes, postMRNote, postMRDiscussion }
+export { fetchMRMetadata, fetchMRChanges, fetchMRNotes, postMRNote, updateMRNote }
