@@ -343,6 +343,150 @@ test("handles file inclusion with replacement tokens", async () => {
   })
 })
 
+test("normalizes mcpServers key to mcp", async () => {
+  await using tmp = await tmpdir({
+    init: async (dir) => {
+      await writeConfig(dir, {
+        mcpServers: {
+          gitlab: {
+            command: "npx",
+            args: ["-y", "@modelcontextprotocol/server-gitlab"],
+            env: {
+              GITLAB_PERSONAL_ACCESS_TOKEN: "my-token",
+              GITLAB_API_URL: "https://gitlab.com/api/v4",
+            },
+          },
+        },
+      })
+    },
+  })
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const config = await Config.get()
+      expect(config.mcp).toBeDefined()
+      expect(config.mcp!.gitlab).toBeDefined()
+      const gitlab = config.mcp!.gitlab as any
+      expect(gitlab.type).toBe("local")
+      expect(gitlab.command).toEqual(["npx", "-y", "@modelcontextprotocol/server-gitlab"])
+      expect(gitlab.environment).toEqual({
+        GITLAB_PERSONAL_ACCESS_TOKEN: "my-token",
+        GITLAB_API_URL: "https://gitlab.com/api/v4",
+      })
+    },
+  })
+})
+
+test("normalizes mcpServers with array command format", async () => {
+  await using tmp = await tmpdir({
+    init: async (dir) => {
+      await writeConfig(dir, {
+        mcpServers: {
+          myserver: {
+            command: ["node", "server.js"],
+            env: { PORT: "3000" },
+          },
+        },
+      })
+    },
+  })
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const config = await Config.get()
+      const server = config.mcp!.myserver as any
+      expect(server.type).toBe("local")
+      expect(server.command).toEqual(["node", "server.js"])
+      expect(server.environment).toEqual({ PORT: "3000" })
+    },
+  })
+})
+
+test("does not overwrite existing mcp key with mcpServers", async () => {
+  await using tmp = await tmpdir({
+    init: async (dir) => {
+      await writeConfig(dir, {
+        mcp: {
+          existing: {
+            type: "local",
+            command: ["node", "existing.js"],
+          },
+        },
+        mcpServers: {
+          shouldbeignored: {
+            command: "node",
+            args: ["ignored.js"],
+          },
+        },
+      })
+    },
+  })
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      // When both mcp and mcpServers exist, mcpServers is silently dropped
+      // and mcp is preserved. No validation error.
+      const config = await Config.get()
+      expect(config.mcp).toBeDefined()
+      expect(config.mcp!.existing).toBeDefined()
+      expect((config.mcp! as any).shouldbeignored).toBeUndefined()
+    },
+  })
+})
+
+test("normalizes remote server without type field", async () => {
+  await using tmp = await tmpdir({
+    init: async (dir) => {
+      await writeConfig(dir, {
+        mcpServers: {
+          myremote: {
+            url: "https://example.com/mcp",
+            headers: { Authorization: "Bearer token" },
+          },
+        },
+      })
+    },
+  })
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const config = await Config.get()
+      const server = config.mcp!.myremote as any
+      expect(server.type).toBe("remote")
+      expect(server.url).toBe("https://example.com/mcp")
+      expect(server.headers).toEqual({ Authorization: "Bearer token" })
+    },
+  })
+})
+
+test("normalizes typed entry with external field names", async () => {
+  await using tmp = await tmpdir({
+    init: async (dir) => {
+      await writeConfig(dir, {
+        mcpServers: {
+          myserver: {
+            type: "local",
+            command: "npx",
+            args: ["-y", "some-server"],
+            env: { TOKEN: "abc" },
+          },
+        },
+      })
+    },
+  })
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      // Even with type: "local", string command + args + env should be normalized
+      const config = await Config.get()
+      const server = config.mcp!.myserver as any
+      expect(server.type).toBe("local")
+      expect(server.command).toEqual(["npx", "-y", "some-server"])
+      expect(server.environment).toEqual({ TOKEN: "abc" })
+    },
+  })
+})
+
 test("validates config schema and throws on invalid fields", async () => {
   await using tmp = await tmpdir({
     init: async (dir) => {
@@ -2085,5 +2229,32 @@ describe("OPENCODE_CONFIG_CONTENT token substitution", () => {
         delete process.env["OPENCODE_CONFIG_CONTENT"]
       }
     }
+  })
+})
+
+test("normalizes native config with string command and args", async () => {
+  await using tmp = await tmpdir({
+    init: async (dir) => {
+      await writeConfig(dir, {
+        mcp: {
+          myserver: {
+            type: "local",
+            command: "node",
+            args: ["server.js"],
+            env: { PORT: "3000" },
+          },
+        },
+      })
+    },
+  })
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const config = await Config.get()
+      const server = config.mcp!.myserver as any
+      expect(server.type).toBe("local")
+      expect(server.command).toEqual(["node", "server.js"])
+      expect(server.environment).toEqual({ PORT: "3000" })
+    },
   })
 })
