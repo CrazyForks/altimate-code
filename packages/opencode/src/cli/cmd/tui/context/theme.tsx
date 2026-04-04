@@ -939,6 +939,7 @@ function getSyntaxRules(theme: Theme) {
       style: {
         foreground: theme.markdownCode,
         // altimate_change start — upstream_fix: add background to prevent invisible code blocks on light themes
+        // backgroundElement (not background) gives fenced code blocks visible contrast on light themes
         background: theme.backgroundElement,
         // altimate_change end
       },
@@ -947,7 +948,7 @@ function getSyntaxRules(theme: Theme) {
       scope: ["markup.raw.inline"],
       style: {
         foreground: theme.markdownCode,
-        background: theme.background,
+        background: theme.background, // inline code blends with page background
       },
     },
     {

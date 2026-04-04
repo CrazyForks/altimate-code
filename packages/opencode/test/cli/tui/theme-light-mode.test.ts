@@ -149,6 +149,9 @@ function getSyntaxRules(theme: Theme): SyntaxRule[] {
 }
 
 // ─── Contrast helpers ──────────────────────────────────────────────────────
+// Contrast thresholds use WCAG 2.1 "large text" minimums (3:1) since terminal
+// text renders at effective large-text size. Lower thresholds (2:1, 2.5:1) are
+// used for syntax-highlighted code where some colors are decorative/secondary.
 
 const WHITE = RGBA.fromHex("#ffffff")
 
