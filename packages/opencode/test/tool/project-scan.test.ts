@@ -312,6 +312,8 @@ describe("detectEnvVars", () => {
       "PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD", "DATABASE_URL",
       "MYSQL_HOST", "MYSQL_TCP_PORT", "MYSQL_DATABASE", "MYSQL_USER", "MYSQL_PASSWORD",
       "REDSHIFT_HOST", "REDSHIFT_PORT", "REDSHIFT_DATABASE", "REDSHIFT_USER", "REDSHIFT_PASSWORD",
+      "CLICKHOUSE_HOST", "CLICKHOUSE_PORT", "CLICKHOUSE_DB", "CLICKHOUSE_DATABASE",
+      "CLICKHOUSE_USER", "CLICKHOUSE_USERNAME", "CLICKHOUSE_PASSWORD", "CLICKHOUSE_URL",
     ]
     for (const v of vars) {
       delete process.env[v]
@@ -553,6 +555,71 @@ describe("detectEnvVars", () => {
       expect(conn.name).toMatch(/^env_/)
       expect(conn.name).toBe(`env_${conn.type}`)
     }
+  })
+
+  test("detects ClickHouse via CLICKHOUSE_HOST", async () => {
+    clearWarehouseEnvVars()
+    process.env.CLICKHOUSE_HOST = "ch.example.com"
+    process.env.CLICKHOUSE_PORT = "8443"
+    process.env.CLICKHOUSE_DB = "analytics"
+    process.env.CLICKHOUSE_USER = "default"
+    process.env.CLICKHOUSE_PASSWORD = "secret"
+
+    const result = await detectEnvVars()
+    const ch = result.find((r) => r.type === "clickhouse")
+    expect(ch).toBeDefined()
+    expect(ch!.name).toBe("env_clickhouse")
+    expect(ch!.source).toBe("env-var")
+    expect(ch!.signal).toBe("CLICKHOUSE_HOST")
+    expect(ch!.config.host).toBe("ch.example.com")
+    expect(ch!.config.port).toBe("8443")
+    expect(ch!.config.database).toBe("analytics")
+    expect(ch!.config.user).toBe("default")
+    expect(ch!.config.password).toBe("***")
+  })
+
+  test("detects ClickHouse via CLICKHOUSE_URL", async () => {
+    clearWarehouseEnvVars()
+    process.env.CLICKHOUSE_URL = "https://ch.example.com:8443/analytics"
+
+    const result = await detectEnvVars()
+    const ch = result.find((r) => r.type === "clickhouse")
+    expect(ch).toBeDefined()
+    expect(ch!.signal).toBe("CLICKHOUSE_URL")
+    expect(ch!.config.connection_string).toBe("***")
+  })
+
+  test("ClickHouse prefers CLICKHOUSE_DB over CLICKHOUSE_DATABASE for database", async () => {
+    clearWarehouseEnvVars()
+    process.env.CLICKHOUSE_HOST = "ch.local"
+    process.env.CLICKHOUSE_DB = "preferred_db"
+    process.env.CLICKHOUSE_DATABASE = "fallback_db"
+
+    const result = await detectEnvVars()
+    const ch = result.find((r) => r.type === "clickhouse")
+    expect(ch).toBeDefined()
+    expect(ch!.config.database).toBe("preferred_db")
+  })
+
+  test("detects ClickHouse via DATABASE_URL with clickhouse+https scheme", async () => {
+    clearWarehouseEnvVars()
+    process.env.DATABASE_URL = "clickhouse+https://user:pass@ch.example.com:8443/db"
+
+    const result = await detectEnvVars()
+    const ch = result.find((r) => r.type === "clickhouse")
+    expect(ch).toBeDefined()
+    expect(ch!.signal).toBe("DATABASE_URL")
+    expect(ch!.config.connection_string).toBe("***")
+  })
+
+  test("detects ClickHouse via DATABASE_URL with clickhouse+http scheme", async () => {
+    clearWarehouseEnvVars()
+    process.env.DATABASE_URL = "clickhouse+http://user:pass@ch.local:8123/db"
+
+    const result = await detectEnvVars()
+    const ch = result.find((r) => r.type === "clickhouse")
+    expect(ch).toBeDefined()
+    expect(ch!.signal).toBe("DATABASE_URL")
   })
 })
 
