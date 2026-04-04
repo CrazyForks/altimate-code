@@ -1385,8 +1385,11 @@ export namespace Config {
     if (result.mcp && typeof result.mcp === "object" && !Array.isArray(result.mcp)) {
       const servers = { ...(result.mcp as Record<string, any>) }
       for (const [name, entry] of Object.entries(servers)) {
-        if (!entry || typeof entry !== "object") continue
-        // Build a normalized entry — Handles both untyped and typed entries with external fields
+        if (!entry || typeof entry !== "object") {
+          delete servers[name]
+          continue
+        }
+        // Build a normalized entry — handles both untyped and typed entries with external fields
         if (entry.command || entry.args) {
           const cmd = Array.isArray(entry.command)
             ? entry.command.map(String)
