@@ -6,9 +6,13 @@ import DESCRIPTION from "./glob.txt"
 import { Ripgrep } from "../file/ripgrep"
 import { Instance } from "../project/instance"
 import { assertExternalDirectory } from "./external-directory"
+// altimate_change start — glob hardening: timeout, home/root blocking, default exclusions
+import os from "os"
 import { abortAfter } from "../util/abort"
+import { IGNORE_PATTERNS } from "./ls"
 
 const GLOB_TIMEOUT_MS = 30_000
+// altimate_change end
 
 export const GlobTool = Tool.define("glob", {
   description: DESCRIPTION,
@@ -36,10 +40,25 @@ export const GlobTool = Tool.define("glob", {
     search = path.isAbsolute(search) ? search : path.resolve(Instance.directory, search)
     await assertExternalDirectory(ctx, search, { kind: "directory" })
 
+    // altimate_change start — block home/root directory to prevent scanning entire filesystem
+    const homeDir = os.homedir()
+    if (search === "/" || search === homeDir) {
+      return {
+        title: path.relative(Instance.worktree, search),
+        metadata: { count: 0, truncated: false },
+        output: `The directory "${search}" is too broad to search. Please specify a more specific \`path\` parameter within your project or a subdirectory.`,
+      }
+    }
+    // altimate_change end
+
     const limit = 100
     const files = []
     let truncated = false
+    // altimate_change start — 30s timeout with default directory exclusions
     let timedOut = false
+
+    const defaultExclusions = IGNORE_PATTERNS.map((p) => `!${p}*`)
+    const globs = [params.pattern, ...defaultExclusions]
 
     const timeout = abortAfter(GLOB_TIMEOUT_MS)
     const localAbort = new AbortController()
@@ -49,7 +68,7 @@ export const GlobTool = Tool.define("glob", {
     try {
       for await (const file of Ripgrep.files({
         cwd: search,
-        glob: [params.pattern],
+        glob: globs,
         signal,
       })) {
         if (files.length >= limit) {
@@ -75,9 +94,11 @@ export const GlobTool = Tool.define("glob", {
       localAbort.abort()
       timeout.clearTimeout()
     }
+    // altimate_change end
     files.sort((a, b) => b.mtime - a.mtime)
 
     const output = []
+    // altimate_change start — timeout-aware output messages
     if (files.length === 0 && timedOut) {
       output.push(
         `Glob search timed out after ${GLOB_TIMEOUT_MS / 1000}s with no results. The search directory "${search}" is too broad for the pattern "${params.pattern}". Use a more specific \`path\` parameter to narrow the search scope.`,
@@ -108,5 +129,6 @@ export const GlobTool = Tool.define("glob", {
       },
       output: output.join("\n"),
     }
+    // altimate_change end
   },
 })

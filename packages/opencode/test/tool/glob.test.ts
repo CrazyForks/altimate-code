@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import os from "os"
 import path from "path"
 import fs from "fs/promises"
 import { GlobTool } from "../../src/tool/glob"
@@ -129,6 +130,92 @@ describe("tool.glob", () => {
         expect(result.metadata.count).toBe(1)
         expect(result.output).toContain("inner.txt")
         expect(result.output).not.toContain("outer.txt")
+      },
+    })
+  })
+
+  test("blocks home directory with helpful message", async () => {
+    const homeDir = os.homedir()
+    await Instance.provide({
+      directory: homeDir,
+      fn: async () => {
+        const glob = await GlobTool.init()
+        const result = await glob.execute({ pattern: "**/*.yml", path: homeDir }, ctx)
+        expect(result.metadata.count).toBe(0)
+        expect(result.output).toContain("too broad to search")
+      },
+    })
+  })
+
+  test("blocks root directory with helpful message", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const glob = await GlobTool.init()
+        const result = await glob.execute({ pattern: "**/*.yml", path: "/" }, ctx)
+        expect(result.metadata.count).toBe(0)
+        expect(result.output).toContain("too broad to search")
+      },
+    })
+  })
+
+  test("allows subdirectory of home", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(path.join(dir, "project.yml"), "")
+      },
+    })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const glob = await GlobTool.init()
+        const result = await glob.execute({ pattern: "*.yml" }, ctx)
+        expect(result.metadata.count).toBe(1)
+        expect(result.output).toContain("project.yml")
+      },
+    })
+  })
+
+  test("excludes node_modules by default", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await fs.mkdir(path.join(dir, "node_modules", "pkg"), { recursive: true })
+        await Bun.write(path.join(dir, "node_modules", "pkg", "index.ts"), "")
+        await Bun.write(path.join(dir, "src.ts"), "")
+      },
+    })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const glob = await GlobTool.init()
+        const result = await glob.execute({ pattern: "**/*.ts" }, ctx)
+        expect(result.metadata.count).toBe(1)
+        expect(result.output).toContain("src.ts")
+        expect(result.output).not.toContain("node_modules")
+      },
+    })
+  })
+
+  test("excludes dist and build by default", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await fs.mkdir(path.join(dir, "dist"), { recursive: true })
+        await fs.mkdir(path.join(dir, "build"), { recursive: true })
+        await Bun.write(path.join(dir, "dist", "bundle.js"), "")
+        await Bun.write(path.join(dir, "build", "output.js"), "")
+        await Bun.write(path.join(dir, "app.js"), "")
+      },
+    })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const glob = await GlobTool.init()
+        const result = await glob.execute({ pattern: "**/*.js" }, ctx)
+        expect(result.metadata.count).toBe(1)
+        expect(result.output).toContain("app.js")
+        expect(result.output).not.toContain("dist")
+        expect(result.output).not.toContain("build")
       },
     })
   })
