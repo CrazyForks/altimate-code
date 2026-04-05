@@ -383,9 +383,12 @@ export const GitlabReviewCommand = cmd({
       UI.println(`  Branch: ${mrData.source_branch} -> ${mrData.target_branch}`)
       UI.println(`  Changed files: ${mrData.changes.length}`)
 
-      // altimate_change start — warn when diff is truncated
-      if (mrData.changes.length > MAX_DIFF_FILES) {
-        UI.println(`  ⚠ Large MR: only first ${MAX_DIFF_FILES} of ${mrData.changes.length} files will be reviewed`)
+      // altimate_change start — warn when diff will be truncated (file count or byte size)
+      const { truncated: willTruncate } = truncateDiffs(mrData.changes)
+      if (willTruncate) {
+        UI.println(
+          `  ⚠ Large MR: diffs truncated to stay within context limits (max ${MAX_DIFF_FILES} files / ${MAX_DIFF_BYTES} bytes)`,
+        )
       }
       // altimate_change end
 

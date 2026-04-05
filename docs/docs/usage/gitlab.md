@@ -74,4 +74,4 @@ Override the default model with the `--model` flag or `MODEL` / `ALTIMATE_MODEL`
 ## Known Limitations
 
 - Reviews are posted as MR-level notes, not inline per-line comments (inline comments planned for a future release).
-- Very large MRs (50+ files or 200 KB+ of diffs) are automatically truncated. The review will note which files were omitted.
+- Large MRs (more than 50 files or exceeding 200 KB of diffs) are automatically truncated. The review will note which files were omitted.
