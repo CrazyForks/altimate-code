@@ -152,6 +152,44 @@ describe("ConfigPaths.parseText: ${VAR} substitution (shell/dotenv alias)", () =
     }
   })
 
+  test("JSON-safe: env value with quotes cannot inject JSON structure", async () => {
+    // Security regression test for C1 in consensus review of PR #655.
+    // {env:VAR} is raw injection (backward compat); ${VAR} is string-safe.
+    process.env.OPENCODE_TEST_INJECT = 'pwned", "isAdmin": true, "x": "y'
+    try {
+      const text = '{"token": "${OPENCODE_TEST_INJECT}"}'
+      const result = await ConfigPaths.parseText(text, "/fake/config.json")
+      // Value stays inside the "token" string — no injection into sibling keys
+      expect(result).toEqual({ token: 'pwned", "isAdmin": true, "x": "y' })
+      expect(result.isAdmin).toBeUndefined()
+    } finally {
+      delete process.env.OPENCODE_TEST_INJECT
+    }
+  })
+
+  test("JSON-safe: env value with backslash and newline escaped properly", async () => {
+    process.env.OPENCODE_TEST_MULTILINE = 'line1\nline2\tpath\\to\\file'
+    try {
+      const text = '{"value": "${OPENCODE_TEST_MULTILINE}"}'
+      const result = await ConfigPaths.parseText(text, "/fake/config.json")
+      expect(result).toEqual({ value: "line1\nline2\tpath\\to\\file" })
+    } finally {
+      delete process.env.OPENCODE_TEST_MULTILINE
+    }
+  })
+
+  test("escape hatch: $${VAR} stays literal (docker-compose convention)", async () => {
+    process.env.OPENCODE_TEST_SHOULD_NOT_SUB = "interpolated"
+    try {
+      const text = '{"template": "$${OPENCODE_TEST_SHOULD_NOT_SUB}"}'
+      const result = await ConfigPaths.parseText(text, "/fake/config.json")
+      // $${VAR} → literal ${VAR}, env value is NOT substituted
+      expect(result).toEqual({ template: "${OPENCODE_TEST_SHOULD_NOT_SUB}" })
+    } finally {
+      delete process.env.OPENCODE_TEST_SHOULD_NOT_SUB
+    }
+  })
+
   test("works inside MCP environment config (issue #635 regression)", async () => {
     process.env.OPENCODE_TEST_GITLAB_TOKEN = "glpat-xxxxx"
     try {

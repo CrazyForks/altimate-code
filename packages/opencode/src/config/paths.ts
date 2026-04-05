@@ -84,7 +84,7 @@ export namespace ConfigPaths {
     return typeof input === "string" ? path.dirname(input) : input.dir
   }
 
-  /** Apply {env:VAR}, ${VAR}, and {file:path} substitutions to config text. */
+  /** Apply {env:VAR} and {file:path} substitutions to config text. */
   async function substitute(text: string, input: ParseSource, missing: "error" | "empty" = "error") {
     text = text.replace(/\{env:([^}]+)\}/g, (_, varName) => {
       return process.env[varName] || ""
@@ -92,10 +92,15 @@ export namespace ConfigPaths {
     // altimate_change start — accept ${VAR} shell/dotenv syntax as alias for {env:VAR}
     // Users arriving from Claude Code / VS Code / dotenv / docker-compose expect this
     // convention. Only matches POSIX identifier names to avoid collisions with random
-    // ${...} content. See issue #635.
-    text = text.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_, varName) => {
-      return process.env[varName] || ""
+    // ${...} content. Value is JSON-escaped so it can't break out of the enclosing
+    // string — use {env:VAR} for raw unquoted injection. Docker-compose convention:
+    // $${VAR} escapes to literal ${VAR}. See issue #635.
+    text = text.replace(/(?<!\$)\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_, varName) => {
+      const value = process.env[varName] || ""
+      return JSON.stringify(value).slice(1, -1)
     })
+    // Unescape: $${VAR} → ${VAR} (user-authored literal preservation, docker-compose style)
+    text = text.replace(/\$\$(\{[A-Za-z_][A-Za-z0-9_]*\})/g, "$$$1")
     // altimate_change end
 
     const fileMatches = Array.from(text.matchAll(/\{file:[^}]+\}/g))

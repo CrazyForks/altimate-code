@@ -24,12 +24,15 @@ Run an MCP server as a local subprocess:
 
 Both syntaxes work anywhere in the config:
 
-| Syntax | Example |
-|--------|---------|
-| `{env:VAR}` | `"API_KEY": "{env:MY_API_KEY}"` |
-| `${VAR}` | `"API_KEY": "${MY_API_KEY}"` (shell / dotenv / VS Code style) |
+| Syntax | Injection mode | Example |
+|--------|----------------|---------|
+| `${VAR}` | String-safe (JSON-escaped) | `"API_KEY": "${MY_API_KEY}"` — shell / dotenv / VS Code style |
+| `{env:VAR}` | Raw text | `"count": {env:NUM}` — use for unquoted structural injection |
+| `$${VAR}` | Escape hatch | `"template": "$${VAR}"` — preserves literal `${VAR}` (docker-compose style) |
 
 If the variable is not set, it resolves to an empty string. Bare `$VAR` (without braces) is **not** interpolated — use `${VAR}` or `{env:VAR}`.
+
+**Why two syntaxes?** `${VAR}` JSON-escapes the value so tokens containing quotes or braces can't break the config structure — the safe default for secrets. `{env:VAR}` does raw text injection for the rare case where you need to inject numbers or structure into unquoted JSON positions.
 
 | Field | Type | Description |
 |-------|------|-------------|
