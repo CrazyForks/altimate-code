@@ -250,6 +250,37 @@ describe("ConfigPaths.parseText: ${VAR} substitution (shell/dotenv alias)", () =
     }
   })
 
+  test("single-pass: {env:A} value containing ${B} stays literal (no cascade)", async () => {
+    // Regression test for cubic/coderabbit P1: previously the {env:VAR} pass ran
+    // first, then the ${VAR} pass expanded any ${...} in its output. Single-pass
+    // substitution evaluates both patterns against the ORIGINAL text only.
+    process.env.OPENCODE_TEST_CASCADE_A = "${OPENCODE_TEST_CASCADE_B}"
+    process.env.OPENCODE_TEST_CASCADE_B = "should-not-expand"
+    try {
+      const text = '{"value": "{env:OPENCODE_TEST_CASCADE_A}"}'
+      const result = await ConfigPaths.parseText(text, "/fake/config.json")
+      // {env:VAR} is raw injection — its output is NOT re-interpolated
+      expect(result.value).toBe("${OPENCODE_TEST_CASCADE_B}")
+    } finally {
+      delete process.env.OPENCODE_TEST_CASCADE_A
+      delete process.env.OPENCODE_TEST_CASCADE_B
+    }
+  })
+
+  test("single-pass: ${A} value containing {env:B} stays literal (no cascade)", async () => {
+    // Reverse direction: ${VAR} output must not be matched by {env:VAR} pass.
+    process.env.OPENCODE_TEST_CASCADE_C = "{env:OPENCODE_TEST_CASCADE_D}"
+    process.env.OPENCODE_TEST_CASCADE_D = "should-not-expand"
+    try {
+      const text = '{"value": "${OPENCODE_TEST_CASCADE_C}"}'
+      const result = await ConfigPaths.parseText(text, "/fake/config.json")
+      expect(result.value).toBe("{env:OPENCODE_TEST_CASCADE_D}")
+    } finally {
+      delete process.env.OPENCODE_TEST_CASCADE_C
+      delete process.env.OPENCODE_TEST_CASCADE_D
+    }
+  })
+
   test("works inside MCP environment config (issue #635 regression)", async () => {
     process.env.OPENCODE_TEST_GITLAB_TOKEN = "glpat-xxxxx"
     try {

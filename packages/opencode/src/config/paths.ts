@@ -86,43 +86,49 @@ export namespace ConfigPaths {
 
   /** Apply {env:VAR} and {file:path} substitutions to config text. */
   async function substitute(text: string, input: ParseSource, missing: "error" | "empty" = "error") {
-    // altimate_change start — track interpolation stats for telemetry
-    let legacyBraceRefs = 0
-    let legacyBraceUnresolved = 0
-    text = text.replace(/\{env:([^}]+)\}/g, (_, varName) => {
-      legacyBraceRefs++
-      const v = process.env[varName]
-      if (v === undefined || v === "") legacyBraceUnresolved++
-      return v || ""
-    })
-    // altimate_change end
-    // altimate_change start — accept ${VAR} shell/dotenv syntax as alias for {env:VAR}
-    // Users arriving from Claude Code / VS Code / dotenv / docker-compose expect this
-    // convention. Only matches POSIX identifier names to avoid collisions with random
-    // ${...} content. Value is JSON-escaped so it can't break out of the enclosing
-    // string — use {env:VAR} for raw unquoted injection. Supports ${VAR:-default}
-    // for fallback values (docker-compose / POSIX shell convention: default used when
-    // the variable is unset OR empty). Docker-compose convention: $${VAR} escapes to
-    // literal ${VAR}. See issue #635.
+    // altimate_change start — unified env-var interpolation
+    // Single-pass substitution against the ORIGINAL text prevents output of one
+    // pattern being re-matched by another (e.g. {env:A}="${B}" expanding B).
+    // Syntaxes (order tried, in one regex via alternation):
+    //   1. $${VAR} or $${VAR:-default} — literal escape (docker-compose style)
+    //   2. ${VAR} or ${VAR:-default}   — string-safe, JSON-escaped (shell/dotenv)
+    //   3. {env:VAR}                    — raw text injection (backward compat)
+    // Users arriving from Claude Code / VS Code / dotenv / docker-compose expect
+    // ${VAR}. Use {env:VAR} for raw unquoted injection. See issue #635.
     let dollarRefs = 0
     let dollarUnresolved = 0
     let dollarDefaulted = 0
-    text = text.replace(/(?<!\$)\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g, (_, varName, fallback) => {
-      dollarRefs++
-      const envValue = process.env[varName]
-      const resolved = envValue !== undefined && envValue !== ""
-      if (!resolved && fallback !== undefined) dollarDefaulted++
-      if (!resolved && fallback === undefined) dollarUnresolved++
-      const value = resolved ? envValue : (fallback ?? "")
-      return JSON.stringify(value).slice(1, -1)
-    })
-    // Unescape: $${VAR} → ${VAR} (user-authored literal preservation, docker-compose style)
-    // Handles both ${VAR} and ${VAR:-default} forms.
     let dollarEscaped = 0
-    text = text.replace(/\$\$(\{[A-Za-z_][A-Za-z0-9_]*(?::-[^}]*)?\})/g, (_, rest) => {
-      dollarEscaped++
-      return "$" + rest
-    })
+    let legacyBraceRefs = 0
+    let legacyBraceUnresolved = 0
+    text = text.replace(
+      /\$\$(\{[A-Za-z_][A-Za-z0-9_]*(?::-[^}]*)?\})|(?<!\$)\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}|\{env:([^}]+)\}/g,
+      (match, escaped, dollarVar, dollarDefault, braceVar) => {
+        if (escaped !== undefined) {
+          // $${VAR} → literal ${VAR}
+          dollarEscaped++
+          return "$" + escaped
+        }
+        if (dollarVar !== undefined) {
+          // ${VAR} / ${VAR:-default} → JSON-escaped string-safe substitution
+          dollarRefs++
+          const envValue = process.env[dollarVar]
+          const resolved = envValue !== undefined && envValue !== ""
+          if (!resolved && dollarDefault !== undefined) dollarDefaulted++
+          if (!resolved && dollarDefault === undefined) dollarUnresolved++
+          const value = resolved ? envValue : (dollarDefault ?? "")
+          return JSON.stringify(value).slice(1, -1)
+        }
+        if (braceVar !== undefined) {
+          // {env:VAR} → raw text injection
+          legacyBraceRefs++
+          const v = process.env[braceVar]
+          if (v === undefined || v === "") legacyBraceUnresolved++
+          return v || ""
+        }
+        return match
+      },
+    )
     // Emit telemetry if any env interpolation happened. Dynamic import avoids a
     // circular dep with @/altimate/telemetry (which imports @/config/config).
     if (dollarRefs > 0 || legacyBraceRefs > 0 || dollarEscaped > 0) {
