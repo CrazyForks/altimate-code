@@ -178,6 +178,66 @@ describe("ConfigPaths.parseText: ${VAR} substitution (shell/dotenv alias)", () =
     }
   })
 
+  test("default: ${VAR:-default} uses default when var unset", async () => {
+    // Variable is not set — default value should be used
+    const text = '{"mode": "${OPENCODE_TEST_UNSET_VAR:-production}"}'
+    const result = await ConfigPaths.parseText(text, "/fake/config.json")
+    expect(result).toEqual({ mode: "production" })
+  })
+
+  test("default: ${VAR:-default} uses env value when var set", async () => {
+    process.env.OPENCODE_TEST_DEFAULT_OVERRIDE = "staging"
+    try {
+      const text = '{"mode": "${OPENCODE_TEST_DEFAULT_OVERRIDE:-production}"}'
+      const result = await ConfigPaths.parseText(text, "/fake/config.json")
+      expect(result).toEqual({ mode: "staging" })
+    } finally {
+      delete process.env.OPENCODE_TEST_DEFAULT_OVERRIDE
+    }
+  })
+
+  test("default: ${VAR:-default} uses default when var is empty string", async () => {
+    // POSIX :- uses default for both unset AND empty (matches docker-compose)
+    process.env.OPENCODE_TEST_EMPTY_VAR = ""
+    try {
+      const text = '{"mode": "${OPENCODE_TEST_EMPTY_VAR:-fallback}"}'
+      const result = await ConfigPaths.parseText(text, "/fake/config.json")
+      expect(result).toEqual({ mode: "fallback" })
+    } finally {
+      delete process.env.OPENCODE_TEST_EMPTY_VAR
+    }
+  })
+
+  test("default: empty default ${VAR:-} resolves to empty string", async () => {
+    const text = '{"value": "${OPENCODE_TEST_EMPTY_DEFAULT:-}"}'
+    const result = await ConfigPaths.parseText(text, "/fake/config.json")
+    expect(result).toEqual({ value: "" })
+  })
+
+  test("default: default value with spaces and special chars", async () => {
+    const text = '{"msg": "${OPENCODE_TEST_MISSING:-Hello World 123}"}'
+    const result = await ConfigPaths.parseText(text, "/fake/config.json")
+    expect(result).toEqual({ msg: "Hello World 123" })
+  })
+
+  test("default: default value is JSON-escaped (security)", async () => {
+    const text = '{"token": "${OPENCODE_TEST_MISSING:-pwned\\", \\"isAdmin\\": true, \\"x\\": \\"y}"}'
+    const result = await ConfigPaths.parseText(text, "/fake/config.json")
+    expect(result.token).toContain("pwned")
+    expect(result.isAdmin).toBeUndefined()
+  })
+
+  test("escape hatch: $${VAR:-default} stays literal", async () => {
+    process.env.OPENCODE_TEST_ESCAPED_DEFAULT = "should-not-be-used"
+    try {
+      const text = '{"template": "$${OPENCODE_TEST_ESCAPED_DEFAULT:-my-default}"}'
+      const result = await ConfigPaths.parseText(text, "/fake/config.json")
+      expect(result).toEqual({ template: "${OPENCODE_TEST_ESCAPED_DEFAULT:-my-default}" })
+    } finally {
+      delete process.env.OPENCODE_TEST_ESCAPED_DEFAULT
+    }
+  })
+
   test("escape hatch: $${VAR} stays literal (docker-compose convention)", async () => {
     process.env.OPENCODE_TEST_SHOULD_NOT_SUB = "interpolated"
     try {

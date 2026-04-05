@@ -93,14 +93,18 @@ export namespace ConfigPaths {
     // Users arriving from Claude Code / VS Code / dotenv / docker-compose expect this
     // convention. Only matches POSIX identifier names to avoid collisions with random
     // ${...} content. Value is JSON-escaped so it can't break out of the enclosing
-    // string — use {env:VAR} for raw unquoted injection. Docker-compose convention:
-    // $${VAR} escapes to literal ${VAR}. See issue #635.
-    text = text.replace(/(?<!\$)\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_, varName) => {
-      const value = process.env[varName] || ""
+    // string — use {env:VAR} for raw unquoted injection. Supports ${VAR:-default}
+    // for fallback values (docker-compose / POSIX shell convention: default used when
+    // the variable is unset OR empty). Docker-compose convention: $${VAR} escapes to
+    // literal ${VAR}. See issue #635.
+    text = text.replace(/(?<!\$)\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g, (_, varName, fallback) => {
+      const envValue = process.env[varName]
+      const value = envValue !== undefined && envValue !== "" ? envValue : (fallback ?? "")
       return JSON.stringify(value).slice(1, -1)
     })
     // Unescape: $${VAR} → ${VAR} (user-authored literal preservation, docker-compose style)
-    text = text.replace(/\$\$(\{[A-Za-z_][A-Za-z0-9_]*\})/g, "$$$1")
+    // Handles both ${VAR} and ${VAR:-default} forms.
+    text = text.replace(/\$\$(\{[A-Za-z_][A-Za-z0-9_]*(?::-[^}]*)?\})/g, "$$$1")
     // altimate_change end
 
     const fileMatches = Array.from(text.matchAll(/\{file:[^}]+\}/g))
