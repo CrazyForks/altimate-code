@@ -97,6 +97,81 @@ describe("ConfigPaths.parseText: {env:VAR} substitution", () => {
   })
 })
 
+describe("ConfigPaths.parseText: ${VAR} substitution (shell/dotenv alias)", () => {
+  const envKey = "OPENCODE_TEST_SHELL_SYNTAX_KEY"
+
+  beforeEach(() => {
+    process.env[envKey] = "shell-style-value"
+  })
+
+  afterEach(() => {
+    delete process.env[envKey]
+  })
+
+  test("substitutes ${VAR} with environment variable value", async () => {
+    const text = `{"apiKey": "\${${envKey}}"}`
+    const result = await ConfigPaths.parseText(text, "/fake/config.json")
+    expect(result).toEqual({ apiKey: "shell-style-value" })
+  })
+
+  test("substitutes to empty string when env var is not set", async () => {
+    const text = '{"apiKey": "${OPENCODE_TEST_SHELL_NONEXISTENT_XYZ}"}'
+    const result = await ConfigPaths.parseText(text, "/fake/config.json")
+    expect(result).toEqual({ apiKey: "" })
+  })
+
+  test("${VAR} and {env:VAR} both work in same config", async () => {
+    process.env.OPENCODE_TEST_MIXED_A = "alpha"
+    process.env.OPENCODE_TEST_MIXED_B = "beta"
+    try {
+      const text = '{"a": "${OPENCODE_TEST_MIXED_A}", "b": "{env:OPENCODE_TEST_MIXED_B}"}'
+      const result = await ConfigPaths.parseText(text, "/fake/config.json")
+      expect(result).toEqual({ a: "alpha", b: "beta" })
+    } finally {
+      delete process.env.OPENCODE_TEST_MIXED_A
+      delete process.env.OPENCODE_TEST_MIXED_B
+    }
+  })
+
+  test("ignores ${...} with non-identifier names (spaces, special chars)", async () => {
+    // These should pass through unmodified — not valid POSIX identifiers
+    const text = '{"a": "${FOO BAR}", "b": "${foo-bar}", "c": "${foo.bar}"}'
+    const result = await ConfigPaths.parseText(text, "/fake/config.json")
+    expect(result).toEqual({ a: "${FOO BAR}", b: "${foo-bar}", c: "${foo.bar}" })
+  })
+
+  test("does not match bare $VAR (without braces)", async () => {
+    process.env.OPENCODE_TEST_BARE = "should-not-match"
+    try {
+      const text = '{"value": "$OPENCODE_TEST_BARE"}'
+      const result = await ConfigPaths.parseText(text, "/fake/config.json")
+      // Bare $VAR stays literal — only ${VAR} is interpolated
+      expect(result).toEqual({ value: "$OPENCODE_TEST_BARE" })
+    } finally {
+      delete process.env.OPENCODE_TEST_BARE
+    }
+  })
+
+  test("works inside MCP environment config (issue #635 regression)", async () => {
+    process.env.OPENCODE_TEST_GITLAB_TOKEN = "glpat-xxxxx"
+    try {
+      const text = `{
+        "mcp": {
+          "gitlab": {
+            "type": "local",
+            "command": ["npx", "-y", "@modelcontextprotocol/server-gitlab"],
+            "environment": { "GITLAB_TOKEN": "\${OPENCODE_TEST_GITLAB_TOKEN}" }
+          }
+        }
+      }`
+      const result = await ConfigPaths.parseText(text, "/fake/config.json")
+      expect(result.mcp.gitlab.environment.GITLAB_TOKEN).toBe("glpat-xxxxx")
+    } finally {
+      delete process.env.OPENCODE_TEST_GITLAB_TOKEN
+    }
+  })
+})
+
 describe("ConfigPaths.parseText: {file:path} substitution", () => {
   test("substitutes {file:path} with file contents (trimmed)", async () => {
     await using tmp = await tmpdir()

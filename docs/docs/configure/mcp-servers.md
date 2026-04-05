@@ -20,6 +20,17 @@ Run an MCP server as a local subprocess:
 }
 ```
 
+### Environment variable interpolation
+
+Both syntaxes work anywhere in the config:
+
+| Syntax | Example |
+|--------|---------|
+| `{env:VAR}` | `"API_KEY": "{env:MY_API_KEY}"` |
+| `${VAR}` | `"API_KEY": "${MY_API_KEY}"` (shell / dotenv / VS Code style) |
+
+If the variable is not set, it resolves to an empty string. Bare `$VAR` (without braces) is **not** interpolated — use `${VAR}` or `{env:VAR}`.
+
 | Field | Type | Description |
 |-------|------|-------------|
 | `type` | `"local"` | Local subprocess server |
