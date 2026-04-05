@@ -100,30 +100,13 @@ export const ApplyPatchTool = Tool.define("apply_patch", {
           const oldContent = await fs.readFile(filePath, "utf-8")
           let newContent = oldContent
 
-          // altimate_change start — retry patch application with re-read on mismatch
           // Apply the update chunks to get new content
           try {
             const fileUpdate = Patch.deriveNewContentsFromChunks(filePath, hunk.chunks)
             newContent = fileUpdate.content
           } catch (error) {
-            // Re-read the file and retry once — the file may have changed since the LLM last saw it
-            const freshContent = await fs.readFile(filePath, "utf-8")
-            if (freshContent !== oldContent) {
-              try {
-                const retryUpdate = Patch.deriveNewContentsFromChunks(filePath, hunk.chunks)
-                newContent = retryUpdate.content
-              } catch (retryError) {
-                throw new Error(
-                  `apply_patch verification failed: ${retryError}\n\nThe file has been modified since you last read it. Please re-read the file and generate a new patch.`,
-                )
-              }
-            } else {
-              throw new Error(
-                `apply_patch verification failed: ${error}\n\nThe expected lines were not found in the file. Please re-read the file and generate a new patch based on its current contents.`,
-              )
-            }
+            throw new Error(`apply_patch verification failed: ${error}`)
           }
-          // altimate_change end
 
           const diff = trimDiff(createTwoFilesPatch(filePath, filePath, oldContent, newContent))
 

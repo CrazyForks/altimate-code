@@ -37,15 +37,12 @@ export const SqlExecuteTool = Tool.define("sql_execute", {
     }
     // altimate_change end
 
-    // altimate_change start — pre-execution SQL validation via cached schema
-    const preValidation = await preValidateSql(args.query, args.warehouse)
-    if (preValidation.blocked) {
-      return {
-        title: "SQL: VALIDATION ERROR",
-        metadata: { rowCount: 0, truncated: false, error: preValidation.error },
-        output: preValidation.error!,
-      }
-    }
+    // altimate_change start — shadow-mode pre-execution SQL validation
+    // Runs validation against cached schema and emits sql_pre_validation telemetry,
+    // but does NOT block execution. Used to measure catch rate before deciding
+    // whether to enable blocking in a future release. Fire-and-forget so it
+    // doesn't add latency to the sql_execute hot path.
+    preValidateSql(args.query, args.warehouse).catch(() => {})
     // altimate_change end
 
     try {

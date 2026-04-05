@@ -2,9 +2,6 @@ import z from "zod"
 import { Tool } from "../../tool/tool"
 import { Dispatcher } from "../native"
 import type { Telemetry } from "../telemetry"
-// altimate_change start — auto-pull schema from cache when not provided
-import { getCache } from "../native/schema/cache"
-// altimate_change end
 
 export const AltimateCoreValidateTool = Tool.define("altimate_core_validate", {
   description:
@@ -15,20 +12,11 @@ export const AltimateCoreValidateTool = Tool.define("altimate_core_validate", {
     schema_context: z.record(z.string(), z.any()).optional().describe("Inline schema definition"),
   }),
   async execute(args, ctx) {
-    let hasSchema = !!(args.schema_path || (args.schema_context && Object.keys(args.schema_context).length > 0))
-    // altimate_change start — auto-pull schema from cache when not provided
-    if (!hasSchema) {
-      const cachedSchema = await tryGetSchemaFromCache()
-      if (cachedSchema) {
-        args = { ...args, schema_context: cachedSchema }
-        hasSchema = true
-      }
-    }
-    // altimate_change end
+    const hasSchema = !!(args.schema_path || (args.schema_context && Object.keys(args.schema_context).length > 0))
     const noSchema = !hasSchema
     if (noSchema) {
       const error =
-        "No schema provided. Provide schema_context or schema_path so table/column references can be resolved. Tip: run schema_index first to cache your warehouse schema."
+        "No schema provided. Provide schema_context or schema_path so table/column references can be resolved."
       return {
         title: "Validate: NO SCHEMA",
         metadata: { success: false, valid: false, has_schema: false, error },
@@ -88,41 +76,6 @@ function classifyValidationError(message: string): string {
   if (lower.includes("type")) return "type_mismatch"
   return "validation_error"
 }
-
-// altimate_change start — auto-pull schema from cache when not provided
-const CACHE_TTL_MS = 24 * 60 * 60 * 1000
-
-async function tryGetSchemaFromCache(): Promise<Record<string, any> | null> {
-  try {
-    const cache = await getCache()
-    const status = cache.cacheStatus()
-    const warehouse = status.warehouses[0]
-    if (!warehouse?.last_indexed) return null
-
-    const cacheAge = Date.now() - new Date(warehouse.last_indexed).getTime()
-    if (cacheAge > CACHE_TTL_MS) return null
-
-    const columns = cache.listColumns(warehouse.name, 10_000)
-    if (columns.length === 0) return null
-
-    const schemaContext: Record<string, any> = {}
-    for (const col of columns) {
-      const tableName = col.schema_name ? `${col.schema_name}.${col.table}` : col.table
-      if (!schemaContext[tableName]) {
-        schemaContext[tableName] = []
-      }
-      schemaContext[tableName].push({
-        name: col.name,
-        type: col.data_type || "VARCHAR",
-        nullable: col.nullable,
-      })
-    }
-    return schemaContext
-  } catch {
-    return null
-  }
-}
-// altimate_change end
 
 function formatValidate(data: Record<string, any>): string {
   if (data.error) return `Error: ${data.error}`
