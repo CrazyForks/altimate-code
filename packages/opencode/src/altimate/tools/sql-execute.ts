@@ -222,7 +222,7 @@ async function preValidateSql(sql: string, warehouse: string | undefined, queryT
     // Only block on high-confidence structural errors
     const structuralErrors = errors.filter((e: any) => {
       const msg = (e.message ?? "").toLowerCase()
-      return /\b(column|table|relation|identifier|not found|does not exist)\b/.test(msg)
+      return /\b(column|table|view|relation|identifier|not found|does not exist)\b/.test(msg)
     })
 
     if (structuralErrors.length === 0) {
