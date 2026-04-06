@@ -248,7 +248,7 @@ export namespace SessionProcessor {
                           type: "text",
                           synthetic: true,
                           text:
-                            `⚠️ altimate-code: session stopped — \`${value.toolName}\` was called ${totalCalls}+ times, ` +
+                            `⚠️ altimate-code: session stopped — \`${value.toolName}\` was called ${totalCalls} times, ` +
                             `indicating the agent is stuck in a loop. Please start a new session with a revised prompt.`,
                           time: { start: Date.now(), end: Date.now() },
                         })
@@ -270,9 +270,9 @@ export namespace SessionProcessor {
                           messageID: input.assistantMessage.id,
                           sessionID: input.assistantMessage.sessionID,
                           type: "text",
-                          // synthetic: false so the LLM actually sees this warning and can course-correct
+                          synthetic: false,
                           text:
-                            `⚠️ altimate-code: \`${value.toolName}\` has been called ${totalCalls}+ times this session. ` +
+                            `⚠️ altimate-code: \`${value.toolName}\` has been called ${totalCalls} times this session. ` +
                             `You appear to be stuck in a loop. Stop repeating the same approach. ` +
                             `Either try a fundamentally different strategy or explain to the user what is blocking you. ` +
                             `The session will be force-stopped if this continues.`,
@@ -281,6 +281,8 @@ export namespace SessionProcessor {
                       }
 
                       // Escalation level 1: ask permission (existing behavior)
+                      // Reset before ask so denial/exception doesn't leave count at threshold
+                      toolCallCounts[value.toolName] = 0
                       const agent = await Agent.get(input.assistantMessage.agent)
                       await PermissionNext.ask({
                         permission: "doom_loop",
@@ -294,7 +296,6 @@ export namespace SessionProcessor {
                         always: [value.toolName],
                         ruleset: agent.permission,
                       })
-                      toolCallCounts[value.toolName] = 0
                     }
                     // altimate_change end
                   }
