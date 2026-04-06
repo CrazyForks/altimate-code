@@ -254,6 +254,7 @@ export namespace SessionProcessor {
                         })
                         blocked = true
                         toolCallCounts[value.toolName] = 0
+                        toolLoopHits[value.toolName] = 0
                         break
                       }
 
@@ -270,7 +271,7 @@ export namespace SessionProcessor {
                           messageID: input.assistantMessage.id,
                           sessionID: input.assistantMessage.sessionID,
                           type: "text",
-                          synthetic: false,
+                          synthetic: true,
                           text:
                             `⚠️ altimate-code: \`${value.toolName}\` has been called ${totalCalls} times this session. ` +
                             `You appear to be stuck in a loop. Stop repeating the same approach. ` +
