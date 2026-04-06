@@ -72,6 +72,19 @@ ORDER BY ordinal_position
 ```
 
 ```sql
+-- SQL Server / Fabric
+SELECT c.name AS column_name, tp.name AS data_type, c.is_nullable,
+       dc.definition AS column_default
+FROM sys.columns c
+INNER JOIN sys.types tp ON c.user_type_id = tp.user_type_id
+INNER JOIN sys.objects o ON c.object_id = o.object_id
+INNER JOIN sys.schemas s ON o.schema_id = s.schema_id
+LEFT JOIN sys.default_constraints dc ON c.default_object_id = dc.object_id
+WHERE s.name = 'dbo' AND o.name = 'orders'
+ORDER BY c.column_id
+```
+
+```sql
 -- ClickHouse
 DESCRIBE TABLE source_db.events
 ```
@@ -409,3 +422,39 @@ Even when tables match perfectly, state what was checked:
 
 **Silently excluding auto-timestamp columns without asking the user**
 → Always present detected auto-timestamp columns (Step 4) and get explicit confirmation. In migration scenarios, `created_at` should be *identical* — excluding it silently hides real bugs.
+
+---
+
+## SQL Server and Microsoft Fabric
+
+### Supported Configurations
+
+| Warehouse Type | Authentication | Notes |
+|---|---|---|
+| `sqlserver` / `mssql` | User/password or Azure AD | On-prem or Azure SQL. Requires SQL Server 2022+ for `DATETRUNC` and `LEAST`. |
+| `fabric` | Azure AD only | Microsoft Fabric SQL endpoint. Always uses TLS encryption. |
+
+### Connecting to Microsoft Fabric
+
+Fabric uses the same TDS protocol as SQL Server — no separate driver needed. Configuration:
+
+```
+type: "fabric"
+host: "<workspace-id>-<item-id>.datawarehouse.fabric.microsoft.com"
+database: "<warehouse-name>"
+authentication: "azure-active-directory-default"   # recommended
+```
+
+Supported Azure AD authentication types:
+- `azure-active-directory-default` — auto-discovers credentials via `DefaultAzureCredential` (recommended)
+- `token-credential` — same as above, with optional `azure_client_id` for managed identity
+- `azure-active-directory-password` — username/password with `azure_client_id` and `azure_tenant_id`
+- `azure-active-directory-access-token` — pre-obtained token (does **not** auto-refresh)
+- `azure-active-directory-service-principal-secret` — service principal with `azure_client_id`, `azure_client_secret`, `azure_tenant_id`
+- `azure-active-directory-msi-vm` / `azure-active-directory-msi-app-service` — managed identity
+
+### Algorithm Behavior
+
+- **Same-warehouse** MSSQL or Fabric → `joindiff` (single FULL OUTER JOIN, most efficient)
+- **Cross-warehouse** MSSQL/Fabric ↔ other database → `hashdiff` (automatic when using `auto`)
+- The Rust engine maps `sqlserver`/`mssql` to `tsql` dialect and `fabric` to `fabric` dialect — both generate valid T-SQL syntax with bracket quoting (`[schema].[table]`).
