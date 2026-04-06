@@ -27,6 +27,15 @@ export namespace SessionProcessor {
   // 30 catches pathological patterns while avoiding false positives for power users.
   const TOOL_REPEAT_THRESHOLD = 30
   // altimate_change end
+  // altimate_change start — escalating circuit breaker for doom loops
+  // When the repeat threshold is hit and auto-accepted (headless, config allow), the
+  // counter resets and the loop continues indefinitely. Escalation levels:
+  //   1st hit (30 calls):  ask permission (existing behavior)
+  //   2nd hit (60 calls):  ask + inject synthetic warning telling model to change approach
+  //   3rd hit (90 calls):  force-stop the session — the model is stuck
+  const DOOM_LOOP_WARN_ESCALATION = 2 // hits before injecting warning
+  const DOOM_LOOP_STOP_ESCALATION = 3 // hits before force-stopping
+  // altimate_change end
   const log = Log.create({ service: "session.processor" })
 
   export type Info = Awaited<ReturnType<typeof create>>
@@ -41,6 +50,9 @@ export namespace SessionProcessor {
     const toolcalls: Record<string, MessageV2.ToolPart> = {}
     // altimate_change start — per-tool call counter for varied-input loop detection
     const toolCallCounts: Record<string, number> = {}
+    // altimate_change end
+    // altimate_change start — escalation counter: how many times each tool has hit TOOL_REPEAT_THRESHOLD
+    const toolLoopHits: Record<string, number> = {}
     // altimate_change end
     let snapshot: string | undefined
     let blocked = false
@@ -201,20 +213,74 @@ export namespace SessionProcessor {
                       })
                     }
 
-                    // altimate_change start — per-tool repeat counter (catches varied-input loops like todowrite 2,080x)
+                    // altimate_change start — per-tool repeat counter with escalating circuit breaker
                     // Counter is scoped to the processor lifetime (create() call), so it accumulates
                     // across multiple process() invocations within a session. This is intentional:
                     // cross-turn accumulation catches slow-burn loops that stay under the threshold
                     // per-turn but add up over the session.
                     toolCallCounts[value.toolName] = (toolCallCounts[value.toolName] ?? 0) + 1
                     if (toolCallCounts[value.toolName] >= TOOL_REPEAT_THRESHOLD) {
+                      toolLoopHits[value.toolName] = (toolLoopHits[value.toolName] ?? 0) + 1
+                      const hits = toolLoopHits[value.toolName]
+                      const totalCalls = hits * TOOL_REPEAT_THRESHOLD
+
                       Telemetry.track({
                         type: "doom_loop_detected",
                         timestamp: Date.now(),
                         session_id: input.sessionID,
                         tool_name: value.toolName,
-                        repeat_count: toolCallCounts[value.toolName],
+                        repeat_count: totalCalls,
+                        escalation_level: hits,
                       })
+
+                      // Escalation level 3+: force-stop — the model is irretrievably stuck
+                      if (hits >= DOOM_LOOP_STOP_ESCALATION) {
+                        log.warn("doom loop circuit breaker: force-stopping session", {
+                          tool: value.toolName,
+                          totalCalls,
+                          hits,
+                          sessionID: input.sessionID,
+                        })
+                        await Session.updatePart({
+                          id: PartID.ascending(),
+                          messageID: input.assistantMessage.id,
+                          sessionID: input.assistantMessage.sessionID,
+                          type: "text",
+                          synthetic: true,
+                          text:
+                            `⚠️ altimate-code: session stopped — \`${value.toolName}\` was called ${totalCalls}+ times, ` +
+                            `indicating the agent is stuck in a loop. Please start a new session with a revised prompt.`,
+                          time: { start: Date.now(), end: Date.now() },
+                        })
+                        blocked = true
+                        toolCallCounts[value.toolName] = 0
+                        break
+                      }
+
+                      // Escalation level 2: warn the model via synthetic message
+                      if (hits >= DOOM_LOOP_WARN_ESCALATION) {
+                        log.warn("doom loop escalation: injecting warning", {
+                          tool: value.toolName,
+                          totalCalls,
+                          hits,
+                          sessionID: input.sessionID,
+                        })
+                        await Session.updatePart({
+                          id: PartID.ascending(),
+                          messageID: input.assistantMessage.id,
+                          sessionID: input.assistantMessage.sessionID,
+                          type: "text",
+                          // synthetic: false so the LLM actually sees this warning and can course-correct
+                          text:
+                            `⚠️ altimate-code: \`${value.toolName}\` has been called ${totalCalls}+ times this session. ` +
+                            `You appear to be stuck in a loop. Stop repeating the same approach. ` +
+                            `Either try a fundamentally different strategy or explain to the user what is blocking you. ` +
+                            `The session will be force-stopped if this continues.`,
+                          time: { start: Date.now(), end: Date.now() },
+                        })
+                      }
+
+                      // Escalation level 1: ask permission (existing behavior)
                       const agent = await Agent.get(input.assistantMessage.agent)
                       await PermissionNext.ask({
                         permission: "doom_loop",
@@ -223,7 +289,7 @@ export namespace SessionProcessor {
                         metadata: {
                           tool: value.toolName,
                           input: value.input,
-                          repeat_count: toolCallCounts[value.toolName],
+                          repeat_count: totalCalls,
                         },
                         always: [value.toolName],
                         ruleset: agent.permission,
@@ -478,6 +544,9 @@ export namespace SessionProcessor {
                   continue
               }
               if (needsCompaction) break
+              // altimate_change start — exit stream loop immediately on doom loop force-stop
+              if (blocked) break
+              // altimate_change end
             }
           } catch (e: any) {
             log.error("process", {

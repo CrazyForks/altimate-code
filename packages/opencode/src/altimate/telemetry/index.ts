@@ -243,6 +243,9 @@ export namespace Telemetry {
         session_id: string
         tool_name: string
         repeat_count: number
+        // altimate_change start — escalation level for distinguishing ask/warn/stop in analytics
+        escalation_level?: number
+        // altimate_change end
       }
     | {
         type: "environment_census"
