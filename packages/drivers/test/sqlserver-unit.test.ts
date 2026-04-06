@@ -1,0 +1,211 @@
+/**
+ * Unit tests for SQL Server driver logic:
+ * - TOP injection (vs LIMIT)
+ * - Truncation detection
+ * - Schema introspection queries
+ * - Connection lifecycle
+ * - Result format mapping
+ */
+import { describe, test, expect, mock, beforeEach } from "bun:test"
+
+// --- Mock mssql ---
+
+let mockQueryCalls: string[] = []
+let mockQueryResult: any = { recordset: [] }
+let mockConnectCalls: any[] = []
+let mockCloseCalls = 0
+let mockInputs: Array<{ name: string; value: any }> = []
+
+function resetMocks() {
+  mockQueryCalls = []
+  mockQueryResult = { recordset: [] }
+  mockConnectCalls = []
+  mockCloseCalls = 0
+  mockInputs = []
+}
+
+function createMockRequest() {
+  const req: any = {
+    input(name: string, value: any) {
+      mockInputs.push({ name, value })
+      return req
+    },
+    async query(sql: string) {
+      mockQueryCalls.push(sql)
+      return mockQueryResult
+    },
+  }
+  return req
+}
+
+mock.module("mssql", () => ({
+  default: {
+    connect: async (config: any) => {
+      mockConnectCalls.push(config)
+      return {
+        request: () => createMockRequest(),
+        close: async () => {
+          mockCloseCalls++
+        },
+      }
+    },
+  },
+}))
+
+// Import after mocking
+const { connect } = await import("../src/sqlserver")
+
+describe("SQL Server driver unit tests", () => {
+  let connector: Awaited<ReturnType<typeof connect>>
+
+  beforeEach(async () => {
+    resetMocks()
+    connector = await connect({ host: "localhost", port: 1433, database: "testdb", user: "sa", password: "pass" })
+    await connector.connect()
+  })
+
+  // --- TOP injection ---
+
+  describe("TOP injection", () => {
+    test("injects TOP for SELECT without one", async () => {
+      mockQueryResult = { recordset: [{ id: 1, name: "a" }] }
+      await connector.execute("SELECT * FROM t")
+      expect(mockQueryCalls[0]).toContain("TOP 1001")
+    })
+
+    test("does NOT double-TOP when TOP already present", async () => {
+      mockQueryResult = { recordset: [{ id: 1 }] }
+      await connector.execute("SELECT TOP 5 * FROM t")
+      expect(mockQueryCalls[0]).toBe("SELECT TOP 5 * FROM t")
+    })
+
+    test("does NOT inject TOP when LIMIT present", async () => {
+      mockQueryResult = { recordset: [] }
+      await connector.execute("SELECT * FROM t LIMIT 10")
+      expect(mockQueryCalls[0]).toBe("SELECT * FROM t LIMIT 10")
+    })
+
+    test("noLimit bypasses TOP injection", async () => {
+      mockQueryResult = { recordset: [] }
+      await connector.execute("SELECT * FROM t", undefined, undefined, { noLimit: true })
+      expect(mockQueryCalls[0]).toBe("SELECT * FROM t")
+    })
+
+    test("uses custom limit value", async () => {
+      mockQueryResult = { recordset: [] }
+      await connector.execute("SELECT * FROM t", 50)
+      expect(mockQueryCalls[0]).toContain("TOP 51")
+    })
+
+    test("default limit is 1000", async () => {
+      mockQueryResult = { recordset: [] }
+      await connector.execute("SELECT * FROM t")
+      expect(mockQueryCalls[0]).toContain("TOP 1001")
+    })
+  })
+
+  // --- Truncation ---
+
+  describe("truncation detection", () => {
+    test("detects truncation when rows exceed limit", async () => {
+      const rows = Array.from({ length: 11 }, (_, i) => ({ id: i }))
+      mockQueryResult = { recordset: rows }
+      const result = await connector.execute("SELECT * FROM t", 10)
+      expect(result.truncated).toBe(true)
+      expect(result.rows.length).toBe(10)
+    })
+
+    test("no truncation when rows at or below limit", async () => {
+      mockQueryResult = { recordset: [{ id: 1 }, { id: 2 }] }
+      const result = await connector.execute("SELECT * FROM t", 10)
+      expect(result.truncated).toBe(false)
+    })
+
+    test("empty result returns correctly", async () => {
+      mockQueryResult = { recordset: [], recordset_columns: {} }
+      const result = await connector.execute("SELECT * FROM t")
+      expect(result.rows).toEqual([])
+      expect(result.truncated).toBe(false)
+    })
+  })
+
+  // --- Schema introspection ---
+
+  describe("schema introspection", () => {
+    test("listSchemas queries sys.schemas", async () => {
+      mockQueryResult = { recordset: [{ name: "dbo" }, { name: "sales" }] }
+      const schemas = await connector.listSchemas()
+      expect(mockQueryCalls[0]).toContain("sys.schemas")
+      expect(schemas).toEqual(["dbo", "sales"])
+    })
+
+    test("listTables queries sys.tables and sys.views", async () => {
+      mockQueryResult = {
+        recordset: [
+          { name: "orders", type: "U " },
+          { name: "order_summary", type: "V" },
+        ],
+      }
+      const tables = await connector.listTables("dbo")
+      expect(mockQueryCalls[0]).toContain("UNION ALL")
+      expect(mockQueryCalls[0]).toContain("sys.tables")
+      expect(mockQueryCalls[0]).toContain("sys.views")
+      expect(tables).toEqual([
+        { name: "orders", type: "table" },
+        { name: "order_summary", type: "view" },
+      ])
+    })
+
+    test("describeTable queries sys.columns", async () => {
+      mockQueryResult = {
+        recordset: [
+          { column_name: "id", data_type: "int", is_nullable: 0 },
+          { column_name: "name", data_type: "nvarchar", is_nullable: 1 },
+        ],
+      }
+      const cols = await connector.describeTable("dbo", "users")
+      expect(mockQueryCalls[0]).toContain("sys.columns")
+      expect(cols).toEqual([
+        { name: "id", data_type: "int", nullable: false },
+        { name: "name", data_type: "nvarchar", nullable: true },
+      ])
+    })
+  })
+
+  // --- Connection lifecycle ---
+
+  describe("connection lifecycle", () => {
+    test("close is idempotent", async () => {
+      await connector.close()
+      await connector.close()
+      expect(mockCloseCalls).toBe(1)
+    })
+  })
+
+  // --- Result format ---
+
+  describe("result format", () => {
+    test("maps recordset to column-ordered arrays", async () => {
+      mockQueryResult = {
+        recordset: [
+          { id: 1, name: "alice", age: 30 },
+          { id: 2, name: "bob", age: 25 },
+        ],
+      }
+      const result = await connector.execute("SELECT id, name, age FROM t")
+      expect(result.columns).toEqual(["id", "name", "age"])
+      expect(result.rows).toEqual([
+        [1, "alice", 30],
+        [2, "bob", 25],
+      ])
+    })
+
+    test("filters underscore-prefixed columns", async () => {
+      mockQueryResult = {
+        recordset: [{ id: 1, _bucket: 3, name: "x" }],
+      }
+      const result = await connector.execute("SELECT * FROM t")
+      expect(result.columns).toEqual(["id", "name"])
+    })
+  })
+})

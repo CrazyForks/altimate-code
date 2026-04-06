@@ -104,6 +104,7 @@ const DRIVER_ALIASES: Record<string, AliasMap> = {
   mariadb: MYSQL_ALIASES,
   sqlserver: SQLSERVER_ALIASES,
   mssql: SQLSERVER_ALIASES,
+  fabric: SQLSERVER_ALIASES,
   oracle: ORACLE_ALIASES,
   mongodb: MONGODB_ALIASES,
   mongo: MONGODB_ALIASES,

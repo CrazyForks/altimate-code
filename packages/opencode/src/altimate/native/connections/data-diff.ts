@@ -11,6 +11,24 @@ import type { DataDiffParams, DataDiffResult, PartitionDiffResult } from "../typ
 import * as Registry from "./registry"
 
 // ---------------------------------------------------------------------------
+// Dialect mapping — bridge warehouse config types to Rust SqlDialect serde names
+// ---------------------------------------------------------------------------
+
+/** Map warehouse config types to Rust SqlDialect serde names. */
+const WAREHOUSE_TO_DIALECT: Record<string, string> = {
+  sqlserver: "tsql",
+  mssql: "tsql",
+  fabric: "fabric",
+  postgresql: "postgres",
+  mariadb: "mysql",
+}
+
+/** Convert a warehouse config type to the Rust-compatible SqlDialect name. */
+export function warehouseTypeToDialect(warehouseType: string): string {
+  return WAREHOUSE_TO_DIALECT[warehouseType.toLowerCase()] ?? warehouseType.toLowerCase()
+}
+
+// ---------------------------------------------------------------------------
 // Query-source detection
 // ---------------------------------------------------------------------------
 
@@ -18,10 +36,17 @@ const SQL_KEYWORDS = /^\s*(SELECT|WITH|VALUES)\b/i
 
 /**
  * Detect whether a string is an arbitrary SQL query (vs a plain table name).
- * Plain table names may contain dots (schema.table, db.schema.table) but not spaces.
+ *
+ * A SQL query starts with a keyword AND contains whitespace (e.g., "SELECT * FROM ...").
+ * A plain table name — even one named "select" or "with" — is a single token without
+ * internal whitespace (possibly dot-separated like schema.table or db.schema.table).
+ *
+ * The \b in SQL_KEYWORDS already prevents matching "with_metadata" or "select_results",
+ * but the whitespace check additionally handles bare keyword table names like "select".
  */
 function isQuery(input: string): boolean {
-  return SQL_KEYWORDS.test(input)
+  const trimmed = input.trim()
+  return SQL_KEYWORDS.test(trimmed) && /\s/.test(trimmed)
 }
 
 /**
@@ -449,6 +474,12 @@ function dateTruncExpr(granularity: string, column: string, dialect: string): st
       }
       return `TRUNC(${column}, '${oracleFmt[g] ?? g.toUpperCase()}')`
     }
+    case "sqlserver":
+    case "mssql":
+    case "tsql":
+    case "fabric":
+      // SQL Server 2022+ / Fabric: DATETRUNC expects unquoted datepart keyword
+      return `DATETRUNC(${g.toUpperCase()}, ${column})`
     default:
       // Postgres, Snowflake, Redshift, DuckDB, etc.
       return `DATE_TRUNC('${g}', ${column})`
@@ -536,6 +567,12 @@ function buildPartitionWhereClause(
     case "mysql":
     case "mariadb":
       return `${expr} = '${partitionValue}'`
+    case "sqlserver":
+    case "mssql":
+    case "tsql":
+    case "fabric":
+      // Style 23 = ISO-8601 (yyyy-mm-dd), locale-safe
+      return `${expr} = CONVERT(DATE, '${partitionValue}', 23)`
     default:
       return `${expr} = '${partitionValue}'`
   }
@@ -623,10 +660,10 @@ async function runPartitionedDiff(params: DataDiffParams): Promise<DataDiffResul
   const resolveDialect = (warehouse: string | undefined): string => {
     if (warehouse) {
       const cfg = Registry.getConfig(warehouse)
-      return cfg?.type ?? "generic"
+      return warehouseTypeToDialect(cfg?.type ?? "generic")
     }
     const warehouses = Registry.list().warehouses
-    return warehouses[0]?.type ?? "generic"
+    return warehouseTypeToDialect(warehouses[0]?.type ?? "generic")
   }
 
   const sourceDialect = resolveDialect(params.source_warehouse)
@@ -766,10 +803,10 @@ export async function runDataDiff(params: DataDiffParams): Promise<DataDiffResul
   const resolveDialect = (warehouse: string | undefined): string => {
     if (warehouse) {
       const cfg = Registry.getConfig(warehouse)
-      return cfg?.type ?? "generic"
+      return warehouseTypeToDialect(cfg?.type ?? "generic")
     }
     const warehouses = Registry.list().warehouses
-    return warehouses[0]?.type ?? "generic"
+    return warehouseTypeToDialect(warehouses[0]?.type ?? "generic")
   }
 
   const dialect1 = resolveDialect(params.source_warehouse)
