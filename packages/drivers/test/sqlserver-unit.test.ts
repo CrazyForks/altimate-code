@@ -53,18 +53,6 @@ mock.module("mssql", () => ({
   },
 }))
 
-// Mock @azure/identity for Azure AD tests
-class MockDefaultAzureCredential {
-  opts: any
-  constructor(opts?: any) {
-    this.opts = opts
-  }
-}
-
-mock.module("@azure/identity", () => ({
-  DefaultAzureCredential: MockDefaultAzureCredential,
-}))
-
 // Import after mocking
 const { connect } = await import("../src/sqlserver")
 
@@ -250,7 +238,7 @@ describe("SQL Server driver unit tests", () => {
       })
     })
 
-    test("azure-active-directory-default uses DefaultAzureCredential", async () => {
+    test("azure-active-directory-default passes type to tedious (no credential object)", async () => {
       resetMocks()
       const c = await connect({
         host: "myserver.database.windows.net",
@@ -259,23 +247,22 @@ describe("SQL Server driver unit tests", () => {
       })
       await c.connect()
       const cfg = mockConnectCalls[0]
-      expect(cfg.authentication.type).toBe("token-credential")
-      expect(cfg.authentication.options.credential).toBeInstanceOf(MockDefaultAzureCredential)
+      expect(cfg.authentication.type).toBe("azure-active-directory-default")
+      expect(cfg.authentication.options.credential).toBeUndefined()
     })
 
-    test("token-credential uses DefaultAzureCredential with managed identity", async () => {
+    test("azure-active-directory-default with client_id passes clientId option", async () => {
       resetMocks()
       const c = await connect({
         host: "myserver.database.windows.net",
         database: "db",
-        authentication: "token-credential",
+        authentication: "azure-active-directory-default",
         azure_client_id: "mi-client-id",
       })
       await c.connect()
       const cfg = mockConnectCalls[0]
-      expect(cfg.authentication.type).toBe("token-credential")
-      const cred = cfg.authentication.options.credential as MockDefaultAzureCredential
-      expect(cred.opts).toEqual({ managedIdentityClientId: "mi-client-id" })
+      expect(cfg.authentication.type).toBe("azure-active-directory-default")
+      expect(cfg.authentication.options.clientId).toBe("mi-client-id")
     })
 
     test("encryption forced for all Azure AD connections", async () => {
@@ -298,6 +285,47 @@ describe("SQL Server driver unit tests", () => {
       await c.connect()
       const cfg = mockConnectCalls[0]
       expect(cfg.options.encrypt).toBe(false)
+    })
+
+    test("'CLI' shorthand maps to azure-active-directory-default", async () => {
+      resetMocks()
+      const c = await connect({
+        host: "myserver.datawarehouse.fabric.microsoft.com",
+        database: "migration",
+        authentication: "CLI",
+      })
+      await c.connect()
+      const cfg = mockConnectCalls[0]
+      expect(cfg.authentication.type).toBe("azure-active-directory-default")
+      expect(cfg.options.encrypt).toBe(true)
+    })
+
+    test("'service-principal' shorthand maps correctly", async () => {
+      resetMocks()
+      const c = await connect({
+        host: "myserver.database.windows.net",
+        database: "db",
+        authentication: "service-principal",
+        azure_client_id: "cid",
+        azure_client_secret: "csec",
+        azure_tenant_id: "tid",
+      })
+      await c.connect()
+      const cfg = mockConnectCalls[0]
+      expect(cfg.authentication.type).toBe("azure-active-directory-service-principal-secret")
+      expect(cfg.authentication.options.clientId).toBe("cid")
+    })
+
+    test("'msi' shorthand maps to azure-active-directory-msi-vm", async () => {
+      resetMocks()
+      const c = await connect({
+        host: "myserver.database.windows.net",
+        database: "db",
+        authentication: "msi",
+      })
+      await c.connect()
+      const cfg = mockConnectCalls[0]
+      expect(cfg.authentication.type).toBe("azure-active-directory-msi-vm")
     })
   })
 
@@ -372,12 +400,12 @@ describe("SQL Server driver unit tests", () => {
       ])
     })
 
-    test("filters underscore-prefixed columns", async () => {
+    test("preserves underscore-prefixed columns", async () => {
       mockQueryResult = {
-        recordset: [{ id: 1, _bucket: 3, name: "x" }],
+        recordset: [{ id: 1, _p: "Delivered", name: "x" }],
       }
       const result = await connector.execute("SELECT * FROM t")
-      expect(result.columns).toEqual(["id", "name"])
+      expect(result.columns).toEqual(["id", "_p", "name"])
     })
   })
 })

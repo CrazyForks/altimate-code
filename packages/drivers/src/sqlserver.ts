@@ -37,29 +37,30 @@ export async function connect(config: ConnectionConfig): Promise<Connector> {
         },
       }
 
-      const authType = config.authentication as string | undefined
+      // Normalize shorthand auth values to tedious-compatible types
+      const AUTH_SHORTHANDS: Record<string, string> = {
+        cli: "azure-active-directory-default",
+        default: "azure-active-directory-default",
+        password: "azure-active-directory-password",
+        "service-principal": "azure-active-directory-service-principal-secret",
+        serviceprincipal: "azure-active-directory-service-principal-secret",
+        "managed-identity": "azure-active-directory-msi-vm",
+        msi: "azure-active-directory-msi-vm",
+      }
+      const rawAuth = config.authentication as string | undefined
+      const authType = rawAuth ? (AUTH_SHORTHANDS[rawAuth.toLowerCase()] ?? rawAuth) : undefined
 
-      if (authType?.startsWith("azure-active-directory") || authType === "token-credential") {
-        // Azure AD / Entra ID — always encrypt
+      if (authType?.startsWith("azure-active-directory")) {
+        // Azure AD / Entra ID — tedious handles credential creation internally.
+        // We pass the type + options; tedious imports @azure/identity itself.
         ;(mssqlConfig.options as any).encrypt = true
 
-        if (authType === "token-credential" || authType === "azure-active-directory-default") {
-          try {
-            const { DefaultAzureCredential } = await import("@azure/identity")
-            mssqlConfig.authentication = {
-              type: "token-credential",
-              options: {
-                credential: new DefaultAzureCredential(
-                  config.azure_client_id
-                    ? { managedIdentityClientId: config.azure_client_id as string }
-                    : undefined,
-                ),
-              },
-            }
-          } catch {
-            throw new Error(
-              "Azure AD authentication requires @azure/identity. Run: npm install @azure/identity",
-            )
+        if (authType === "azure-active-directory-default") {
+          mssqlConfig.authentication = {
+            type: "azure-active-directory-default",
+            options: {
+              ...(config.azure_client_id && { clientId: config.azure_client_id as string }),
+            },
           }
         } else if (authType === "azure-active-directory-password") {
           mssqlConfig.authentication = {
@@ -128,7 +129,7 @@ export async function connect(config: ConnectionConfig): Promise<Connector> {
       const rows = result.recordset ?? []
       const columns =
         rows.length > 0
-          ? Object.keys(rows[0]).filter((k) => !k.startsWith("_"))
+          ? Object.keys(rows[0])
           : (result.recordset?.columns
               ? Object.keys(result.recordset.columns)
               : [])
