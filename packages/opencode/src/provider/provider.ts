@@ -1638,10 +1638,15 @@ export namespace Provider {
     }
 
     // altimate_change start — default to altimate-backend when configured and no model chosen yet
-    const altimateProvider = providers[ProviderID.make("altimate-backend")]
-    if (altimateProvider && altimateProvider.models[ModelID.make("altimate-default")]) {
+    const altimateProviderID = ProviderID.make("altimate-backend")
+    const altimateProvider = providers[altimateProviderID]
+    if (
+      altimateProvider &&
+      altimateProvider.models[ModelID.make("altimate-default")] &&
+      (!cfg.provider || Object.keys(cfg.provider).includes(String(altimateProviderID)))
+    ) {
       return {
-        providerID: ProviderID.make("altimate-backend"),
+        providerID: altimateProviderID,
         modelID: ModelID.make("altimate-default"),
       }
     }
