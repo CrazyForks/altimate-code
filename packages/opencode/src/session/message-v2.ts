@@ -995,7 +995,9 @@ export namespace MessageV2 {
               },
             ).toObject()
           }
-        } catch {}
+        } catch (parseErr) {
+          console.warn("[message-v2] Failed to parse stream error:", parseErr)
+        }
         return new NamedError.Unknown({ message: JSON.stringify(e) }, { cause: e }).toObject()
     }
   }
