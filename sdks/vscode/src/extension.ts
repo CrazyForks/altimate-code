@@ -78,7 +78,9 @@ export function activate(context: vscode.ExtensionContext) {
         await fetch(`http://localhost:${port}/app`)
         connected = true
         break
-      } catch (e) {}
+      } catch (e) {
+        console.warn(`[opencode-vscode] connection attempt ${11 - tries}/10 failed:`, e instanceof Error ? e.message : e)
+      }
 
       tries--
     } while (tries > 0)
