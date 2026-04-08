@@ -281,7 +281,9 @@ async function assertOpencodeConnected() {
       })
       connected = true
       break
-    } catch (e) {}
+    } catch (e) {
+      console.warn(`[assertOpencodeConnected] retry ${retry}/30 failed:`, e instanceof Error ? e.message : e)
+    }
     await sleep(300)
   } while (retry++ < 30)
 
