@@ -7,7 +7,6 @@ import { Instance } from "../../src/project/instance"
 import { Provider } from "../../src/provider/provider"
 import { ProviderID, ModelID } from "../../src/provider/schema"
 import { Env } from "../../src/env"
-import { Global } from "../../src/global"
 
 test("provider loaded from env variable", async () => {
   await using tmp = await tmpdir({
@@ -2367,7 +2366,8 @@ test("defaultModel returns altimate-backend when altimate credentials exist and 
       },
     })
   } finally {
-    process.env.OPENCODE_TEST_HOME = originalHome
+    if (originalHome === undefined) delete process.env.OPENCODE_TEST_HOME
+    else process.env.OPENCODE_TEST_HOME = originalHome
   }
 })
 
@@ -2412,7 +2412,8 @@ test("defaultModel prefers altimate-backend over other providers when altimate i
       },
     })
   } finally {
-    process.env.OPENCODE_TEST_HOME = originalHome
+    if (originalHome === undefined) delete process.env.OPENCODE_TEST_HOME
+    else process.env.OPENCODE_TEST_HOME = originalHome
   }
 })
 
@@ -2453,7 +2454,8 @@ test("defaultModel respects explicit config model over altimate-backend", async 
       },
     })
   } finally {
-    process.env.OPENCODE_TEST_HOME = originalHome
+    if (originalHome === undefined) delete process.env.OPENCODE_TEST_HOME
+    else process.env.OPENCODE_TEST_HOME = originalHome
   }
 })
 
