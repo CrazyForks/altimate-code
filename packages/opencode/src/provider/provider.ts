@@ -1637,6 +1637,24 @@ export namespace Provider {
       return { providerID: entry.providerID, modelID: entry.modelID }
     }
 
+    // altimate_change start — default to altimate-backend when configured and no model chosen yet
+    const altimateProviderID = ProviderID.make("altimate-backend")
+    const altimateProvider = providers[altimateProviderID]
+    if (
+      altimateProvider &&
+      altimateProvider.models[ModelID.make("altimate-default")] &&
+      (!cfg.provider || Object.keys(cfg.provider).includes(String(altimateProviderID)))
+    ) {
+      // altimate_change start — log when altimate-backend auto-selected
+      log.info("defaulting to altimate-backend/altimate-default (no model configured)")
+      // altimate_change end
+      return {
+        providerID: altimateProviderID,
+        modelID: ModelID.make("altimate-default"),
+      }
+    }
+    // altimate_change end
+
     const provider = Object.values(providers).find((p) => !cfg.provider || Object.keys(cfg.provider).includes(p.id))
     if (!provider) throw new Error("no providers found")
     const [model] = sort(Object.values(provider.models))
