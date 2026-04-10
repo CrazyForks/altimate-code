@@ -76,7 +76,7 @@ Source Freshness:
 
 Generate dbt unit tests (v1.8+) from a compiled manifest. Analyzes model SQL for testable logic (CASE/WHEN, JOINs, NULLs, window functions, division, incremental), generates type-correct mock inputs, and assembles complete YAML.
 
-```
+```text
 > dbt_unit_test_gen --manifest_path target/manifest.json --model fct_orders --max_scenarios 5
 
 Unit Test Gen: 4 test(s) for fct_orders
@@ -112,7 +112,7 @@ unit_tests:
           - { order_id: 2, quantity: 1, unit_price: 50 }
     expect:
       rows:
-        - { order_id: 1, order_total: 100 }
+        - { order_id: 1, order_total: 300 }
         - { order_id: 2, order_total: 50 }
   # ... null_handling, edge_case, incremental tests
 ```
@@ -171,7 +171,7 @@ All commands provide friendly error diagnostics with actionable fix suggestions 
 
 Automated dbt unit test generation (v1.8+). Uses `dbt_unit_test_gen` to produce scaffold YAML, then refines expected outputs by reading the compiled SQL and running it against the mock data.
 
-```
+```text
 You: /dbt-unit-tests fct_orders
 
 > dbt_unit_test_gen --manifest_path target/manifest.json --model fct_orders
