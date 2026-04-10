@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test"
+import { describe, test, expect } from "bun:test"
 import fs from "fs"
 import path from "path"
 import YAML from "yaml"
@@ -7,25 +7,15 @@ import { generateDbtUnitTests, assembleYaml } from "../../src/altimate/native/db
 import type { UnitTestCase } from "../../src/altimate/native/types"
 
 // ---------------------------------------------------------------------------
-// Helpers — use shared tmpdir() fixture for automatic cleanup
+// Helpers — each test uses `await using tmp = await tmpdir()` for its own
+// disposable tmpdir. No suite-level state.
 // ---------------------------------------------------------------------------
 
-let tmp: Awaited<ReturnType<typeof tmpdir>>
-let manifestCounter = 0
-
-beforeEach(async () => {
-  tmp = await tmpdir()
-  manifestCounter = 0
-})
-
-afterEach(async () => {
-  await tmp[Symbol.asyncDispose]()
-})
-
-function writeTmpManifest(content: object | string): string {
-  const tmpFile = path.join(tmp.path, `manifest-${manifestCounter++}.json`)
-  fs.writeFileSync(tmpFile, typeof content === "string" ? content : JSON.stringify(content))
-  return tmpFile
+/** Write a manifest JSON into the given tmp dir and return its absolute path. */
+function writeManifestTo(dirPath: string, content: object | string): string {
+  const p = path.join(dirPath, "manifest.json")
+  fs.writeFileSync(p, typeof content === "string" ? content : JSON.stringify(content))
+  return p
 }
 
 function makeManifest(overrides?: {
@@ -78,22 +68,25 @@ describe("generateDbtUnitTests", () => {
   })
 
   test("returns error when model not found", async () => {
-    const r = await generateDbtUnitTests({ manifest_path: writeTmpManifest(makeManifest()), model: "nope" })
+    await using tmp = await tmpdir()
+    const r = await generateDbtUnitTests({ manifest_path: writeManifestTo(tmp.path, makeManifest()), model: "nope" })
     expect(r.success).toBe(false)
     expect(r.error).toContain("not found in manifest")
   })
 
   test("returns error when compiled SQL is missing", async () => {
+    await using tmp = await tmpdir()
     const m = makeManifest({ compiledSql: "" })
     const key = Object.keys(m.nodes).find((k) => k.includes("fct_orders"))!
     ;(m.nodes as any)[key].compiled_code = ""
-    const r = await generateDbtUnitTests({ manifest_path: writeTmpManifest(m), model: "fct_orders" })
+    const r = await generateDbtUnitTests({ manifest_path: writeManifestTo(tmp.path, m), model: "fct_orders" })
     expect(r.success).toBe(false)
     expect(r.error).toContain("No compiled SQL found")
   })
 
   test("generates happy path test for simple model", async () => {
-    const r = await generateDbtUnitTests({ manifest_path: writeTmpManifest(makeManifest()), model: "fct_orders" })
+    await using tmp = await tmpdir()
+    const r = await generateDbtUnitTests({ manifest_path: writeManifestTo(tmp.path, makeManifest()), model: "fct_orders" })
     expect(r.success).toBe(true)
     expect(r.model_name).toBe("fct_orders")
     expect(r.materialized).toBe("table")
@@ -106,7 +99,8 @@ describe("generateDbtUnitTests", () => {
   })
 
   test("YAML output is valid and parseable", async () => {
-    const r = await generateDbtUnitTests({ manifest_path: writeTmpManifest(makeManifest()), model: "fct_orders" })
+    await using tmp = await tmpdir()
+    const r = await generateDbtUnitTests({ manifest_path: writeManifestTo(tmp.path, makeManifest()), model: "fct_orders" })
     expect(r.yaml).toBeTruthy()
     // Round-trip: parse the generated YAML and verify structure
     const parsed = YAML.parse(r.yaml)
@@ -118,8 +112,9 @@ describe("generateDbtUnitTests", () => {
   })
 
   test("detects CASE/WHEN and generates null_handling test", async () => {
+    await using tmp = await tmpdir()
     const r = await generateDbtUnitTests({
-      manifest_path: writeTmpManifest(makeManifest({
+      manifest_path: writeManifestTo(tmp.path, makeManifest({
         compiledSql: `SELECT order_id, CASE WHEN status = 'done' THEN amount ELSE 0 END AS net FROM stg_orders`,
       })),
       model: "fct_orders",
@@ -130,8 +125,9 @@ describe("generateDbtUnitTests", () => {
   })
 
   test("detects division and generates boundary test", async () => {
+    await using tmp = await tmpdir()
     const r = await generateDbtUnitTests({
-      manifest_path: writeTmpManifest(makeManifest({
+      manifest_path: writeManifestTo(tmp.path, makeManifest({
         compiledSql: `SELECT order_id, amount / quantity AS unit_price FROM stg_orders`,
       })),
       model: "fct_orders",
@@ -141,8 +137,9 @@ describe("generateDbtUnitTests", () => {
   })
 
   test("generates incremental test with input: this mock", async () => {
+    await using tmp = await tmpdir()
     const r = await generateDbtUnitTests({
-      manifest_path: writeTmpManifest(makeManifest({ materialized: "incremental" })),
+      manifest_path: writeManifestTo(tmp.path, makeManifest({ materialized: "incremental" })),
       model: "fct_orders",
       max_scenarios: 5,
     })
@@ -157,8 +154,9 @@ describe("generateDbtUnitTests", () => {
   })
 
   test("ephemeral deps with no columns use sql format, not dict", async () => {
+    await using tmp = await tmpdir()
     const r = await generateDbtUnitTests({
-      manifest_path: writeTmpManifest(makeManifest({
+      manifest_path: writeManifestTo(tmp.path, makeManifest({
         upstreamMaterialized: "ephemeral",
         upstreamColumns: {}, // no columns known
       })),
@@ -172,6 +170,7 @@ describe("generateDbtUnitTests", () => {
   })
 
   test("resolves seed dependencies via ref()", async () => {
+    await using tmp = await tmpdir()
     const m = makeManifest()
     const key = Object.keys(m.nodes).find((k) => k.includes("fct_orders"))!
     ;(m.nodes as any)[key].depends_on.nodes = ["seed.my_project.country_codes"]
@@ -183,7 +182,7 @@ describe("generateDbtUnitTests", () => {
       depends_on: { nodes: [] },
       columns: { code: { name: "code", data_type: "VARCHAR" }, name: { name: "name", data_type: "VARCHAR" } },
     }
-    const r = await generateDbtUnitTests({ manifest_path: writeTmpManifest(m), model: "fct_orders" })
+    const r = await generateDbtUnitTests({ manifest_path: writeManifestTo(tmp.path, m), model: "fct_orders" })
     expect(r.success).toBe(true)
     expect(r.dependency_count).toBe(1)
     // Seed should resolve as ref(), not source()
@@ -192,17 +191,19 @@ describe("generateDbtUnitTests", () => {
   })
 
   test("warns when upstream deps cannot be resolved", async () => {
+    await using tmp = await tmpdir()
     const m = makeManifest()
     const key = Object.keys(m.nodes).find((k) => k.includes("fct_orders"))!
     // Add an unresolvable dep — semantic_model.* is a real dbt resource type
     // that parseManifest doesn't extract (and we don't support)
     ;(m.nodes as any)[key].depends_on.nodes.push("semantic_model.my_project.orders_sm")
-    const r = await generateDbtUnitTests({ manifest_path: writeTmpManifest(m), model: "fct_orders" })
+    const r = await generateDbtUnitTests({ manifest_path: writeManifestTo(tmp.path, m), model: "fct_orders" })
     expect(r.success).toBe(true)
     expect(r.warnings.some((w) => w.includes("Could not resolve") && w.includes("semantic_model"))).toBe(true)
   })
 
   test("resolves snapshot dependencies via ref()", async () => {
+    await using tmp = await tmpdir()
     const m = makeManifest()
     const key = Object.keys(m.nodes).find((k) => k.includes("fct_orders"))!
     ;(m.nodes as any)[key].depends_on.nodes = ["snapshot.my_project.orders_snapshot"]
@@ -214,7 +215,7 @@ describe("generateDbtUnitTests", () => {
       depends_on: { nodes: [] },
       columns: { order_id: { name: "order_id", data_type: "INTEGER" }, status: { name: "status", data_type: "VARCHAR" } },
     }
-    const r = await generateDbtUnitTests({ manifest_path: writeTmpManifest(m), model: "fct_orders" })
+    const r = await generateDbtUnitTests({ manifest_path: writeManifestTo(tmp.path, m), model: "fct_orders" })
     expect(r.success).toBe(true)
     expect(r.dependency_count).toBe(1)
     expect(r.tests[0].given[0].input).toBe("ref('orders_snapshot')")
@@ -222,10 +223,11 @@ describe("generateDbtUnitTests", () => {
   })
 
   test("long model names preserve scenario suffix (no truncation collision)", async () => {
+    await using tmp = await tmpdir()
     // 70-char model name — longer than 64-char test name limit
     const longName = "fct_this_is_a_very_long_model_name_that_will_definitely_exceed_limits"
     const r = await generateDbtUnitTests({
-      manifest_path: writeTmpManifest(makeManifest({
+      manifest_path: writeManifestTo(tmp.path, makeManifest({
         modelName: longName,
         compiledSql: `SELECT order_id, CASE WHEN x=1 THEN 'a' END, a/b FROM stg_orders`,
       })),
@@ -242,9 +244,10 @@ describe("generateDbtUnitTests", () => {
   })
 
   test("division in string literals does not trigger boundary scenario", async () => {
+    await using tmp = await tmpdir()
     // The SQL has '/' only inside a string literal — should NOT trigger division edge case
     const r = await generateDbtUnitTests({
-      manifest_path: writeTmpManifest(makeManifest({
+      manifest_path: writeManifestTo(tmp.path, makeManifest({
         compiledSql: `SELECT order_id, '2024/01/15' AS date_str FROM stg_orders`,
       })),
       model: "fct_orders",
@@ -257,7 +260,8 @@ describe("generateDbtUnitTests", () => {
   })
 
   test("test names are deterministic across runs", async () => {
-    const manifestPath = writeTmpManifest(makeManifest({
+    await using tmp = await tmpdir()
+    const manifestPath = writeManifestTo(tmp.path, makeManifest({
       compiledSql: `SELECT order_id, CASE WHEN x=1 THEN 'a' ELSE 'b' END, a/b FROM stg_orders`,
     }))
     const r1 = await generateDbtUnitTests({ manifest_path: manifestPath, model: "fct_orders", max_scenarios: 5 })
@@ -267,8 +271,9 @@ describe("generateDbtUnitTests", () => {
   })
 
   test("uses sql format for ephemeral upstream models", async () => {
+    await using tmp = await tmpdir()
     const r = await generateDbtUnitTests({
-      manifest_path: writeTmpManifest(makeManifest({ upstreamMaterialized: "ephemeral" })),
+      manifest_path: writeManifestTo(tmp.path, makeManifest({ upstreamMaterialized: "ephemeral" })),
       model: "fct_orders",
     })
     expect(r.success).toBe(true)
@@ -279,6 +284,7 @@ describe("generateDbtUnitTests", () => {
   })
 
   test("handles source() dependencies", async () => {
+    await using tmp = await tmpdir()
     const m = makeManifest()
     const key = Object.keys(m.nodes).find((k) => k.includes("fct_orders"))!
     ;(m.nodes as any)[key].depends_on.nodes = ["source.my_project.raw.orders"]
@@ -288,14 +294,15 @@ describe("generateDbtUnitTests", () => {
         columns: { order_id: { name: "order_id", data_type: "INTEGER" } },
       },
     }
-    const r = await generateDbtUnitTests({ manifest_path: writeTmpManifest(m), model: "fct_orders" })
+    const r = await generateDbtUnitTests({ manifest_path: writeManifestTo(tmp.path, m), model: "fct_orders" })
     expect(r.success).toBe(true)
     expect(r.tests[0].given.find((g) => g.input.includes("source("))).toBeDefined()
   })
 
   test("respects max_scenarios", async () => {
+    await using tmp = await tmpdir()
     const r = await generateDbtUnitTests({
-      manifest_path: writeTmpManifest(makeManifest({
+      manifest_path: writeManifestTo(tmp.path, makeManifest({
         compiledSql: `SELECT order_id, CASE WHEN x=1 THEN 'a' ELSE 'b' END, amount/qty FROM stg_orders`,
       })),
       model: "fct_orders",
@@ -305,6 +312,7 @@ describe("generateDbtUnitTests", () => {
   })
 
   test("handles multiple upstream dependencies", async () => {
+    await using tmp = await tmpdir()
     const m = makeManifest()
     const key = Object.keys(m.nodes).find((k) => k.includes("fct_orders"))!
     ;(m.nodes as any)[key].depends_on.nodes.push("model.my_project.dim_customers")
@@ -313,25 +321,28 @@ describe("generateDbtUnitTests", () => {
       config: { materialized: "table" }, depends_on: { nodes: [] },
       columns: { customer_id: { name: "customer_id", data_type: "INTEGER" } },
     }
-    const r = await generateDbtUnitTests({ manifest_path: writeTmpManifest(m), model: "fct_orders" })
+    const r = await generateDbtUnitTests({ manifest_path: writeManifestTo(tmp.path, m), model: "fct_orders" })
     expect(r.dependency_count).toBe(2)
     expect(r.tests[0].given.length).toBe(2)
   })
 
   test("model lookup by unique_id works", async () => {
-    const r = await generateDbtUnitTests({ manifest_path: writeTmpManifest(makeManifest()), model: "model.my_project.fct_orders" })
+    await using tmp = await tmpdir()
+    const r = await generateDbtUnitTests({ manifest_path: writeManifestTo(tmp.path, makeManifest()), model: "model.my_project.fct_orders" })
     expect(r.success).toBe(true)
     expect(r.model_name).toBe("fct_orders")
   })
 
   test("handles invalid JSON manifest", async () => {
-    const r = await generateDbtUnitTests({ manifest_path: writeTmpManifest("{{not json}}"), model: "fct_orders" })
+    await using tmp = await tmpdir()
+    const r = await generateDbtUnitTests({ manifest_path: writeManifestTo(tmp.path, "{{not json}}"), model: "fct_orders" })
     expect(r.success).toBe(false)
   })
 
   test("test names are valid identifiers and unique", async () => {
+    await using tmp = await tmpdir()
     const r = await generateDbtUnitTests({
-      manifest_path: writeTmpManifest(makeManifest({
+      manifest_path: writeManifestTo(tmp.path, makeManifest({
         compiledSql: `SELECT order_id, CASE WHEN x=1 THEN 'a' ELSE 'b' END, a/b FROM stg_orders`,
       })),
       model: "fct_orders",
@@ -461,25 +472,28 @@ describe("assembleYaml", () => {
 
 describe("context: descriptions and lineage", () => {
   test("includes model description", async () => {
+    await using tmp = await tmpdir()
     const m = makeManifest()
     const key = Object.keys(m.nodes).find((k) => k.includes("fct_orders"))!
     ;(m.nodes as any)[key].description = "Daily order totals"
-    const r = await generateDbtUnitTests({ manifest_path: writeTmpManifest(m), model: "fct_orders" })
+    const r = await generateDbtUnitTests({ manifest_path: writeManifestTo(tmp.path, m), model: "fct_orders" })
     expect(r.context?.model_description).toBe("Daily order totals")
   })
 
   test("includes upstream descriptions", async () => {
+    await using tmp = await tmpdir()
     const m = makeManifest()
     const key = Object.keys(m.nodes).find((k) => k.includes("stg_orders"))!
     ;(m.nodes as any)[key].description = "Staged orders"
-    const r = await generateDbtUnitTests({ manifest_path: writeTmpManifest(m), model: "fct_orders" })
+    const r = await generateDbtUnitTests({ manifest_path: writeManifestTo(tmp.path, m), model: "fct_orders" })
     expect(r.context?.upstream[0].description).toBe("Staged orders")
     expect(r.context?.upstream[0].ref).toBe("ref('stg_orders')")
   })
 
   test("includes column descriptions", async () => {
+    await using tmp = await tmpdir()
     const r = await generateDbtUnitTests({
-      manifest_path: writeTmpManifest(makeManifest({
+      manifest_path: writeManifestTo(tmp.path, makeManifest({
         upstreamColumns: {
           order_id: { name: "order_id", data_type: "INTEGER", description: "PK" },
           unit_price: { name: "unit_price", data_type: "NUMERIC", description: "USD price" },
@@ -496,15 +510,17 @@ describe("context: descriptions and lineage", () => {
   })
 
   test("includes compiled SQL", async () => {
+    await using tmp = await tmpdir()
     const sql = "SELECT order_id, quantity * unit_price AS order_total FROM stg_orders"
     const r = await generateDbtUnitTests({
-      manifest_path: writeTmpManifest(makeManifest({ compiledSql: sql })),
+      manifest_path: writeManifestTo(tmp.path, makeManifest({ compiledSql: sql })),
       model: "fct_orders",
     })
     expect(r.context?.compiled_sql).toBe(sql)
   })
 
   test("source deps use source() ref format", async () => {
+    await using tmp = await tmpdir()
     const m = makeManifest()
     const key = Object.keys(m.nodes).find((k) => k.includes("fct_orders"))!
     ;(m.nodes as any)[key].depends_on.nodes = ["source.my_project.raw.orders"]
@@ -515,7 +531,7 @@ describe("context: descriptions and lineage", () => {
         columns: { order_id: { name: "order_id", data_type: "INTEGER" } },
       },
     }
-    const r = await generateDbtUnitTests({ manifest_path: writeTmpManifest(m), model: "fct_orders" })
+    const r = await generateDbtUnitTests({ manifest_path: writeManifestTo(tmp.path, m), model: "fct_orders" })
     expect(r.context?.upstream[0].ref).toBe("source('raw', 'orders')")
     expect(r.context?.upstream[0].description).toBe("Raw Shopify orders")
   })
@@ -527,8 +543,9 @@ describe("context: descriptions and lineage", () => {
 
 describe("mock data type handling", () => {
   test("generates correct types for various columns", async () => {
+    await using tmp = await tmpdir()
     const r = await generateDbtUnitTests({
-      manifest_path: writeTmpManifest(makeManifest({
+      manifest_path: writeManifestTo(tmp.path, makeManifest({
         upstreamColumns: {
           id: { name: "id", data_type: "INTEGER" },
           name: { name: "name", data_type: "VARCHAR" },
@@ -550,8 +567,9 @@ describe("mock data type handling", () => {
   })
 
   test("null_edge scenario has nulls in non-key columns", async () => {
+    await using tmp = await tmpdir()
     const r = await generateDbtUnitTests({
-      manifest_path: writeTmpManifest(makeManifest({
+      manifest_path: writeManifestTo(tmp.path, makeManifest({
         compiledSql: `SELECT order_id, COALESCE(discount, 0) AS d FROM stg_orders`,
         upstreamColumns: {
           order_id: { name: "order_id", data_type: "INTEGER" },

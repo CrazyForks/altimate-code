@@ -361,7 +361,15 @@ function detectScenarios(sql: string, materialized: string): Scenario[] {
   if (/\bGROUP\s+BY\b/.test(upper) || /\bOVER\s*\(/.test(upper)) {
     scenarios.push({ category: "edge_case", description: "Verify aggregation/window with multiple rows", mockStyle: "happy_path", rowCount: 3 })
   }
-  if (/\b\w+\s*\/\s*\w+/.test(cleaned)) {
+  // Division detection — match `/` between two "operand-like" tokens.
+  // An operand is: identifier, dotted identifier (a.b), function call like
+  // SUM(...), CAST(... AS ...), COALESCE(...), NULLIF(...), or parenthesized
+  // expression. String literals are already stripped above.
+  // We deliberately exclude `/*` (block comment open, already stripped) and
+  // `//` (some dialects use it but not in compiled dbt SQL).
+  const operand = /(?:\w+\s*\([^)]*\)|\w+(?:\.\w+)?|\([^)]*\))/.source
+  const divisionRegex = new RegExp(`${operand}\\s*\\/(?!\\*|\\/)\\s*${operand}`)
+  if (divisionRegex.test(cleaned)) {
     scenarios.push({ category: "edge_case", description: "Verify divide-by-zero protection", mockStyle: "boundary", rowCount: 2 })
   }
   if (materialized === "incremental") {
@@ -430,7 +438,19 @@ function buildTests(
   ephemeralDeps: Set<string>,
   maxScenarios: number,
 ): UnitTestCase[] {
-  return scenarios.slice(0, maxScenarios).map((scenario, idx) => {
+  // Preserve the incremental scenario even when truncating to maxScenarios.
+  // Otherwise SQL with enough non-incremental triggers (JOIN + CASE + division)
+  // would push the incremental test out of the capped window, losing the
+  // `input: this` mock entirely for incremental models.
+  const capped = scenarios.slice(0, maxScenarios)
+  const incremental = scenarios.find((s) => s.category === "incremental")
+  if (incremental && !capped.includes(incremental)) {
+    // Replace the last non-happy-path scenario with the incremental one.
+    // Happy path is always first and must be kept.
+    capped[capped.length - 1] = incremental
+  }
+
+  return capped.map((scenario, idx) => {
     // Build the scenario suffix first, then truncate the model-name portion
     // so the suffix is always preserved (prevents collisions for long names).
     const suffix = `_${scenario.category}${idx > 0 ? `_${idx}` : ""}`
@@ -463,7 +483,7 @@ function buildTests(
           rows: [],
           format: "sql" as const,
           sql: rows.map((row) =>
-            `SELECT ${Object.entries(row).map(([k, v]) => `${formatSqlLiteral(v)} AS ${k}`).join(", ")}`,
+            `SELECT ${Object.entries(row).map(([k, v]) => `${formatSqlLiteral(v)} AS ${quoteIdent(k)}`).join(", ")}`,
           ).join("\nUNION ALL\n"),
         }
       }
@@ -507,6 +527,15 @@ function formatSqlLiteral(value: unknown): string {
   if (typeof value === "string") return `'${value.replace(/'/g, "''")}'`
   if (typeof value === "boolean") return value ? "TRUE" : "FALSE"
   return String(value)
+}
+
+/**
+ * Quote a column identifier with double quotes (ANSI SQL / dbt standard).
+ * Handles reserved keywords (`select`, `order`, `group`), mixed case, and
+ * names with special characters. Escapes embedded double quotes.
+ */
+function quoteIdent(name: string): string {
+  return `"${name.replace(/"/g, '""')}"`
 }
 
 // ---------------------------------------------------------------------------
