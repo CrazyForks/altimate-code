@@ -95,6 +95,30 @@ describe("PostConnectSuggestions.getPostConnectSuggestions", () => {
     expect(result).not.toContain("data_diff")
   })
 
+  test("skips sql_execute and sql_analyze suggestions for MongoDB connections", () => {
+    const result = PostConnectSuggestions.getPostConnectSuggestions({
+      warehouseType: "mongodb",
+      schemaIndexed: false,
+      dbtDetected: false,
+      connectionCount: 1,
+      toolsUsedInSession: [],
+    })
+    expect(result).not.toContain("sql_execute")
+    expect(result).not.toContain("sql_analyze")
+  })
+
+  test("skips SQL suggestions for 'mongo' alias warehouse type", () => {
+    const result = PostConnectSuggestions.getPostConnectSuggestions({
+      warehouseType: "mongo",
+      schemaIndexed: true,
+      dbtDetected: false,
+      connectionCount: 1,
+      toolsUsedInSession: [],
+    })
+    expect(result).not.toContain("sql_execute")
+    expect(result).not.toContain("sql_analyze")
+  })
+
   test("always includes sql_execute and sql_analyze", () => {
     const result = PostConnectSuggestions.getPostConnectSuggestions({
       warehouseType: "snowflake",
@@ -184,6 +208,23 @@ describe("PostConnectSuggestions.getProgressiveSuggestion", () => {
   test("empty string returns null", () => {
     const result = PostConnectSuggestions.getProgressiveSuggestion("")
     expect(result).toBeNull()
+  })
+
+  test("progressive suggestion shown once, returns null on second call (dedup)", () => {
+    const first = PostConnectSuggestions.getProgressiveSuggestion("sql_execute")
+    expect(first).not.toBeNull()
+    const second = PostConnectSuggestions.getProgressiveSuggestion("sql_execute")
+    expect(second).toBeNull()
+  })
+
+  test("dedup is per-tool: different tools get their own suggestion", () => {
+    const a = PostConnectSuggestions.getProgressiveSuggestion("sql_execute")
+    const b = PostConnectSuggestions.getProgressiveSuggestion("sql_analyze")
+    expect(a).not.toBeNull()
+    expect(b).not.toBeNull()
+    // Second call to same tool returns null
+    expect(PostConnectSuggestions.getProgressiveSuggestion("sql_execute")).toBeNull()
+    expect(PostConnectSuggestions.getProgressiveSuggestion("sql_analyze")).toBeNull()
   })
 })
 

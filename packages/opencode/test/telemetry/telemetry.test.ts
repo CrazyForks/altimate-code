@@ -1930,6 +1930,49 @@ describe("telemetry.maskArgs", () => {
     const parsed = JSON.parse(masked)
     expect(parsed.connection_string).toBe("****")
   })
+
+  test("redacts sensitive keys in nested objects", () => {
+    const masked = Telemetry.maskArgs({
+      config: {
+        host: "db.example.com",
+        password: "hunter2",
+        token: "eyJhbGciOi...",
+      },
+    })
+    const parsed = JSON.parse(masked)
+    expect(parsed.config.password).toBe("****")
+    expect(parsed.config.token).toBe("****")
+    expect(parsed.config.host).toBe("db.example.com")
+  })
+
+  test("redacts compound keys matched by suffix rules (db_password, warehouse_password)", () => {
+    const masked = Telemetry.maskArgs({
+      db_password: "secret123",
+      warehouse_password: "wh-pass-456",
+    })
+    const parsed = JSON.parse(masked)
+    expect(parsed.db_password).toBe("****")
+    expect(parsed.warehouse_password).toBe("****")
+  })
+
+  test("redacts sensitive keys inside arrays of objects", () => {
+    const masked = Telemetry.maskArgs({
+      connections: [
+        { name: "prod", password: "pass1" },
+        { name: "dev", secret: "pass2" },
+      ],
+    })
+    const parsed = JSON.parse(masked)
+    expect(parsed.connections[0].password).toBe("****")
+    expect(parsed.connections[0].name).toBe("prod")
+    expect(parsed.connections[1].secret).toBe("****")
+  })
+
+  test("maskString replaces double-quoted SQL strings with ?", () => {
+    const masked = Telemetry.maskString('SELECT * FROM t WHERE name = "John Doe"')
+    expect(masked).not.toContain("John Doe")
+    expect(masked).toContain("?")
+  })
 })
 
 // ---------------------------------------------------------------------------
