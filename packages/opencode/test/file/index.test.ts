@@ -1,4 +1,5 @@
 import { describe, test, expect } from "bun:test"
+import { $ } from "bun"
 import path from "path"
 import fs from "fs/promises"
 import { File } from "../../src/file"
@@ -389,6 +390,194 @@ describe("file/index Filesystem patterns", () => {
           await expect(File.read("../outside.txt")).rejects.toThrow("Access denied")
         },
       })
+    })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// File.list() — behavior (sorting, exclusions, gitignore marking)
+// ---------------------------------------------------------------------------
+
+describe("File.list() — behavior", () => {
+  test("sorts directories before files, then alphabetically", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+      init: async (dir) => {
+        await fs.mkdir(path.join(dir, "zebra-dir"), { recursive: true })
+        await fs.mkdir(path.join(dir, "alpha-dir"), { recursive: true })
+        await fs.writeFile(path.join(dir, "zebra.txt"), "z")
+        await fs.writeFile(path.join(dir, "alpha.txt"), "a")
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const nodes = await File.list()
+        const names = nodes.map((n) => n.name)
+        // Directories come first, then files — each group sorted alphabetically
+        const dirNames = nodes.filter((n) => n.type === "directory").map((n) => n.name)
+        const fileNames = nodes.filter((n) => n.type === "file").map((n) => n.name)
+        expect(dirNames).toEqual(["alpha-dir", "zebra-dir"])
+        expect(fileNames).toEqual(["alpha.txt", "zebra.txt"])
+        // Directories appear before files in the combined list
+        const firstFile = names.indexOf("alpha.txt")
+        const lastDir = names.indexOf("zebra-dir")
+        expect(lastDir).toBeLessThan(firstFile)
+      },
+    })
+  })
+
+  test("excludes .git and .DS_Store entries", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+      init: async (dir) => {
+        // .git already exists from git init; add .DS_Store
+        await fs.writeFile(path.join(dir, ".DS_Store"), "")
+        await fs.writeFile(path.join(dir, "visible.txt"), "ok")
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const nodes = await File.list()
+        const names = nodes.map((n) => n.name)
+        expect(names).not.toContain(".git")
+        expect(names).not.toContain(".DS_Store")
+        expect(names).toContain("visible.txt")
+      },
+    })
+  })
+
+  test("sets ignored=true on nodes matching .gitignore patterns", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+      init: async (dir) => {
+        await fs.writeFile(path.join(dir, ".gitignore"), "*.log\nbuild/\n")
+        await fs.writeFile(path.join(dir, "app.ts"), "code")
+        await fs.writeFile(path.join(dir, "debug.log"), "log data")
+        await fs.mkdir(path.join(dir, "build"), { recursive: true })
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const nodes = await File.list()
+        const byName = Object.fromEntries(nodes.map((n) => [n.name, n]))
+        expect(byName["app.ts"].ignored).toBe(false)
+        expect(byName["debug.log"].ignored).toBe(true)
+        expect(byName["build"].ignored).toBe(true)
+        // .gitignore itself is present and not marked ignored
+        expect(byName[".gitignore"]).toBeDefined()
+        expect(byName[".gitignore"].ignored).toBe(false)
+      },
+    })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// File.status() — git change detection (modified, added, deleted)
+// ---------------------------------------------------------------------------
+
+describe("File.status() — git change detection", () => {
+  test("detects modified files with correct line counts", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+      init: async (dir) => {
+        // Trailing newlines avoid "no newline at end of file" noise in git diff
+        await fs.writeFile(path.join(dir, "file.txt"), "line1\nline2\nline3\n")
+        await $`git add file.txt && git commit -m "init"`.cwd(dir).quiet()
+      },
+    })
+
+    // Modify the committed file: change line2→modified, add line4
+    await fs.writeFile(path.join(tmp.path, "file.txt"), "line1\nmodified\nline3\nline4\n")
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const changes = await File.status()
+        const modified = changes.find((c) => c.path === "file.txt")
+        expect(modified).toBeDefined()
+        expect(modified!.status).toBe("modified")
+        // git diff --numstat reports exactly 2 added, 1 removed for this edit
+        expect(modified!.added).toBe(2)
+        expect(modified!.removed).toBe(1)
+      },
+    })
+  })
+
+  test("detects untracked files as added with line count", async () => {
+    await using tmp = await tmpdir({ git: true })
+
+    // File has no trailing newline — split("\n") yields 3 elements
+    await fs.writeFile(path.join(tmp.path, "new-file.txt"), "line1\nline2\nline3")
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const changes = await File.status()
+        const added = changes.find((c) => c.path === "new-file.txt")
+        expect(added).toBeDefined()
+        expect(added!.status).toBe("added")
+        expect(added!.added).toBe(3)
+        expect(added!.removed).toBe(0)
+      },
+    })
+  })
+
+  test("detects deleted files", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+      init: async (dir) => {
+        await fs.writeFile(path.join(dir, "to-delete.txt"), "content\n")
+        await $`git add to-delete.txt && git commit -m "init"`.cwd(dir).quiet()
+      },
+    })
+
+    await fs.unlink(path.join(tmp.path, "to-delete.txt"))
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const changes = await File.status()
+        // Deleted files appear in both numstat (as "modified") and diff-filter=D
+        // (as "deleted"); look for the "deleted" status entry specifically.
+        const deleted = changes.find((c) => c.path === "to-delete.txt" && c.status === "deleted")
+        expect(deleted).toBeDefined()
+      },
+    })
+  })
+
+  test("returns empty array for non-git project", async () => {
+    await using tmp = await tmpdir()
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const changes = await File.status()
+        expect(changes).toEqual([])
+      },
+    })
+  })
+
+  test("returns empty array for clean working tree", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+      init: async (dir) => {
+        await fs.writeFile(path.join(dir, "clean.txt"), "committed")
+        await $`git add clean.txt && git commit -m "init"`.cwd(dir).quiet()
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const changes = await File.status()
+        expect(changes).toEqual([])
+      },
     })
   })
 })
