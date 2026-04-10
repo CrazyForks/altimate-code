@@ -216,6 +216,16 @@ export async function generateDbtUnitTests(
   const upstreamDeps = resolveUpstream(
     model.depends_on, manifest.models, manifest.sources, manifest.seeds, manifest.snapshots,
   )
+  // Warn if any deps couldn't be resolved (e.g., unknown resource types like
+  // semantic_model.*, or deps missing from the manifest). This prevents the
+  // generated YAML from silently missing required `given` inputs.
+  const resolvedIds = new Set(upstreamDeps.map((d) => d.unique_id))
+  const unresolved = model.depends_on.filter((id) => !resolvedIds.has(id))
+  if (unresolved.length > 0) {
+    warnings.push(
+      `Could not resolve ${unresolved.length} upstream dep(s) — generated YAML may be missing mock inputs: ${unresolved.join(", ")}`,
+    )
+  }
   const materialized = model.materialized || "view"
 
   // 6. Enrich columns from warehouse (parallel, best-effort)

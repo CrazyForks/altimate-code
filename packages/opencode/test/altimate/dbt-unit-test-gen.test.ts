@@ -191,6 +191,17 @@ describe("generateDbtUnitTests", () => {
     expect(r.tests[0].given[0].rows.length).toBeGreaterThan(0)
   })
 
+  test("warns when upstream deps cannot be resolved", async () => {
+    const m = makeManifest()
+    const key = Object.keys(m.nodes).find((k) => k.includes("fct_orders"))!
+    // Add an unresolvable dep — semantic_model.* is a real dbt resource type
+    // that parseManifest doesn't extract (and we don't support)
+    ;(m.nodes as any)[key].depends_on.nodes.push("semantic_model.my_project.orders_sm")
+    const r = await generateDbtUnitTests({ manifest_path: writeTmpManifest(m), model: "fct_orders" })
+    expect(r.success).toBe(true)
+    expect(r.warnings.some((w) => w.includes("Could not resolve") && w.includes("semantic_model"))).toBe(true)
+  })
+
   test("resolves snapshot dependencies via ref()", async () => {
     const m = makeManifest()
     const key = Object.keys(m.nodes).find((k) => k.includes("fct_orders"))!

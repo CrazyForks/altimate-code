@@ -104,6 +104,8 @@ export interface SqlOptimizeResult {
 export interface SchemaInspectParams {
   table: string
   schema_name?: string
+  /** Database/catalog name — needed for cross-database queries (Snowflake, BigQuery) */
+  database?: string
   warehouse?: string
 }
 

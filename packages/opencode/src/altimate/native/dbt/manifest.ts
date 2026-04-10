@@ -4,7 +4,6 @@
  * Ported from Python altimate_engine.dbt.manifest.
  */
 
-import * as fs from "fs"
 import type {
   DbtManifestParams,
   DbtManifestResult,
@@ -13,8 +12,7 @@ import type {
   DbtTestInfo,
   ModelColumn,
 } from "../types"
-
-const LARGE_MANIFEST_BYTES = 50 * 1024 * 1024 // 50 MB
+import { loadRawManifest } from "./helpers"
 
 function extractColumns(columnsDict: Record<string, any>): ModelColumn[] {
   return Object.entries(columnsDict).map(([colName, col]) => ({
@@ -26,6 +24,9 @@ function extractColumns(columnsDict: Record<string, any>): ModelColumn[] {
 
 /**
  * Parse a dbt manifest.json and extract model, source, and node information.
+ *
+ * Uses the shared `loadRawManifest` helper which caches by path+mtime, so
+ * repeated calls (e.g. parseManifest → dbtLineage) don't re-read large files.
  */
 export async function parseManifest(params: DbtManifestParams): Promise<DbtManifestResult> {
   const emptyResult: DbtManifestResult = {
@@ -41,31 +42,13 @@ export async function parseManifest(params: DbtManifestParams): Promise<DbtManif
     seed_count: 0,
   }
 
-  if (!fs.existsSync(params.path)) {
-    return emptyResult
-  }
-
-  let raw: string
-  try {
-    const stat = fs.statSync(params.path)
-    if (stat.size > LARGE_MANIFEST_BYTES) {
-      // Log warning but continue
-    }
-    raw = await fs.promises.readFile(params.path, "utf-8")
-  } catch {
-    return emptyResult
-  }
-
   let manifest: any
   try {
-    manifest = JSON.parse(raw)
+    manifest = loadRawManifest(params.path)
   } catch {
     return emptyResult
   }
-
-  if (typeof manifest !== "object" || manifest === null) {
-    return emptyResult
-  }
+  if (!manifest) return emptyResult
 
   const nodes = manifest.nodes || {}
   const sourcesDict = manifest.sources || {}
