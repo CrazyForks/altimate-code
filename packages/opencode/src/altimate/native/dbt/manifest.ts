@@ -83,6 +83,7 @@ export async function parseManifest(params: DbtManifestParams): Promise<DbtManif
       models.push({
         unique_id: nodeId,
         name: node.name || "",
+        description: node.description || undefined,
         schema_name: node.schema || undefined,
         database: node.database || undefined,
         materialized: node.config?.materialized || undefined,
@@ -109,6 +110,7 @@ export async function parseManifest(params: DbtManifestParams): Promise<DbtManif
     sources.push({
       unique_id: sourceId,
       name: source.name || "",
+      description: source.description || undefined,
       source_name: source.source_name || "",
       schema_name: source.schema || undefined,
       database: source.database || undefined,
@@ -125,5 +127,6 @@ export async function parseManifest(params: DbtManifestParams): Promise<DbtManif
     test_count: testCount,
     snapshot_count: snapshotCount,
     seed_count: seedCount,
+    adapter_type: manifest.metadata?.adapter_type || undefined,
   }
 }
