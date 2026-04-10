@@ -1,28 +1,32 @@
-import { describe, test, expect, afterEach } from "bun:test"
+import { describe, test, expect, beforeEach, afterEach } from "bun:test"
 import fs from "fs"
 import path from "path"
-import os from "os"
 import YAML from "yaml"
+import { tmpdir } from "../fixture/fixture"
 import { generateDbtUnitTests, assembleYaml } from "../../src/altimate/native/dbt/unit-tests"
 import type { UnitTestCase } from "../../src/altimate/native/types"
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Helpers — use shared tmpdir() fixture for automatic cleanup
 // ---------------------------------------------------------------------------
 
-const tmpFiles: string[] = []
+let tmp: Awaited<ReturnType<typeof tmpdir>>
+let manifestCounter = 0
+
+beforeEach(async () => {
+  tmp = await tmpdir()
+  manifestCounter = 0
+})
+
+afterEach(async () => {
+  await tmp[Symbol.asyncDispose]()
+})
 
 function writeTmpManifest(content: object | string): string {
-  const tmpFile = path.join(os.tmpdir(), `manifest-utg-${Date.now()}-${Math.random().toString(36).slice(2)}.json`)
+  const tmpFile = path.join(tmp.path, `manifest-${manifestCounter++}.json`)
   fs.writeFileSync(tmpFile, typeof content === "string" ? content : JSON.stringify(content))
-  tmpFiles.push(tmpFile)
   return tmpFile
 }
-
-afterEach(() => {
-  for (const f of tmpFiles) { try { fs.unlinkSync(f) } catch {} }
-  tmpFiles.length = 0
-})
 
 function makeManifest(overrides?: {
   modelName?: string; materialized?: string; compiledSql?: string
@@ -165,6 +169,80 @@ describe("generateDbtUnitTests", () => {
     const ephInput = r.tests[0].given.find((g) => g.format === "sql")
     expect(ephInput).toBeDefined()
     expect(ephInput!.sql).toBeDefined()
+  })
+
+  test("resolves seed dependencies via ref()", async () => {
+    const m = makeManifest()
+    const key = Object.keys(m.nodes).find((k) => k.includes("fct_orders"))!
+    ;(m.nodes as any)[key].depends_on.nodes = ["seed.my_project.country_codes"]
+    ;(m.nodes as any)["seed.my_project.country_codes"] = {
+      resource_type: "seed",
+      name: "country_codes",
+      schema: "seeds",
+      config: { materialized: "seed" },
+      depends_on: { nodes: [] },
+      columns: { code: { name: "code", data_type: "VARCHAR" }, name: { name: "name", data_type: "VARCHAR" } },
+    }
+    const r = await generateDbtUnitTests({ manifest_path: writeTmpManifest(m), model: "fct_orders" })
+    expect(r.success).toBe(true)
+    expect(r.dependency_count).toBe(1)
+    // Seed should resolve as ref(), not source()
+    expect(r.tests[0].given[0].input).toBe("ref('country_codes')")
+    expect(r.tests[0].given[0].rows.length).toBeGreaterThan(0)
+  })
+
+  test("resolves snapshot dependencies via ref()", async () => {
+    const m = makeManifest()
+    const key = Object.keys(m.nodes).find((k) => k.includes("fct_orders"))!
+    ;(m.nodes as any)[key].depends_on.nodes = ["snapshot.my_project.orders_snapshot"]
+    ;(m.nodes as any)["snapshot.my_project.orders_snapshot"] = {
+      resource_type: "snapshot",
+      name: "orders_snapshot",
+      schema: "snapshots",
+      config: { materialized: "snapshot" },
+      depends_on: { nodes: [] },
+      columns: { order_id: { name: "order_id", data_type: "INTEGER" }, status: { name: "status", data_type: "VARCHAR" } },
+    }
+    const r = await generateDbtUnitTests({ manifest_path: writeTmpManifest(m), model: "fct_orders" })
+    expect(r.success).toBe(true)
+    expect(r.dependency_count).toBe(1)
+    expect(r.tests[0].given[0].input).toBe("ref('orders_snapshot')")
+    expect(r.tests[0].given[0].rows.length).toBeGreaterThan(0)
+  })
+
+  test("long model names preserve scenario suffix (no truncation collision)", async () => {
+    // 70-char model name — longer than 64-char test name limit
+    const longName = "fct_this_is_a_very_long_model_name_that_will_definitely_exceed_limits"
+    const r = await generateDbtUnitTests({
+      manifest_path: writeTmpManifest(makeManifest({
+        modelName: longName,
+        compiledSql: `SELECT order_id, CASE WHEN x=1 THEN 'a' END, a/b FROM stg_orders`,
+      })),
+      model: longName,
+      max_scenarios: 5,
+    })
+    expect(r.success).toBe(true)
+    // All test names should be unique — no collisions from truncation
+    const names = r.tests.map((t) => t.name)
+    expect(new Set(names).size).toBe(names.length)
+    // Scenario suffixes should be preserved
+    expect(names.some((n) => n.endsWith("_happy_path"))).toBe(true)
+    expect(names.some((n) => n.includes("null_handling") || n.includes("edge_case"))).toBe(true)
+  })
+
+  test("division in string literals does not trigger boundary scenario", async () => {
+    // The SQL has '/' only inside a string literal — should NOT trigger division edge case
+    const r = await generateDbtUnitTests({
+      manifest_path: writeTmpManifest(makeManifest({
+        compiledSql: `SELECT order_id, '2024/01/15' AS date_str FROM stg_orders`,
+      })),
+      model: "fct_orders",
+      max_scenarios: 5,
+    })
+    expect(r.success).toBe(true)
+    // Only happy_path should be generated (no division → no boundary test)
+    expect(r.tests.length).toBe(1)
+    expect(r.tests[0].category).toBe("happy_path")
   })
 
   test("test names are deterministic across runs", async () => {

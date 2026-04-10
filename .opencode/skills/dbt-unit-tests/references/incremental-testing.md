@@ -1,16 +1,16 @@
 # Testing Incremental dbt Models
 
-Incremental models have two code paths controlled by `{{ if is_incremental() }}`. Both paths must be tested.
+Incremental models have two code paths controlled by `{% if is_incremental() %}`. Both paths must be tested.
 
 ## The Two Paths
 
 ```sql
--- Full refresh path (is_incremental = false)
 SELECT * FROM {{ ref('stg_orders') }}
 
--- Incremental path (is_incremental = true)
-SELECT * FROM {{ ref('stg_orders') }}
-WHERE updated_at > (SELECT MAX(updated_at) FROM {{ this }})
+{% if is_incremental() %}
+  -- Incremental path: only process new rows
+  WHERE updated_at > (SELECT MAX(updated_at) FROM {{ this }})
+{% endif %}
 ```
 
 ## Test 1: Full Refresh

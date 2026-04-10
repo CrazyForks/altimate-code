@@ -73,7 +73,7 @@ interface UpstreamDep {
   schema_name?: string
   database?: string
   description?: string
-  resource_type: "model" | "source"
+  resource_type: "model" | "source" | "seed" | "snapshot"
   materialized?: string
   columns: ModelColumn[]
 }
@@ -82,23 +82,30 @@ function resolveUpstream(
   upstreamIds: string[],
   models: DbtModelInfo[],
   sources: DbtSourceInfo[],
+  seeds: DbtModelInfo[],
+  snapshots: DbtModelInfo[],
 ): UpstreamDep[] {
-  const modelMap = new Map(models.map((m) => [m.unique_id, m]))
+  // Map each unique_id to its info + resource_type.
+  // Seeds, snapshots, and models all use ref() so they share handling.
+  const typedMap = new Map<string, { info: DbtModelInfo; kind: "model" | "seed" | "snapshot" }>()
+  for (const m of models) typedMap.set(m.unique_id, { info: m, kind: "model" })
+  for (const s of seeds) typedMap.set(s.unique_id, { info: s, kind: "seed" })
+  for (const s of snapshots) typedMap.set(s.unique_id, { info: s, kind: "snapshot" })
   const sourceMap = new Map(sources.map((s) => [s.unique_id, s]))
 
   const result: UpstreamDep[] = []
   for (const uid of upstreamIds) {
-    const model = modelMap.get(uid)
-    if (model) {
+    const entry = typedMap.get(uid)
+    if (entry) {
       result.push({
         unique_id: uid,
-        name: model.name,
-        schema_name: model.schema_name,
-        database: model.database,
-        description: model.description,
-        resource_type: "model",
-        materialized: model.materialized,
-        columns: model.columns,
+        name: entry.info.name,
+        schema_name: entry.info.schema_name,
+        database: entry.info.database,
+        description: entry.info.description,
+        resource_type: entry.kind,
+        materialized: entry.info.materialized,
+        columns: entry.info.columns,
       })
       continue
     }
@@ -120,6 +127,7 @@ function resolveUpstream(
 }
 
 function depRef(dep: UpstreamDep): string {
+  // Models, seeds, and snapshots all use ref(); only sources use source()
   return dep.resource_type === "source"
     ? `source('${dep.source_name}', '${dep.name}')`
     : `ref('${dep.name}')`
@@ -204,8 +212,10 @@ export async function generateDbtUnitTests(
     warnings.push("Column lineage analysis failed — generating tests without lineage context")
   }
 
-  // 5. Resolve upstream deps from parsed manifest data (no raw nodes access)
-  const upstreamDeps = resolveUpstream(model.depends_on, manifest.models, manifest.sources)
+  // 5. Resolve upstream deps (models, sources, seeds, snapshots)
+  const upstreamDeps = resolveUpstream(
+    model.depends_on, manifest.models, manifest.sources, manifest.seeds, manifest.snapshots,
+  )
   const materialized = model.materialized || "view"
 
   // 6. Enrich columns from warehouse (parallel, best-effort)
@@ -320,8 +330,13 @@ interface Scenario {
  * directly for nuanced logic analysis. This just determines the scaffold.
  */
 function detectScenarios(sql: string, materialized: string): Scenario[] {
-  // Strip SQL comments to avoid false positives (e.g., "-- old/code" matching division)
-  const cleaned = sql.replace(/--.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "")
+  // Strip SQL comments AND string literals to avoid false positives
+  // (e.g., "-- old/code", "'2024/01/15'", "'a/b'" matching division).
+  const cleaned = sql
+    .replace(/--.*$/gm, "")                  // line comments
+    .replace(/\/\*[\s\S]*?\*\//g, "")        // block comments
+    .replace(/'(?:[^'\\]|\\.|'')*'/g, "''")  // single-quoted strings
+    .replace(/"(?:[^"\\]|\\.|"")*"/g, '""')  // double-quoted identifiers/strings
   const upper = cleaned.toUpperCase()
   const scenarios: Scenario[] = [
     { category: "happy_path", description: "Verify correct output for standard input data", mockStyle: "happy_path", rowCount: 2 },
@@ -406,9 +421,14 @@ function buildTests(
   maxScenarios: number,
 ): UnitTestCase[] {
   return scenarios.slice(0, maxScenarios).map((scenario, idx) => {
-    const testName = sanitizeName(
-      `test_${modelName}_${scenario.category}${idx > 0 ? `_${idx}` : ""}`,
-    )
+    // Build the scenario suffix first, then truncate the model-name portion
+    // so the suffix is always preserved (prevents collisions for long names).
+    const suffix = `_${scenario.category}${idx > 0 ? `_${idx}` : ""}`
+    const prefix = "test_"
+    const maxLen = 64
+    const modelBudget = maxLen - prefix.length - suffix.length
+    const truncatedModel = modelName.length > modelBudget ? modelName.slice(0, Math.max(1, modelBudget)) : modelName
+    const testName = sanitizeName(`${prefix}${truncatedModel}${suffix}`)
 
     const given: UnitTestMockInput[] = deps.map((dep) => {
       const input = depRef(dep)

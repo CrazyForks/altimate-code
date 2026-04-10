@@ -200,6 +200,10 @@ export interface DbtManifestResult {
   models: DbtModelInfo[]
   sources: DbtSourceInfo[]
   tests: DbtTestInfo[]
+  /** Seeds parsed from the manifest (extracted like models for ref() resolution) */
+  seeds: DbtModelInfo[]
+  /** Snapshots parsed from the manifest (extracted like models for ref() resolution) */
+  snapshots: DbtModelInfo[]
   source_count: number
   model_count: number
   test_count: number

@@ -131,9 +131,24 @@ Used with `overrides.macros.is_incremental: true` to mock the existing table sta
 
 ## Configuration
 
+Tags can be set at the top level (sibling of `config`) or nested under `config`:
+
 ```yaml
-config:
-  tags: ["unit-test", "revenue"]
+unit_tests:
+  - name: test_example
+    model: fct_orders
+    tags: ["unit-test", "revenue"]
+    # ... rest of test
+```
+
+Or via config:
+
+```yaml
+unit_tests:
+  - name: test_example
+    model: fct_orders
+    config:
+      tags: ["unit-test", "revenue"]
 ```
 
 ## Naming Conventions

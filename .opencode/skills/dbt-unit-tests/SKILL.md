@@ -33,7 +33,7 @@ description: Generate dbt unit tests automatically for any model. Analyzes SQL l
 4. **Never weaken a test to make it pass.** If the test fails, the model logic may be wrong. Investigate before changing expected values.
 5. **Compile before committing.** Always run `altimate-dbt test --model <name>` to verify tests compile and execute.
 
-## Core Workflow: Analyze -> Generate -> Refine -> Validate
+## Core Workflow: Analyze -> Generate -> Refine -> Validate -> Write
 
 ### Phase 1: Analyze the Model
 
@@ -61,7 +61,7 @@ dbt_unit_test_gen(manifest_path: "target/manifest.json", model: "<name>")
 
 The `dbt_unit_test_gen` tool does the heavy lifting:
 
-```
+```text
 dbt_unit_test_gen(
   manifest_path: "target/manifest.json",
   model: "fct_orders",

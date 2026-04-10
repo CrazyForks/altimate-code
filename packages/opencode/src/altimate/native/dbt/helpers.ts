@@ -41,9 +41,10 @@ export function loadRawManifest(manifestPath: string): any | null {
 
 /**
  * Find a model node in the manifest by name or unique_id.
+ * Only returns nodes where resource_type === "model".
  */
 export function findModel(nodes: Record<string, any>, model: string): any | null {
-  if (model in nodes) return nodes[model]
+  if (model in nodes && nodes[model]?.resource_type === "model") return nodes[model]
   for (const [, node] of Object.entries(nodes)) {
     if (node.resource_type !== "model") continue
     if (node.name === model) return node
@@ -53,9 +54,10 @@ export function findModel(nodes: Record<string, any>, model: string): any | null
 
 /**
  * Get the unique_id for a model (by name or unique_id lookup).
+ * Only matches nodes where resource_type === "model".
  */
 export function getUniqueId(nodes: Record<string, any>, model: string): string | undefined {
-  if (model in nodes) return model
+  if (model in nodes && nodes[model]?.resource_type === "model") return model
   for (const [nodeId, node] of Object.entries(nodes)) {
     if (node.resource_type === "model" && node.name === model) return nodeId
   }

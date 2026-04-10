@@ -32,6 +32,8 @@ export async function parseManifest(params: DbtManifestParams): Promise<DbtManif
     models: [],
     sources: [],
     tests: [],
+    seeds: [],
+    snapshots: [],
     source_count: 0,
     model_count: 0,
     test_count: 0,
@@ -70,26 +72,27 @@ export async function parseManifest(params: DbtManifestParams): Promise<DbtManif
 
   const models: DbtModelInfo[] = []
   const tests: DbtTestInfo[] = []
+  const seeds: DbtModelInfo[] = []
+  const snapshots: DbtModelInfo[] = []
   let testCount = 0
-  let snapshotCount = 0
-  let seedCount = 0
 
   for (const [nodeId, node] of Object.entries<any>(nodes)) {
     const resourceType = node.resource_type
 
-    if (resourceType === "model") {
-      const dependsOnNodes = node.depends_on?.nodes || []
-      const columns = extractColumns(node.columns || {})
-      models.push({
+    if (resourceType === "model" || resourceType === "seed" || resourceType === "snapshot") {
+      const info: DbtModelInfo = {
         unique_id: nodeId,
         name: node.name || "",
         description: node.description || undefined,
         schema_name: node.schema || undefined,
         database: node.database || undefined,
         materialized: node.config?.materialized || undefined,
-        depends_on: dependsOnNodes,
-        columns,
-      })
+        depends_on: node.depends_on?.nodes || [],
+        columns: extractColumns(node.columns || {}),
+      }
+      if (resourceType === "model") models.push(info)
+      else if (resourceType === "seed") seeds.push(info)
+      else snapshots.push(info)
     } else if (resourceType === "test") {
       testCount++
       tests.push({
@@ -97,10 +100,6 @@ export async function parseManifest(params: DbtManifestParams): Promise<DbtManif
         name: node.name || "",
         depends_on: node.depends_on?.nodes || [],
       })
-    } else if (resourceType === "snapshot") {
-      snapshotCount++
-    } else if (resourceType === "seed") {
-      seedCount++
     }
   }
 
@@ -122,11 +121,13 @@ export async function parseManifest(params: DbtManifestParams): Promise<DbtManif
     models,
     sources,
     tests,
+    seeds,
+    snapshots,
     source_count: sources.length,
     model_count: models.length,
     test_count: testCount,
-    snapshot_count: snapshotCount,
-    seed_count: seedCount,
+    snapshot_count: snapshots.length,
+    seed_count: seeds.length,
     adapter_type: manifest.metadata?.adapter_type || undefined,
   }
 }
