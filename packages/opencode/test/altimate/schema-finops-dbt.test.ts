@@ -459,6 +459,25 @@ describe("dbt: upstream selector", () => {
   test("does not add + for tag selectors", () => {
     expect(ensureUpstreamSelector("tag:daily", "run")).toBe("tag:daily")
   })
+
+  // altimate_change start — additional edge cases for selector prefix logic
+  test("adds + prefix for test command", () => {
+    expect(ensureUpstreamSelector("my_model", "test")).toBe("+my_model")
+  })
+
+  test("does not add + for source selectors (colon in selector)", () => {
+    // source: selectors with + prefix cause dbt CLI to fail — this is a P0 regression guard
+    expect(ensureUpstreamSelector("source:raw.orders", "run")).toBe("source:raw.orders")
+  })
+
+  test("does not add + for path selectors", () => {
+    expect(ensureUpstreamSelector("path:models/staging", "build")).toBe("path:models/staging")
+  })
+
+  test("does not add + for non-build/run/test commands (ls)", () => {
+    expect(ensureUpstreamSelector("my_model", "ls")).toBe("my_model")
+  })
+  // altimate_change end
 })
 
 describe("Local: type mapping", () => {
@@ -491,6 +510,25 @@ describe("Local: type mapping", () => {
     expect(mapType("SOME_EXOTIC_TYPE")).toBe("VARCHAR")
     expect(mapType("GEOGRAPHY")).toBe("VARCHAR")
   })
+
+  // altimate_change start — additional edge cases for type mapping
+  test("handles case-insensitive input", () => {
+    expect(mapType("varchar")).toBe("VARCHAR")
+    expect(mapType("Timestamp_ntz")).toBe("TIMESTAMP")
+    expect(mapType("bigint")).toBe("BIGINT")
+    expect(mapType("Json")).toBe("JSON")
+  })
+
+  test("handles mixed case with precision parameters", () => {
+    expect(mapType("Timestamp_LTZ(9)")).toBe("TIMESTAMPTZ")
+    expect(mapType("number(38,0)")).toBe("DECIMAL")
+    expect(mapType("Varchar(100)")).toBe("VARCHAR")
+  })
+
+  test("falls back to VARCHAR for empty string", () => {
+    expect(mapType("")).toBe("VARCHAR")
+  })
+  // altimate_change end
 })
 
 describe("FinOps: handler error paths (no warehouse configured)", () => {
