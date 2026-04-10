@@ -119,6 +119,33 @@ describe("PostConnectSuggestions.getPostConnectSuggestions", () => {
     expect(result).toContain("schema_detect_pii")
   })
 
+  test("excludes SQL suggestions for mongodb (full name)", () => {
+    const result = PostConnectSuggestions.getPostConnectSuggestions({
+      warehouseType: "mongodb",
+      schemaIndexed: false,
+      dbtDetected: false,
+      connectionCount: 1,
+      toolsUsedInSession: [],
+    })
+    expect(result).not.toContain("sql_execute")
+    expect(result).not.toContain("sql_analyze")
+    // Should still include non-SQL suggestions
+    expect(result).toContain("lineage_check")
+    expect(result).toContain("schema_detect_pii")
+  })
+
+  test("excludes SQL suggestions for mongo (shortform variant)", () => {
+    const result = PostConnectSuggestions.getPostConnectSuggestions({
+      warehouseType: "mongo",
+      schemaIndexed: false,
+      dbtDetected: false,
+      connectionCount: 1,
+      toolsUsedInSession: [],
+    })
+    expect(result).not.toContain("sql_execute")
+    expect(result).not.toContain("sql_analyze")
+  })
+
   test("includes warehouse type in header", () => {
     const result = PostConnectSuggestions.getPostConnectSuggestions({
       warehouseType: "databricks",
@@ -184,6 +211,47 @@ describe("PostConnectSuggestions.getProgressiveSuggestion", () => {
   test("empty string returns null", () => {
     const result = PostConnectSuggestions.getProgressiveSuggestion("")
     expect(result).toBeNull()
+  })
+
+  test("deduplicates: second call for same tool returns null", () => {
+    const first = PostConnectSuggestions.getProgressiveSuggestion("sql_execute")
+    expect(first).not.toBeNull()
+    expect(first).toContain("sql_analyze")
+
+    const second = PostConnectSuggestions.getProgressiveSuggestion("sql_execute")
+    expect(second).toBeNull()
+  })
+
+  test("different tools return their own suggestions independently", () => {
+    const a = PostConnectSuggestions.getProgressiveSuggestion("sql_execute")
+    const b = PostConnectSuggestions.getProgressiveSuggestion("sql_analyze")
+    expect(a).toContain("sql_analyze")
+    expect(b).toContain("schema_inspect")
+  })
+
+  test("resetShownSuggestions allows re-showing previously shown suggestion", () => {
+    const first = PostConnectSuggestions.getProgressiveSuggestion("sql_execute")
+    expect(first).not.toBeNull()
+
+    const suppressed = PostConnectSuggestions.getProgressiveSuggestion("sql_execute")
+    expect(suppressed).toBeNull()
+
+    PostConnectSuggestions.resetShownSuggestions()
+
+    const afterReset = PostConnectSuggestions.getProgressiveSuggestion("sql_execute")
+    expect(afterReset).not.toBeNull()
+    expect(afterReset).toContain("sql_analyze")
+  })
+
+  test("full progression chain: sql_execute → sql_analyze → schema_inspect", () => {
+    const step1 = PostConnectSuggestions.getProgressiveSuggestion("sql_execute")
+    expect(step1).toContain("sql_analyze")
+
+    const step2 = PostConnectSuggestions.getProgressiveSuggestion("sql_analyze")
+    expect(step2).toContain("schema_inspect")
+
+    const step3 = PostConnectSuggestions.getProgressiveSuggestion("schema_inspect")
+    expect(step3).toContain("lineage_check")
   })
 })
 
