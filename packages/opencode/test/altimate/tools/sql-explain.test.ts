@@ -296,8 +296,35 @@ describe("translateExplainError", () => {
       "snowflake",
       ["snowflake"],
     )
-    expect(result).toContain("unsubstituted `?` placeholder")
-    expect(result).toContain("inline the literal value")
+    expect(result).toContain("unsubstituted bind placeholder")
+    expect(result).toContain("inline the literal values")
+  })
+
+  test("translates `$1` numbered placeholder compile errors (PostgreSQL style)", () => {
+    const result = translateExplainError(
+      new Error("syntax error at or near \"$1\" at position 24"),
+      "postgres",
+      ["postgres"],
+    )
+    expect(result).toContain("unsubstituted bind placeholder")
+  })
+
+  test("translates `:name` named placeholder compile errors", () => {
+    const result = translateExplainError(
+      new Error("syntax error, unexpected :userid near position 31"),
+      "oracle",
+      ["oracle"],
+    )
+    expect(result).toContain("unsubstituted bind placeholder")
+  })
+
+  test("translates PostgreSQL 'no parameter $N' errors", () => {
+    const result = translateExplainError(
+      new Error('there is no parameter $1'),
+      "postgres",
+      ["postgres"],
+    )
+    expect(result).toContain("unsubstituted bind placeholder")
   })
 
   test("translates EXPLAIN ANALYZE-not-supported errors", () => {

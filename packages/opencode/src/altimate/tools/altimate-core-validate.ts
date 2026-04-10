@@ -77,10 +77,15 @@ function classifyValidationError(message: string): string {
 // Warning appended when validation runs without a schema. Stored without a
 // leading blank so it can be pushed into a line array; a blank line is added
 // explicitly at each call site where spacing is desired.
+//
+// The hint uses the flat table-map shape accepted by the tool (see
+// schema-resolver.ts), not the verbose SchemaDefinition form — callers that
+// already know the inner Rust struct layout can use either, but the flat form
+// is strictly easier to construct inline.
 const NO_SCHEMA_NOTE =
   "Note: No schema was provided, so table/column existence checks were skipped. " +
   "To catch missing tables or columns, run `schema_inspect` on the referenced tables first " +
-  "or pass `schema_context` inline with {tables: {...}}."
+  'or pass `schema_context` inline as a table map, for example `{ users: { id: "INTEGER", email: "VARCHAR" } }`.'
 
 function formatValidate(data: Record<string, any>, hasSchema: boolean): string {
   if (data.error) return `Error: ${data.error}`

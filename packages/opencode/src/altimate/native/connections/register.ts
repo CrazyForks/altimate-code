@@ -299,9 +299,26 @@ export function translateExplainError(
     return "No warehouses are configured. Run `warehouse_add` to set one up before calling sql_explain."
   }
 
-  // Unsubstituted-placeholder compilation errors from Snowflake / PG / MySQL.
-  if (/syntax error.*unexpected\s*\?/i.test(msg) || /syntax error.*position\s+\d+.*\?/i.test(msg)) {
-    return "SQL compilation error: the query contains an unsubstituted `?` placeholder. sql_explain does not support parameterized queries — inline the literal value before calling."
+  // Unsubstituted-placeholder compilation errors.
+  //
+  // Bind placeholders come in three flavours: positional `?` (MySQL / JDBC),
+  // numbered `$1`, `$2`, ... (PostgreSQL), and named `:name` (Oracle / SQLite /
+  // some SQLAlchemy dialects). Drivers phrase the resulting syntax error in
+  // many different ways — Snowflake says "unexpected ?", PostgreSQL says
+  // `syntax error at or near "$1"`, Oracle says `ORA-00911: invalid character`,
+  // etc. Rather than enumerate every phrasing, detect a bind-token next to a
+  // syntax-error keyword and translate them all to the same guidance.
+  const isSyntaxError = /syntax error|invalid character|unexpected token/i.test(msg)
+  // Match a bind token that is delimited by whitespace, start/end, or a quote.
+  // The negative lookbehind `(?<!\w)` prevents matching `$1` inside identifiers.
+  const containsBindToken =
+    /(?<!\w)\?(?!\w)/.test(msg) ||
+    /(?<!\w)\$\d+/.test(msg) ||
+    /(?<!\w):[a-zA-Z_]\w*/.test(msg)
+  // PostgreSQL surfaces bind-param issues with its own distinctive phrasing.
+  const isPgBindError = /there is no parameter \$\d+/i.test(msg)
+  if ((isSyntaxError && containsBindToken) || isPgBindError) {
+    return "SQL compilation error: the query contains an unsubstituted bind placeholder (`?`, `$1`, or `:name`). sql_explain does not support parameterized queries — inline the literal values before calling."
   }
 
   // Snowflake-specific: ANALYZE not supported.

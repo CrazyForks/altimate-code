@@ -153,6 +153,16 @@ describe("formatValidate", () => {
     expect(result).toContain("No schema was provided")
     expect(result).not.toContain("\n\n\n")
   })
+
+  test("no-schema note recommends the flat table-map shape, not {tables: {...}}", () => {
+    // Regression: an earlier draft of the note documented the verbose
+    // SchemaDefinition shape `{tables: {...}}`, but the tool's examples and
+    // tests use the flat `{users: {...}}` shape. Using the wrong shape in
+    // the hint would send callers down a rabbit hole.
+    const result = formatValidate({ valid: true }, false)
+    expect(result).not.toContain("{tables:")
+    expect(result).toMatch(/users.*INTEGER/)
+  })
 })
 
 // ---------------------------------------------------------------------------
