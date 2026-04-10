@@ -1,0 +1,588 @@
+diff --git a/dist/index.js b/dist/index.js
+index 69479f98a22f10f17a11f1bc8a65b8fd2b35ca4c..19d34e7710094ce0dd462ceae4eccbc14e7eff84 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -1109,6 +1109,17 @@ async function prepareTools({
+             });
+             break;
+           }
++          case "anthropic.advisor_20260301": {
++            betas.add("advisor-tool-2026-03-01");
++            anthropicTools2.push({
++              type: "advisor_20260301",
++              name: "advisor",
++              model: tool.args.model,
++              max_uses: tool.args.maxUses,
++              ...tool.args.caching ? { caching: { type: "ephemeral", ttl: "5m" } } : {}
++            });
++            break;
++          }
+           default: {
+             toolWarnings.push({ type: "unsupported-tool", tool });
+             break;
+@@ -1644,7 +1655,7 @@ async function convertToAnthropicMessagesPrompt({
+                       cache_control: cacheControl
+                     });
+                   } else if (part.toolName === "code_execution" || // code execution 20250522
+-                  part.toolName === "web_fetch" || part.toolName === "web_search") {
++                  part.toolName === "web_fetch" || part.toolName === "web_search" || part.toolName === "advisor") {
+                     anthropicContent.push({
+                       type: "server_tool_use",
+                       id: part.toolCallId,
+@@ -1785,6 +1796,21 @@ async function convertToAnthropicMessagesPrompt({
+                   });
+                   break;
+                 }
++                if (part.toolName === "advisor") {
++                  const output = part.output;
++                  if (output.type === "json" && output.value != null) {
++                    const parsed = typeof output.value === "string" ? JSON.parse(output.value) : output.value;
++                    if (parsed.type && ["advisor_result", "advisor_redacted_result", "advisor_tool_result_error"].includes(parsed.type)) {
++                      anthropicContent.push({
++                        type: "advisor_tool_result",
++                        tool_use_id: part.toolCallId,
++                        content: parsed,
++                        cache_control: cacheControl
++                      });
++                    }
++                  }
++                  break;
++                }
+                 warnings.push({
+                   type: "other",
+                   message: `provider executed tool result for tool ${part.toolName} is not supported`
+@@ -2381,6 +2407,44 @@ var AnthropicMessagesLanguageModel = class {
+               input: JSON.stringify(part.input),
+               providerExecuted: true
+             });
++          } else if (part.name === "advisor") {
++            content.push({
++              type: "tool-call",
++              toolCallId: part.id,
++              toolName: "advisor",
++              input: JSON.stringify(part.input ?? {}),
++              providerExecuted: true
++            });
++          }
++          break;
++        }
++        case "advisor_tool_result": {
++          const toolUseId = part.tool_use_id;
++          if (part.content.type === "advisor_result") {
++            content.push({
++              type: "tool-result",
++              toolCallId: toolUseId,
++              toolName: "advisor",
++              result: JSON.stringify({ type: "advisor_result", text: part.content.text }),
++              providerExecuted: true
++            });
++          } else if (part.content.type === "advisor_redacted_result") {
++            content.push({
++              type: "tool-result",
++              toolCallId: toolUseId,
++              toolName: "advisor",
++              result: JSON.stringify({ type: "advisor_redacted_result", encrypted_content: part.content.encrypted_content }),
++              providerExecuted: true
++            });
++          } else if (part.content.type === "advisor_tool_result_error") {
++            content.push({
++              type: "tool-result",
++              toolCallId: toolUseId,
++              toolName: "advisor",
++              isError: true,
++              result: JSON.stringify({ type: "advisor_tool_result_error", error_code: part.content.error_code }),
++              providerExecuted: true
++            });
+           }
+           break;
+         }
+@@ -2723,7 +2787,9 @@ var AnthropicMessagesLanguageModel = class {
+                     // code execution 20250825 text editor:
+                     "text_editor_code_execution",
+                     // code execution 20250825 bash:
+-                    "bash_code_execution"
++                    "bash_code_execution",
++                    // advisor tool:
++                    "advisor"
+                   ].includes(value.content_block.name)) {
+                     contentBlocks[value.index] = {
+                       type: "tool-call",
+@@ -2830,6 +2896,37 @@ var AnthropicMessagesLanguageModel = class {
+                   }
+                   return;
+                 }
++                case "advisor_tool_result": {
++                  const part = value.content_block;
++                  const toolUseId = part.tool_use_id;
++                  if (part.content.type === "advisor_result") {
++                    controller.enqueue({
++                      type: "tool-result",
++                      toolCallId: toolUseId,
++                      toolName: "advisor",
++                      result: JSON.stringify({ type: "advisor_result", text: part.content.text }),
++                      providerExecuted: true
++                    });
++                  } else if (part.content.type === "advisor_redacted_result") {
++                    controller.enqueue({
++                      type: "tool-result",
++                      toolCallId: toolUseId,
++                      toolName: "advisor",
++                      result: JSON.stringify({ type: "advisor_redacted_result", encrypted_content: part.content.encrypted_content }),
++                      providerExecuted: true
++                    });
++                  } else if (part.content.type === "advisor_tool_result_error") {
++                    controller.enqueue({
++                      type: "tool-result",
++                      toolCallId: toolUseId,
++                      toolName: "advisor",
++                      isError: true,
++                      result: JSON.stringify({ type: "advisor_tool_result_error", error_code: part.content.error_code }),
++                      providerExecuted: true
++                    });
++                  }
++                  return;
++                }
+                 // code execution 20250522:
+                 case "code_execution_tool_result": {
+                   const part = value.content_block;
+diff --git a/dist/index.mjs b/dist/index.mjs
+index e6d107875e30a9777d4c687fb97faf9a0a00b2f8..4b69d83e44948bd765a786314c68d555fef9fdd0 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -1114,6 +1114,17 @@ async function prepareTools({
+             });
+             break;
+           }
++          case "anthropic.advisor_20260301": {
++            betas.add("advisor-tool-2026-03-01");
++            anthropicTools2.push({
++              type: "advisor_20260301",
++              name: "advisor",
++              model: tool.args.model,
++              max_uses: tool.args.maxUses,
++              ...tool.args.caching ? { caching: { type: "ephemeral", ttl: "5m" } } : {}
++            });
++            break;
++          }
+           default: {
+             toolWarnings.push({ type: "unsupported-tool", tool });
+             break;
+@@ -1663,7 +1674,7 @@ async function convertToAnthropicMessagesPrompt({
+                       cache_control: cacheControl
+                     });
+                   } else if (part.toolName === "code_execution" || // code execution 20250522
+-                  part.toolName === "web_fetch" || part.toolName === "web_search") {
++                  part.toolName === "web_fetch" || part.toolName === "web_search" || part.toolName === "advisor") {
+                     anthropicContent.push({
+                       type: "server_tool_use",
+                       id: part.toolCallId,
+@@ -1804,6 +1815,21 @@ async function convertToAnthropicMessagesPrompt({
+                   });
+                   break;
+                 }
++                if (part.toolName === "advisor") {
++                  const output = part.output;
++                  if (output.type === "json" && output.value != null) {
++                    const parsed = typeof output.value === "string" ? JSON.parse(output.value) : output.value;
++                    if (parsed.type && ["advisor_result", "advisor_redacted_result", "advisor_tool_result_error"].includes(parsed.type)) {
++                      anthropicContent.push({
++                        type: "advisor_tool_result",
++                        tool_use_id: part.toolCallId,
++                        content: parsed,
++                        cache_control: cacheControl
++                      });
++                    }
++                  }
++                  break;
++                }
+                 warnings.push({
+                   type: "other",
+                   message: `provider executed tool result for tool ${part.toolName} is not supported`
+@@ -2400,6 +2426,44 @@ var AnthropicMessagesLanguageModel = class {
+               input: JSON.stringify(part.input),
+               providerExecuted: true
+             });
++          } else if (part.name === "advisor") {
++            content.push({
++              type: "tool-call",
++              toolCallId: part.id,
++              toolName: "advisor",
++              input: JSON.stringify(part.input ?? {}),
++              providerExecuted: true
++            });
++          }
++          break;
++        }
++        case "advisor_tool_result": {
++          const toolUseId = part.tool_use_id;
++          if (part.content.type === "advisor_result") {
++            content.push({
++              type: "tool-result",
++              toolCallId: toolUseId,
++              toolName: "advisor",
++              result: JSON.stringify({ type: "advisor_result", text: part.content.text }),
++              providerExecuted: true
++            });
++          } else if (part.content.type === "advisor_redacted_result") {
++            content.push({
++              type: "tool-result",
++              toolCallId: toolUseId,
++              toolName: "advisor",
++              result: JSON.stringify({ type: "advisor_redacted_result", encrypted_content: part.content.encrypted_content }),
++              providerExecuted: true
++            });
++          } else if (part.content.type === "advisor_tool_result_error") {
++            content.push({
++              type: "tool-result",
++              toolCallId: toolUseId,
++              toolName: "advisor",
++              isError: true,
++              result: JSON.stringify({ type: "advisor_tool_result_error", error_code: part.content.error_code }),
++              providerExecuted: true
++            });
+           }
+           break;
+         }
+@@ -2742,7 +2806,9 @@ var AnthropicMessagesLanguageModel = class {
+                     // code execution 20250825 text editor:
+                     "text_editor_code_execution",
+                     // code execution 20250825 bash:
+-                    "bash_code_execution"
++                    "bash_code_execution",
++                    // advisor tool:
++                    "advisor"
+                   ].includes(value.content_block.name)) {
+                     contentBlocks[value.index] = {
+                       type: "tool-call",
+@@ -2849,6 +2915,37 @@ var AnthropicMessagesLanguageModel = class {
+                   }
+                   return;
+                 }
++                case "advisor_tool_result": {
++                  const part = value.content_block;
++                  const toolUseId = part.tool_use_id;
++                  if (part.content.type === "advisor_result") {
++                    controller.enqueue({
++                      type: "tool-result",
++                      toolCallId: toolUseId,
++                      toolName: "advisor",
++                      result: JSON.stringify({ type: "advisor_result", text: part.content.text }),
++                      providerExecuted: true
++                    });
++                  } else if (part.content.type === "advisor_redacted_result") {
++                    controller.enqueue({
++                      type: "tool-result",
++                      toolCallId: toolUseId,
++                      toolName: "advisor",
++                      result: JSON.stringify({ type: "advisor_redacted_result", encrypted_content: part.content.encrypted_content }),
++                      providerExecuted: true
++                    });
++                  } else if (part.content.type === "advisor_tool_result_error") {
++                    controller.enqueue({
++                      type: "tool-result",
++                      toolCallId: toolUseId,
++                      toolName: "advisor",
++                      isError: true,
++                      result: JSON.stringify({ type: "advisor_tool_result_error", error_code: part.content.error_code }),
++                      providerExecuted: true
++                    });
++                  }
++                  return;
++                }
+                 // code execution 20250522:
+                 case "code_execution_tool_result": {
+                   const part = value.content_block;
+diff --git a/dist/internal/index.js b/dist/internal/index.js
+index bdb69ee319f2d895385aea143e8aa32269a48aff..dbb7bbedc7f3eb5e2e9235f4a3a5ea5bacae0a52 100644
+--- a/dist/internal/index.js
++++ b/dist/internal/index.js
+@@ -1102,6 +1102,17 @@ async function prepareTools({
+             });
+             break;
+           }
++          case "anthropic.advisor_20260301": {
++            betas.add("advisor-tool-2026-03-01");
++            anthropicTools2.push({
++              type: "advisor_20260301",
++              name: "advisor",
++              model: tool.args.model,
++              max_uses: tool.args.maxUses,
++              ...tool.args.caching ? { caching: { type: "ephemeral", ttl: "5m" } } : {}
++            });
++            break;
++          }
+           default: {
+             toolWarnings.push({ type: "unsupported-tool", tool });
+             break;
+@@ -1637,7 +1648,7 @@ async function convertToAnthropicMessagesPrompt({
+                       cache_control: cacheControl
+                     });
+                   } else if (part.toolName === "code_execution" || // code execution 20250522
+-                  part.toolName === "web_fetch" || part.toolName === "web_search") {
++                  part.toolName === "web_fetch" || part.toolName === "web_search" || part.toolName === "advisor") {
+                     anthropicContent.push({
+                       type: "server_tool_use",
+                       id: part.toolCallId,
+@@ -1778,6 +1789,21 @@ async function convertToAnthropicMessagesPrompt({
+                   });
+                   break;
+                 }
++                if (part.toolName === "advisor") {
++                  const output = part.output;
++                  if (output.type === "json" && output.value != null) {
++                    const parsed = typeof output.value === "string" ? JSON.parse(output.value) : output.value;
++                    if (parsed.type && ["advisor_result", "advisor_redacted_result", "advisor_tool_result_error"].includes(parsed.type)) {
++                      anthropicContent.push({
++                        type: "advisor_tool_result",
++                        tool_use_id: part.toolCallId,
++                        content: parsed,
++                        cache_control: cacheControl
++                      });
++                    }
++                  }
++                  break;
++                }
+                 warnings.push({
+                   type: "other",
+                   message: `provider executed tool result for tool ${part.toolName} is not supported`
+@@ -2374,6 +2400,44 @@ var AnthropicMessagesLanguageModel = class {
+               input: JSON.stringify(part.input),
+               providerExecuted: true
+             });
++          } else if (part.name === "advisor") {
++            content.push({
++              type: "tool-call",
++              toolCallId: part.id,
++              toolName: "advisor",
++              input: JSON.stringify(part.input ?? {}),
++              providerExecuted: true
++            });
++          }
++          break;
++        }
++        case "advisor_tool_result": {
++          const toolUseId = part.tool_use_id;
++          if (part.content.type === "advisor_result") {
++            content.push({
++              type: "tool-result",
++              toolCallId: toolUseId,
++              toolName: "advisor",
++              result: JSON.stringify({ type: "advisor_result", text: part.content.text }),
++              providerExecuted: true
++            });
++          } else if (part.content.type === "advisor_redacted_result") {
++            content.push({
++              type: "tool-result",
++              toolCallId: toolUseId,
++              toolName: "advisor",
++              result: JSON.stringify({ type: "advisor_redacted_result", encrypted_content: part.content.encrypted_content }),
++              providerExecuted: true
++            });
++          } else if (part.content.type === "advisor_tool_result_error") {
++            content.push({
++              type: "tool-result",
++              toolCallId: toolUseId,
++              toolName: "advisor",
++              isError: true,
++              result: JSON.stringify({ type: "advisor_tool_result_error", error_code: part.content.error_code }),
++              providerExecuted: true
++            });
+           }
+           break;
+         }
+@@ -2716,7 +2780,9 @@ var AnthropicMessagesLanguageModel = class {
+                     // code execution 20250825 text editor:
+                     "text_editor_code_execution",
+                     // code execution 20250825 bash:
+-                    "bash_code_execution"
++                    "bash_code_execution",
++                    // advisor tool:
++                    "advisor"
+                   ].includes(value.content_block.name)) {
+                     contentBlocks[value.index] = {
+                       type: "tool-call",
+@@ -2823,6 +2889,37 @@ var AnthropicMessagesLanguageModel = class {
+                   }
+                   return;
+                 }
++                case "advisor_tool_result": {
++                  const part = value.content_block;
++                  const toolUseId = part.tool_use_id;
++                  if (part.content.type === "advisor_result") {
++                    controller.enqueue({
++                      type: "tool-result",
++                      toolCallId: toolUseId,
++                      toolName: "advisor",
++                      result: JSON.stringify({ type: "advisor_result", text: part.content.text }),
++                      providerExecuted: true
++                    });
++                  } else if (part.content.type === "advisor_redacted_result") {
++                    controller.enqueue({
++                      type: "tool-result",
++                      toolCallId: toolUseId,
++                      toolName: "advisor",
++                      result: JSON.stringify({ type: "advisor_redacted_result", encrypted_content: part.content.encrypted_content }),
++                      providerExecuted: true
++                    });
++                  } else if (part.content.type === "advisor_tool_result_error") {
++                    controller.enqueue({
++                      type: "tool-result",
++                      toolCallId: toolUseId,
++                      toolName: "advisor",
++                      isError: true,
++                      result: JSON.stringify({ type: "advisor_tool_result_error", error_code: part.content.error_code }),
++                      providerExecuted: true
++                    });
++                  }
++                  return;
++                }
+                 // code execution 20250522:
+                 case "code_execution_tool_result": {
+                   const part = value.content_block;
+diff --git a/dist/internal/index.mjs b/dist/internal/index.mjs
+index f2c17a167872841ee4846540e8cc2860e872e69e..62aec53d0a277e168ed132998ea888c3f25ff6c6 100644
+--- a/dist/internal/index.mjs
++++ b/dist/internal/index.mjs
+@@ -1099,6 +1099,17 @@ async function prepareTools({
+             });
+             break;
+           }
++          case "anthropic.advisor_20260301": {
++            betas.add("advisor-tool-2026-03-01");
++            anthropicTools2.push({
++              type: "advisor_20260301",
++              name: "advisor",
++              model: tool.args.model,
++              max_uses: tool.args.maxUses,
++              ...tool.args.caching ? { caching: { type: "ephemeral", ttl: "5m" } } : {}
++            });
++            break;
++          }
+           default: {
+             toolWarnings.push({ type: "unsupported-tool", tool });
+             break;
+@@ -1648,7 +1659,7 @@ async function convertToAnthropicMessagesPrompt({
+                       cache_control: cacheControl
+                     });
+                   } else if (part.toolName === "code_execution" || // code execution 20250522
+-                  part.toolName === "web_fetch" || part.toolName === "web_search") {
++                  part.toolName === "web_fetch" || part.toolName === "web_search" || part.toolName === "advisor") {
+                     anthropicContent.push({
+                       type: "server_tool_use",
+                       id: part.toolCallId,
+@@ -1789,6 +1800,21 @@ async function convertToAnthropicMessagesPrompt({
+                   });
+                   break;
+                 }
++                if (part.toolName === "advisor") {
++                  const output = part.output;
++                  if (output.type === "json" && output.value != null) {
++                    const parsed = typeof output.value === "string" ? JSON.parse(output.value) : output.value;
++                    if (parsed.type && ["advisor_result", "advisor_redacted_result", "advisor_tool_result_error"].includes(parsed.type)) {
++                      anthropicContent.push({
++                        type: "advisor_tool_result",
++                        tool_use_id: part.toolCallId,
++                        content: parsed,
++                        cache_control: cacheControl
++                      });
++                    }
++                  }
++                  break;
++                }
+                 warnings.push({
+                   type: "other",
+                   message: `provider executed tool result for tool ${part.toolName} is not supported`
+@@ -2385,6 +2411,44 @@ var AnthropicMessagesLanguageModel = class {
+               input: JSON.stringify(part.input),
+               providerExecuted: true
+             });
++          } else if (part.name === "advisor") {
++            content.push({
++              type: "tool-call",
++              toolCallId: part.id,
++              toolName: "advisor",
++              input: JSON.stringify(part.input ?? {}),
++              providerExecuted: true
++            });
++          }
++          break;
++        }
++        case "advisor_tool_result": {
++          const toolUseId = part.tool_use_id;
++          if (part.content.type === "advisor_result") {
++            content.push({
++              type: "tool-result",
++              toolCallId: toolUseId,
++              toolName: "advisor",
++              result: JSON.stringify({ type: "advisor_result", text: part.content.text }),
++              providerExecuted: true
++            });
++          } else if (part.content.type === "advisor_redacted_result") {
++            content.push({
++              type: "tool-result",
++              toolCallId: toolUseId,
++              toolName: "advisor",
++              result: JSON.stringify({ type: "advisor_redacted_result", encrypted_content: part.content.encrypted_content }),
++              providerExecuted: true
++            });
++          } else if (part.content.type === "advisor_tool_result_error") {
++            content.push({
++              type: "tool-result",
++              toolCallId: toolUseId,
++              toolName: "advisor",
++              isError: true,
++              result: JSON.stringify({ type: "advisor_tool_result_error", error_code: part.content.error_code }),
++              providerExecuted: true
++            });
+           }
+           break;
+         }
+@@ -2727,7 +2791,9 @@ var AnthropicMessagesLanguageModel = class {
+                     // code execution 20250825 text editor:
+                     "text_editor_code_execution",
+                     // code execution 20250825 bash:
+-                    "bash_code_execution"
++                    "bash_code_execution",
++                    // advisor tool:
++                    "advisor"
+                   ].includes(value.content_block.name)) {
+                     contentBlocks[value.index] = {
+                       type: "tool-call",
+@@ -2834,6 +2900,37 @@ var AnthropicMessagesLanguageModel = class {
+                   }
+                   return;
+                 }
++                case "advisor_tool_result": {
++                  const part = value.content_block;
++                  const toolUseId = part.tool_use_id;
++                  if (part.content.type === "advisor_result") {
++                    controller.enqueue({
++                      type: "tool-result",
++                      toolCallId: toolUseId,
++                      toolName: "advisor",
++                      result: JSON.stringify({ type: "advisor_result", text: part.content.text }),
++                      providerExecuted: true
++                    });
++                  } else if (part.content.type === "advisor_redacted_result") {
++                    controller.enqueue({
++                      type: "tool-result",
++                      toolCallId: toolUseId,
++                      toolName: "advisor",
++                      result: JSON.stringify({ type: "advisor_redacted_result", encrypted_content: part.content.encrypted_content }),
++                      providerExecuted: true
++                    });
++                  } else if (part.content.type === "advisor_tool_result_error") {
++                    controller.enqueue({
++                      type: "tool-result",
++                      toolCallId: toolUseId,
++                      toolName: "advisor",
++                      isError: true,
++                      result: JSON.stringify({ type: "advisor_tool_result_error", error_code: part.content.error_code }),
++                      providerExecuted: true
++                    });
++                  }
++                  return;
++                }
+                 // code execution 20250522:
+                 case "code_execution_tool_result": {
+                   const part = value.content_block;

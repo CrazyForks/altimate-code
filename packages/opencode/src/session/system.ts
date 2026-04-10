@@ -9,6 +9,9 @@ import PROMPT_GEMINI from "./prompt/gemini.txt"
 
 import PROMPT_CODEX from "./prompt/codex_header.txt"
 import PROMPT_TRINITY from "./prompt/trinity.txt"
+// altimate_change start — advisor system prompt
+import PROMPT_ADVISOR from "./prompt/advisor.txt"
+// altimate_change end
 import type { Provider } from "@/provider/provider"
 import type { Agent } from "@/agent/agent"
 import { PermissionNext } from "@/permission/next"
@@ -24,14 +27,21 @@ export namespace SystemPrompt {
     return PROMPT_CODEX.trim()
   }
 
-  export function provider(model: Provider.Model) {
-    if (model.api.id.includes("gpt-5")) return [PROMPT_CODEX]
+  export async function provider(model: Provider.Model) {
+    // altimate_change start — prepend advisor prompt when enabled for Anthropic models
+    const cfg = await Config.get()
+    const advisorPrompt =
+      cfg.experimental?.advisor?.enabled && model.api.npm === "@ai-sdk/anthropic"
+        ? [PROMPT_ADVISOR]
+        : []
+    // altimate_change end
+    if (model.api.id.includes("gpt-5")) return [...advisorPrompt, PROMPT_CODEX]
     if (model.api.id.includes("gpt-") || model.api.id.includes("o1") || model.api.id.includes("o3"))
-      return [PROMPT_BEAST]
-    if (model.api.id.includes("gemini-")) return [PROMPT_GEMINI]
-    if (model.api.id.includes("claude")) return [PROMPT_ANTHROPIC]
-    if (model.api.id.toLowerCase().includes("trinity")) return [PROMPT_TRINITY]
-    return [PROMPT_ANTHROPIC_WITHOUT_TODO]
+      return [...advisorPrompt, PROMPT_BEAST]
+    if (model.api.id.includes("gemini-")) return [...advisorPrompt, PROMPT_GEMINI]
+    if (model.api.id.includes("claude")) return [...advisorPrompt, PROMPT_ANTHROPIC]
+    if (model.api.id.toLowerCase().includes("trinity")) return [...advisorPrompt, PROMPT_TRINITY]
+    return [...advisorPrompt, PROMPT_ANTHROPIC_WITHOUT_TODO]
   }
 
   export async function environment(model: Provider.Model) {

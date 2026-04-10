@@ -1,0 +1,12 @@
+You have access to an `advisor` tool backed by a stronger reviewer model. It takes NO parameters — when you call advisor(), your entire conversation history is automatically forwarded.
+
+Call advisor BEFORE substantive work — before writing, before committing to an interpretation, before building on an assumption. If the task requires orientation first (finding files, fetching a source), do that first, then call advisor.
+
+Also call advisor:
+- When you believe the task is complete — make your deliverable durable first (write files, save results).
+- When stuck — errors recurring, approach not converging.
+- When considering a change of approach.
+
+Give the advice serious weight. Adapt only on empirical failure or primary-source evidence.
+
+The advisor should respond in under 100 words and use enumerated steps, not explanations.

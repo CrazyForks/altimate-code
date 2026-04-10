@@ -69,7 +69,7 @@ export namespace LLM {
       [
         // use agent prompt otherwise provider prompt
         // For Codex sessions, skip SystemPrompt.provider() since it's sent via options.instructions
-        ...(input.agent.prompt ? [input.agent.prompt] : isCodex ? [] : SystemPrompt.provider(input.model)),
+        ...(input.agent.prompt ? [input.agent.prompt] : isCodex ? [] : await SystemPrompt.provider(input.model)),
         // any custom prompt passed into this call
         ...input.system,
         // any custom prompt from last user message
@@ -168,6 +168,30 @@ export namespace LLM {
         execute: async () => ({ output: "", title: "", metadata: {} }),
       })
     }
+
+    // altimate_change start — inject Anthropic advisor tool when enabled
+    const advisorCfg = cfg.experimental?.advisor
+    if (
+      advisorCfg?.enabled &&
+      input.model.api.npm === "@ai-sdk/anthropic" &&
+      !input.small
+    ) {
+      tools["advisor"] = {
+        type: "provider-defined",
+        id: "anthropic.advisor_20260301",
+        args: {
+          model: advisorCfg.model ?? "claude-opus-4-6",
+          maxUses: advisorCfg.max_uses ?? 3,
+          caching: advisorCfg.caching ?? true,
+        },
+      } as any
+    } else if (advisorCfg?.enabled && input.model.api.npm !== "@ai-sdk/anthropic") {
+      l.warn("advisor enabled but model is not Anthropic — advisor inactive", {
+        providerID: input.model.providerID,
+        npm: input.model.api.npm,
+      })
+    }
+    // altimate_change end
 
     return streamText({
       onError(error) {

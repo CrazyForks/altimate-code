@@ -174,6 +174,21 @@ export namespace SessionProcessor {
                     sessionToolCallsMade++
                     // altimate_change end
 
+                    // altimate_change start — track advisor tool calls
+                    if (value.toolName === "advisor") {
+                      const advisorCfg = (await Config.get()).experimental?.advisor
+                      Telemetry.track({
+                        type: "advisor_call",
+                        timestamp: Date.now(),
+                        session_id: input.sessionID,
+                        message_id: input.assistantMessage.id,
+                        executor_model_id: input.model.id,
+                        advisor_model_id: advisorCfg?.model ?? "claude-opus-4-6",
+                        result_type: "success",
+                      })
+                    }
+                    // altimate_change end
+
                     const parts = await MessageV2.parts(input.assistantMessage.id)
                     const lastThree = parts.slice(-DOOM_LOOP_THRESHOLD)
 

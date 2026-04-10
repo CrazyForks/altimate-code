@@ -238,6 +238,7 @@
   "patchedDependencies": {
     "@openrouter/ai-sdk-provider@1.5.4": "patches/@openrouter%2Fai-sdk-provider@1.5.4.patch",
     "@standard-community/standard-openapi@0.2.9": "patches/@standard-community%2Fstandard-openapi@0.2.9.patch",
+    "@ai-sdk/anthropic@2.0.65": "patches/@ai-sdk%2Fanthropic@2.0.65.patch",
   },
   "overrides": {
     "@types/bun": "catalog:",

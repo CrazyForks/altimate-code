@@ -95,6 +95,18 @@ export namespace Telemetry {
         tokens_cache_read?: number // only when a cached prompt was reused
         tokens_cache_write?: number // only when a new cache entry was written
       }
+    // altimate_change start — advisor tool telemetry
+    | {
+        type: "advisor_call"
+        timestamp: number
+        session_id: string
+        message_id: string
+        executor_model_id: string
+        advisor_model_id: string
+        result_type: "success" | "error" | "redacted"
+        error_code?: string
+      }
+    // altimate_change end
     | {
         type: "tool_call"
         timestamp: number

@@ -1308,6 +1308,31 @@ export namespace Config {
               "Auto-discover MCP servers from VS Code, Claude Code, Copilot, and Gemini configs at startup. Set to false to disable.",
             ),
           // altimate_change end
+          // altimate_change start — advisor tool configuration
+          advisor: z
+            .object({
+              enabled: z
+                .boolean()
+                .default(false)
+                .describe("Enable Anthropic Advisor Tool (executor consults Opus for guidance)"),
+              model: z
+                .string()
+                .default("claude-opus-4-6")
+                .describe("Advisor model ID"),
+              max_uses: z
+                .number()
+                .int()
+                .positive()
+                .max(10)
+                .default(3)
+                .describe("Max advisor calls per request"),
+              caching: z
+                .boolean()
+                .default(true)
+                .describe("Enable prompt caching for advisor sub-inference"),
+            })
+            .optional(),
+          // altimate_change end
         })
         .optional(),
     })

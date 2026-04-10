@@ -853,18 +853,41 @@ export namespace Session {
         input.model.cost?.experimentalOver200K && tokens.input + tokens.cache.read > 200_000
           ? input.model.cost.experimentalOver200K
           : input.model.cost
+      let cost = safe(
+        new Decimal(0)
+          .add(new Decimal(tokens.input).mul(costInfo?.input ?? 0).div(1_000_000))
+          .add(new Decimal(tokens.output).mul(costInfo?.output ?? 0).div(1_000_000))
+          .add(new Decimal(tokens.cache.read).mul(costInfo?.cache?.read ?? 0).div(1_000_000))
+          .add(new Decimal(tokens.cache.write).mul(costInfo?.cache?.write ?? 0).div(1_000_000))
+          // TODO: update models.dev to have better pricing model, for now:
+          // charge reasoning tokens at the same rate as output tokens
+          .add(new Decimal(tokens.reasoning).mul(costInfo?.output ?? 0).div(1_000_000))
+          .toNumber(),
+      )
+
+      // altimate_change start — add advisor iteration cost at advisor model rates
+      const iterations = input.metadata?.["anthropic"]?.["iterations"] as
+        | Array<{ type: string; model?: string; input_tokens?: number; output_tokens?: number }>
+        | undefined
+      if (iterations && Array.isArray(iterations)) {
+        for (const iter of iterations) {
+          if (iter.type === "advisor_message" && iter.model) {
+            // Hardcoded Opus pricing as fallback since Provider.findModel may be async
+            const inputRate = 15 // Opus: $15/M input
+            const outputRate = 75 // Opus: $75/M output
+            const advisorCost = new Decimal(safe(iter.input_tokens ?? 0))
+              .mul(inputRate)
+              .div(1_000_000)
+              .add(new Decimal(safe(iter.output_tokens ?? 0)).mul(outputRate).div(1_000_000))
+              .toNumber()
+            cost = safe(cost + advisorCost)
+          }
+        }
+      }
+      // altimate_change end
+
       return {
-        cost: safe(
-          new Decimal(0)
-            .add(new Decimal(tokens.input).mul(costInfo?.input ?? 0).div(1_000_000))
-            .add(new Decimal(tokens.output).mul(costInfo?.output ?? 0).div(1_000_000))
-            .add(new Decimal(tokens.cache.read).mul(costInfo?.cache?.read ?? 0).div(1_000_000))
-            .add(new Decimal(tokens.cache.write).mul(costInfo?.cache?.write ?? 0).div(1_000_000))
-            // TODO: update models.dev to have better pricing model, for now:
-            // charge reasoning tokens at the same rate as output tokens
-            .add(new Decimal(tokens.reasoning).mul(costInfo?.output ?? 0).div(1_000_000))
-            .toNumber(),
-        ),
+        cost,
         tokens,
       }
     },
