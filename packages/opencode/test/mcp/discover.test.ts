@@ -363,4 +363,44 @@ describe("discoverExternalMcp", () => {
     expect(result["project-server"]).toBeDefined()
     expect((result["project-server"] as any).enabled).toBe(false)
   })
+
+  // altimate_change start — env-var interpolation in external MCP configs (commit f030bf8)
+  test("resolves ${VAR} env-var references in external config values", async () => {
+    const envKey = "__TEST_MCP_DISCOVER_CMD_" + Date.now()
+    process.env[envKey] = "my-custom-node"
+    try {
+      await mkdir(path.join(tempDir, ".vscode"), { recursive: true })
+      await writeFile(
+        path.join(tempDir, ".vscode/mcp.json"),
+        `{"servers": {"env-test": {"command": "\${${envKey}}", "args": ["serve"]}}}`,
+      )
+
+      const { servers: result } = await discoverExternalMcp(tempDir)
+      expect(result["env-test"]).toBeDefined()
+      expect(result["env-test"]).toMatchObject({
+        type: "local",
+        command: ["my-custom-node", "serve"],
+      })
+    } finally {
+      delete process.env[envKey]
+    }
+  })
+
+  test("resolves ${VAR:-default} with fallback when env var is unset", async () => {
+    const envKey = "__TEST_MCP_DISCOVER_UNSET_" + Date.now()
+    delete process.env[envKey]
+    await mkdir(path.join(tempDir, ".vscode"), { recursive: true })
+    await writeFile(
+      path.join(tempDir, ".vscode/mcp.json"),
+      `{"servers": {"default-test": {"command": "\${${envKey}:-fallback-cmd}", "args": ["run"]}}}`,
+    )
+
+    const { servers: result } = await discoverExternalMcp(tempDir)
+    expect(result["default-test"]).toBeDefined()
+    expect(result["default-test"]).toMatchObject({
+      type: "local",
+      command: ["fallback-cmd", "run"],
+    })
+  })
+  // altimate_change end
 })
