@@ -39,17 +39,29 @@ function createMockRequest() {
   return req
 }
 
+function createMockPool(config: any) {
+  mockConnectCalls.push(config)
+  return {
+    connect: async () => {},
+    request: () => createMockRequest(),
+    close: async () => {
+      mockCloseCalls++
+    },
+  }
+}
+
 mock.module("mssql", () => ({
   default: {
-    connect: async (config: any) => {
-      mockConnectCalls.push(config)
-      return {
-        request: () => createMockRequest(),
-        close: async () => {
-          mockCloseCalls++
-        },
-      }
-    },
+    connect: async (config: any) => createMockPool(config),
+  },
+  ConnectionPool: class {
+    _pool: any
+    constructor(config: any) {
+      this._pool = createMockPool(config)
+    }
+    async connect() { return this._pool.connect() }
+    request() { return this._pool.request() }
+    async close() { return this._pool.close() }
   },
 }))
 

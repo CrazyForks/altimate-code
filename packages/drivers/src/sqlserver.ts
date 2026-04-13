@@ -6,10 +6,13 @@ import type { ConnectionConfig, Connector, ConnectorResult, ExecuteOptions, Sche
 
 export async function connect(config: ConnectionConfig): Promise<Connector> {
   let mssql: any
+  let MssqlConnectionPool: any
   try {
     // @ts-expect-error — mssql has no type declarations; installed as optional peerDependency
-    mssql = await import("mssql")
-    mssql = mssql.default || mssql
+    const mod = await import("mssql")
+    mssql = mod.default || mod
+    // ConnectionPool is a named export, not on .default
+    MssqlConnectionPool = mod.ConnectionPool ?? mssql.ConnectionPool
   } catch {
     throw new Error(
       "SQL Server driver not installed. Run: npm install mssql",
@@ -103,7 +106,14 @@ export async function connect(config: ConnectionConfig): Promise<Connector> {
         mssqlConfig.password = config.password
       }
 
-      pool = await mssql.connect(mssqlConfig)
+      // Use an explicit ConnectionPool (not the global mssql.connect()) so
+      // multiple simultaneous connections to different servers are isolated.
+      if (MssqlConnectionPool) {
+        pool = new MssqlConnectionPool(mssqlConfig)
+        await pool.connect()
+      } else {
+        pool = await mssql.connect(mssqlConfig)
+      }
     },
 
     async execute(sql: string, limit?: number, _binds?: any[], options?: ExecuteOptions): Promise<ConnectorResult> {
@@ -126,22 +136,38 @@ export async function connect(config: ConnectionConfig): Promise<Connector> {
       }
 
       const result = await pool.request().query(query)
-      const rows = result.recordset ?? []
+      const recordset = result.recordset ?? []
+      const truncated = effectiveLimit > 0 && recordset.length > effectiveLimit
+      const limitedRecordset = truncated ? recordset.slice(0, effectiveLimit) : recordset
+
+      // mssql merges unnamed columns (e.g. SELECT COUNT(*), SUM(...)) into a
+      // single array under the empty-string key: row[""] = [val1, val2, ...].
+      // Flatten these arrays to restore positional column values.
+      const flattenRow = (row: any): any[] => {
+        const vals: any[] = []
+        for (const v of Object.values(row)) {
+          if (Array.isArray(v)) vals.push(...v)
+          else vals.push(v)
+        }
+        return vals
+      }
+
+      const rows = limitedRecordset.map(flattenRow)
+      const sampleFlat = rows.length > 0 ? rows[0] : []
+      const namedKeys = recordset.length > 0 ? Object.keys(recordset[0]) : []
       const columns =
-        rows.length > 0
-          ? Object.keys(rows[0])
-          : (result.recordset?.columns
-              ? Object.keys(result.recordset.columns)
-              : [])
-      const truncated = effectiveLimit > 0 && rows.length > effectiveLimit
-      const limitedRows = truncated ? rows.slice(0, effectiveLimit) : rows
+        namedKeys.length === sampleFlat.length
+          ? namedKeys
+          : sampleFlat.length > 0
+            ? sampleFlat.map((_: any, i: number) => `col_${i}`)
+            : (result.recordset?.columns
+                ? Object.keys(result.recordset.columns)
+                : [])
 
       return {
         columns,
-        rows: limitedRows.map((row: any) =>
-          columns.map((col) => row[col]),
-        ),
-        row_count: limitedRows.length,
+        rows,
+        row_count: rows.length,
         truncated,
       }
     },
