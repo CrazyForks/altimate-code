@@ -62,7 +62,7 @@ export async function connect(config: ConnectionConfig): Promise<Connector> {
           mssqlConfig.authentication = {
             type: "azure-active-directory-default",
             options: {
-              ...(config.azure_client_id && { clientId: config.azure_client_id as string }),
+              ...(config.azure_client_id ? { clientId: config.azure_client_id as string } : {}),
             },
           }
         } else if (authType === "azure-active-directory-password") {
@@ -87,7 +87,7 @@ export async function connect(config: ConnectionConfig): Promise<Connector> {
           mssqlConfig.authentication = {
             type: authType,
             options: {
-              ...(config.azure_client_id && { clientId: config.azure_client_id }),
+              ...(config.azure_client_id ? { clientId: config.azure_client_id } : {}),
             },
           }
         } else if (authType === "azure-active-directory-service-principal-secret") {
