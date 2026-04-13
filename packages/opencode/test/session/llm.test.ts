@@ -14,6 +14,57 @@ import type { Agent } from "../../src/agent/agent"
 import type { MessageV2 } from "../../src/session/message-v2"
 import { SessionID, MessageID } from "../../src/session/schema"
 
+describe("session.llm.toolNamesFromMessages", () => {
+  test("returns empty set for empty messages", () => {
+    expect(LLM.toolNamesFromMessages([])).toEqual(new Set())
+  })
+
+  test("returns empty set for messages with no tool calls", () => {
+    const messages: ModelMessage[] = [
+      { role: "user", content: [{ type: "text", text: "Hello" }] },
+      { role: "assistant", content: [{ type: "text", text: "Hi" }] },
+    ]
+    expect(LLM.toolNamesFromMessages(messages)).toEqual(new Set())
+  })
+
+  test("extracts tool names from tool-call blocks", () => {
+    const messages = [
+      {
+        role: "assistant",
+        content: [
+          { type: "tool-call", toolCallId: "call-1", toolName: "bash" },
+          { type: "tool-call", toolCallId: "call-2", toolName: "read" },
+        ],
+      },
+    ] as ModelMessage[]
+    expect(LLM.toolNamesFromMessages(messages)).toEqual(new Set(["bash", "read"]))
+  })
+
+  test("deduplicates tool names across messages", () => {
+    const messages = [
+      {
+        role: "assistant",
+        content: [{ type: "tool-call", toolCallId: "call-1", toolName: "bash" }],
+      },
+      {
+        role: "assistant",
+        content: [{ type: "tool-call", toolCallId: "call-2", toolName: "bash" }],
+      },
+    ] as ModelMessage[]
+    expect(LLM.toolNamesFromMessages(messages)).toEqual(new Set(["bash"]))
+  })
+
+  test("ignores tool-result blocks (only extracts from tool-call)", () => {
+    const messages = [
+      {
+        role: "tool",
+        content: [{ type: "tool-result", toolCallId: "call-1", toolName: "bash" }],
+      },
+    ] as ModelMessage[]
+    expect(LLM.toolNamesFromMessages(messages)).toEqual(new Set())
+  })
+})
+
 describe("session.llm.hasToolCalls", () => {
   test("returns false for empty messages array", () => {
     expect(LLM.hasToolCalls([])).toBe(false)
