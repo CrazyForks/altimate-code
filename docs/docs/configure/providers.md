@@ -69,25 +69,45 @@ Available models: `claude-opus-4-6`, `claude-sonnet-4-6`, `claude-haiku-4-5-2025
 }
 ```
 
-## AWS Bedrock
+## Amazon Bedrock
 
 ```json
 {
   "provider": {
-    "bedrock": {
-      "region": "us-east-1",
-      "accessKeyId": "{env:AWS_ACCESS_KEY_ID}",
-      "secretAccessKey": "{env:AWS_SECRET_ACCESS_KEY}"
+    "amazon-bedrock": {
+      "options": {
+        "region": "us-east-1"
+      }
     }
   },
-  "model": "bedrock/anthropic.claude-sonnet-4-6-v1"
+  "model": "amazon-bedrock/anthropic.claude-sonnet-4-6-v1"
 }
 ```
 
 Uses the standard AWS credential chain. Set `AWS_PROFILE` or provide credentials directly.
 
 !!! note
-    If you have AWS SSO or IAM roles configured, Bedrock will use your default credential chain automatically, so no explicit keys are needed.
+    If you have AWS SSO, IAM roles, or environment credentials (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`) configured, Bedrock will use your default credential chain automatically.
+
+### Custom Endpoints (API Gateways)
+
+If your organization routes Bedrock traffic through a custom API gateway or proxy, set the `baseURL` in the provider options:
+
+```json
+{
+  "provider": {
+    "amazon-bedrock": {
+      "options": {
+        "baseURL": "https://your-gateway.example.com/v1",
+        "region": "us-east-1"
+      }
+    }
+  },
+  "model": "amazon-bedrock/anthropic.claude-sonnet-4-6-v1"
+}
+```
+
+For a complete walkthrough — including bearer token authentication, cross-region model IDs, and troubleshooting — see the [Amazon Bedrock Custom Endpoints guide](bedrock-custom-endpoints.md).
 
 ## Azure OpenAI
 
