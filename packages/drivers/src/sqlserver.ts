@@ -142,11 +142,12 @@ export async function connect(config: ConnectionConfig): Promise<Connector> {
 
       // mssql merges unnamed columns (e.g. SELECT COUNT(*), SUM(...)) into a
       // single array under the empty-string key: row[""] = [val1, val2, ...].
-      // Flatten these arrays to restore positional column values.
+      // Flatten only the empty-string key to restore positional column values;
+      // legitimate array values from other keys are preserved as-is.
       const flattenRow = (row: any): any[] => {
         const vals: any[] = []
-        for (const v of Object.values(row)) {
-          if (Array.isArray(v)) vals.push(...v)
+        for (const [k, v] of Object.entries(row)) {
+          if (k === "" && Array.isArray(v)) vals.push(...v)
           else vals.push(v)
         }
         return vals

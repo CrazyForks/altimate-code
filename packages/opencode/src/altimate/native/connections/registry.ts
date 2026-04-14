@@ -166,6 +166,7 @@ async function createConnector(name: string, config: ConnectionConfig): Promise<
     "mariadb",
     "sqlserver",
     "mssql",
+    "fabric",
     "oracle",
     "snowflake",
     "clickhouse",

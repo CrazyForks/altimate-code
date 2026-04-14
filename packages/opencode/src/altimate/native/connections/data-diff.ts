@@ -557,24 +557,25 @@ function buildPartitionWhereClause(
 
   // date mode
   const expr = dateTruncExpr(granularity!, quotedCol, dialect)
+  const escaped = partitionValue.replace(/'/g, "''")
 
   // Cast the literal appropriately per dialect
   switch (dialect) {
     case "bigquery":
-      return `${expr} = '${partitionValue}'`
+      return `${expr} = '${escaped}'`
     case "clickhouse":
-      return `${expr} = toDate('${partitionValue}')`
+      return `${expr} = toDate('${escaped}')`
     case "mysql":
     case "mariadb":
-      return `${expr} = '${partitionValue}'`
+      return `${expr} = '${escaped}'`
     case "sqlserver":
     case "mssql":
     case "tsql":
     case "fabric":
       // Style 23 = ISO-8601 (yyyy-mm-dd), locale-safe
-      return `${expr} = CONVERT(DATE, '${partitionValue}', 23)`
+      return `${expr} = CONVERT(DATE, '${escaped}', 23)`
     default:
-      return `${expr} = '${partitionValue}'`
+      return `${expr} = '${escaped}'`
   }
 }
 

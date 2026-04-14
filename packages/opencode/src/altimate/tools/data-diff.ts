@@ -203,7 +203,7 @@ function formatOutcome(outcome: any, source: string, target: string): string {
       lines.push(`  Sample differences (first ${Math.min(diffRows.length, 5)}):`)
       for (const d of diffRows.slice(0, 5)) {
         const label = d.sign === "-" ? "source only" : "target only"
-        lines.push(`    [${label}] ${d.values?.join(" | ")}`)
+        lines.push(`    [${label}] ${d.values?.join(" | ") ?? "(no values)"}`)
       }
     }
 
