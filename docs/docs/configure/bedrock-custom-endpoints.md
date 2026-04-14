@@ -123,7 +123,7 @@ Models not listed in the table for a given region are **not** prefixed.
 
 **If your gateway expects the prefixed ID** (e.g., `us.anthropic.claude-sonnet-4-6-v1`), no changes are needed — this is the default behavior for supported models.
 
-**If your gateway handles routing independently and expects the bare model ID**, you can force a specific model ID by including a recognized prefix yourself:
+**If your gateway requires a specific prefixed model ID**, you can force that exact ID by including the recognized prefix yourself:
 
 ```json
 {
