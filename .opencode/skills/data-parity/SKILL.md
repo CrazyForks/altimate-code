@@ -427,11 +427,23 @@ Even when tables match perfectly, state what was checked:
 
 ## SQL Server and Microsoft Fabric
 
+### Minimum Version Requirements
+
+| Component | Minimum Version | Why |
+|---|---|---|
+| **SQL Server** | 2022 (16.x) | `DATETRUNC()` used for date partitioning; `LEAST()`/`GREATEST()` used by Rust engine |
+| **Azure SQL Database** | Any current version | Always has `DATETRUNC()` and `LEAST()` |
+| **Microsoft Fabric** | Any current version | T-SQL surface includes all required functions |
+| **mssql** (npm) | 12.0.0 | `ConnectionPool` isolation for concurrent connections, tedious 19 |
+| **@azure/identity** (npm) | 4.0.0 | Required only for Azure AD authentication; tedious imports it internally |
+
+> **Note:** Date partitioning (`partition_column` + `partition_granularity`) uses `DATETRUNC()` which is **not available on SQL Server 2019 or earlier**. Basic diff operations (joindiff, hashdiff, profile) work on older versions. If you need partitioned diffs on SQL Server < 2022, use numeric or categorical partitioning instead.
+
 ### Supported Configurations
 
 | Warehouse Type | Authentication | Notes |
 |---|---|---|
-| `sqlserver` / `mssql` | User/password or Azure AD | On-prem or Azure SQL. Requires SQL Server 2022+ for `DATETRUNC` and `LEAST`. |
+| `sqlserver` / `mssql` | User/password or Azure AD | On-prem or Azure SQL. SQL Server 2022+ required for date partitioning. |
 | `fabric` | Azure AD only | Microsoft Fabric SQL endpoint. Always uses TLS encryption. |
 
 ### Connecting to Microsoft Fabric
@@ -445,9 +457,14 @@ database: "<warehouse-name>"
 authentication: "azure-active-directory-default"   # recommended
 ```
 
-Supported Azure AD authentication types:
-- `azure-active-directory-default` — auto-discovers credentials via `DefaultAzureCredential` (recommended)
-- `token-credential` — same as above, with optional `azure_client_id` for managed identity
+Auth shorthands (mapped to full tedious type names):
+- `CLI` or `default` → `azure-active-directory-default`
+- `password` → `azure-active-directory-password`
+- `service-principal` → `azure-active-directory-service-principal-secret`
+- `msi` or `managed-identity` → `azure-active-directory-msi-vm`
+
+Full Azure AD authentication types:
+- `azure-active-directory-default` — auto-discovers credentials via `DefaultAzureCredential` (recommended; works with `az login`)
 - `azure-active-directory-password` — username/password with `azure_client_id` and `azure_tenant_id`
 - `azure-active-directory-access-token` — pre-obtained token (does **not** auto-refresh)
 - `azure-active-directory-service-principal-secret` — service principal with `azure_client_id`, `azure_client_secret`, `azure_tenant_id`

@@ -56,6 +56,14 @@ export async function connect(config: ConnectionConfig): Promise<Connector> {
       if (authType?.startsWith("azure-active-directory")) {
         // Azure AD / Entra ID — tedious handles credential creation internally.
         // We pass the type + options; tedious imports @azure/identity itself.
+        // Verify @azure/identity is available before attempting Azure AD auth.
+        try {
+          await import("@azure/identity")
+        } catch {
+          throw new Error(
+            "Azure AD authentication requires @azure/identity. Run: npm install @azure/identity",
+          )
+        }
         ;(mssqlConfig.options as any).encrypt = true
 
         if (authType === "azure-active-directory-default") {
