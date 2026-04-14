@@ -18,18 +18,23 @@ import { SnowflakeCortexAuthPlugin } from "../altimate/plugin/snowflake"
 // altimate_change start — altimate backend auth plugin
 import { AltimateAuthPlugin } from "../altimate/plugin/altimate"
 // altimate_change end
+// altimate_change start — anthropic auth plugin (replaces npm opencode-anthropic-auth)
+import { AnthropicAuthPlugin } from "../altimate/plugin/anthropic"
+// altimate_change end
 
 export namespace Plugin {
   const log = Log.create({ service: "plugin" })
 
-  const BUILTIN = ["opencode-anthropic-auth@0.0.13"]
+  // altimate_change start — removed opencode-anthropic-auth npm package, replaced by internal AnthropicAuthPlugin
+  const BUILTIN: string[] = []
+  // altimate_change end
 
   // Built-in plugins that are directly imported (not installed from npm)
   // GitlabAuthPlugin uses a different version of @opencode-ai/plugin (from npm)
   // vs the workspace version, causing a type mismatch on internal HeyApiClient.
   // The types are structurally compatible at runtime.
-  // altimate_change start — snowflake cortex and altimate backend internal plugins
-  const INTERNAL_PLUGINS: PluginInstance[] = [CodexAuthPlugin, CopilotAuthPlugin, GitlabAuthPlugin as unknown as PluginInstance, SnowflakeCortexAuthPlugin, AltimateAuthPlugin]
+  // altimate_change start — snowflake cortex, altimate backend, and anthropic auth internal plugins
+  const INTERNAL_PLUGINS: PluginInstance[] = [CodexAuthPlugin, CopilotAuthPlugin, GitlabAuthPlugin as unknown as PluginInstance, SnowflakeCortexAuthPlugin, AltimateAuthPlugin, AnthropicAuthPlugin]
   // altimate_change end
 
   const state = Instance.state(async () => {

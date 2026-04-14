@@ -9,6 +9,7 @@ import { fn } from "@/util/fn"
 import { Database, NotFoundError, and, desc, eq, inArray, lt, or } from "@/storage/db"
 import { MessageTable, PartTable, SessionTable } from "./session.sql"
 import { ProviderTransform } from "@/provider/transform"
+import { ANTHROPIC_SERVER_SIDE_TOOLS } from "./constants"
 import { STATUS_CODES } from "http"
 import { Storage } from "@/storage/storage"
 import { ProviderError } from "@/provider/error"
@@ -696,8 +697,17 @@ export namespace MessageV2 {
             })
           if (part.type === "tool") {
             toolNames.add(part.tool)
+            // altimate_change start — server-side tools need providerExecuted flag for multi-turn reconstruction
+            const isServerTool = (ANTHROPIC_SERVER_SIDE_TOOLS as readonly string[]).includes(part.tool)
+            // altimate_change end
             if (part.state.status === "completed") {
-              const outputText = part.state.time.compacted ? "[Old tool result content cleared]" : part.state.output
+              // altimate_change start — server-side tool compaction must produce valid JSON for SDK multi-turn reconstruction
+              const outputText = part.state.time.compacted
+                ? (isServerTool
+                    ? JSON.stringify({ type: "advisor_result", text: "[Old tool result content cleared]" })
+                    : "[Old tool result content cleared]")
+                : part.state.output
+              // altimate_change end
               const attachments = part.state.time.compacted || options?.stripMedia ? [] : (part.state.attachments ?? [])
 
               // For providers that don't support media in tool results, extract media files
@@ -723,6 +733,7 @@ export namespace MessageV2 {
                 toolCallId: part.callID,
                 input: part.state.input,
                 output,
+                ...(isServerTool ? { providerExecuted: true } : {}),
                 ...(differentModel ? {} : { callProviderMetadata: part.metadata }),
               })
             }
@@ -733,6 +744,7 @@ export namespace MessageV2 {
                 toolCallId: part.callID,
                 input: part.state.input,
                 errorText: part.state.error,
+                ...(isServerTool ? { providerExecuted: true } : {}),
                 ...(differentModel ? {} : { callProviderMetadata: part.metadata }),
               })
             // Handle pending/running tool calls to prevent dangling tool_use blocks
@@ -744,6 +756,7 @@ export namespace MessageV2 {
                 toolCallId: part.callID,
                 input: part.state.input,
                 errorText: "[Tool execution was interrupted]",
+                ...(isServerTool ? { providerExecuted: true } : {}),
                 ...(differentModel ? {} : { callProviderMetadata: part.metadata }),
               })
           }

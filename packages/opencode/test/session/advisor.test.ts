@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { Decimal } from "decimal.js"
 import { z } from "zod"
+import { ANTHROPIC_SERVER_SIDE_TOOLS } from "../../src/session/constants"
 
 // ---------------------------------------------------------------------------
 // Test 1-3: Tool injection logic
@@ -562,5 +563,203 @@ describe("advisor.prepareTools", () => {
     const def = anthropicTools[0] as any
     expect(def.caching).toBeUndefined()
     expect(def.max_uses).toBe(5)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Test 11: ANTHROPIC_SERVER_SIDE_TOOLS shared constant
+// ---------------------------------------------------------------------------
+
+describe("advisor.serverSideTools", () => {
+  test("contains all expected server-side tool names", () => {
+    expect(ANTHROPIC_SERVER_SIDE_TOOLS).toContain("advisor")
+    expect(ANTHROPIC_SERVER_SIDE_TOOLS).toContain("web_search")
+    expect(ANTHROPIC_SERVER_SIDE_TOOLS).toContain("web_fetch")
+    expect(ANTHROPIC_SERVER_SIDE_TOOLS).toContain("code_execution")
+    expect(ANTHROPIC_SERVER_SIDE_TOOLS).toHaveLength(4)
+  })
+
+  test("isServerTool detection works for all server-side tools", () => {
+    for (const tool of ANTHROPIC_SERVER_SIDE_TOOLS) {
+      expect((ANTHROPIC_SERVER_SIDE_TOOLS as readonly string[]).includes(tool)).toBe(true)
+    }
+  })
+
+  test("regular tools are NOT detected as server-side", () => {
+    const regularTools = ["bash", "read", "edit", "grep", "glob", "write"]
+    for (const tool of regularTools) {
+      expect((ANTHROPIC_SERVER_SIDE_TOOLS as readonly string[]).includes(tool)).toBe(false)
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Test 12: Compaction + server-side tool interaction
+// ---------------------------------------------------------------------------
+
+describe("advisor.compaction", () => {
+  function buildOutputText(opts: {
+    compacted: boolean
+    isServerTool: boolean
+    originalOutput: string
+  }): string {
+    return opts.compacted
+      ? (opts.isServerTool
+          ? JSON.stringify({ type: "advisor_result", text: "[Old tool result content cleared]" })
+          : "[Old tool result content cleared]")
+      : opts.originalOutput
+  }
+
+  test("compacted server-side tool output is valid JSON", () => {
+    const output = buildOutputText({
+      compacted: true,
+      isServerTool: true,
+      originalOutput: '{"type":"advisor_result","text":"real output"}',
+    })
+
+    // Must not throw
+    const parsed = JSON.parse(output)
+    expect(parsed.type).toBe("advisor_result")
+    expect(parsed.text).toBe("[Old tool result content cleared]")
+  })
+
+  test("compacted regular tool output is plain text (not JSON)", () => {
+    const output = buildOutputText({
+      compacted: true,
+      isServerTool: false,
+      originalOutput: "some tool output",
+    })
+
+    expect(output).toBe("[Old tool result content cleared]")
+    expect(() => JSON.parse(output)).toThrow()
+  })
+
+  test("non-compacted output passes through unchanged", () => {
+    const original = '{"type":"advisor_result","text":"step 1: read files"}'
+    const output = buildOutputText({
+      compacted: false,
+      isServerTool: true,
+      originalOutput: original,
+    })
+
+    expect(output).toBe(original)
+  })
+
+  test("compacted advisor output survives SDK multi-turn JSON.parse", () => {
+    // Simulates the SDK patch's multi-turn reconstruction path
+    const compactedOutput = buildOutputText({
+      compacted: true,
+      isServerTool: true,
+      originalOutput: "",
+    })
+
+    // This is what the SDK patch does at line 1857-1858
+    const parsed = typeof compactedOutput === "string"
+      ? JSON.parse(compactedOutput)
+      : compactedOutput
+
+    // Must pass the type validation check
+    expect(parsed.type).toBeDefined()
+    expect(
+      ["advisor_result", "advisor_redacted_result", "advisor_tool_result_error"].includes(parsed.type)
+    ).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Test 13: mcp_ prefix defense-in-depth
+// ---------------------------------------------------------------------------
+
+describe("advisor.mcpPrefixExclusion", () => {
+  const TOOL_PREFIX = "mcp_"
+
+  function prefixToolName(block: { type: string; name?: string }): { type: string; name?: string } {
+    if (
+      block.type === "tool_use" &&
+      block.name &&
+      !(ANTHROPIC_SERVER_SIDE_TOOLS as readonly string[]).includes(block.name)
+    ) {
+      return { ...block, name: `${TOOL_PREFIX}${block.name}` }
+    }
+    return block
+  }
+
+  test("regular tools get mcp_ prefix", () => {
+    const result = prefixToolName({ type: "tool_use", name: "bash" })
+    expect(result.name).toBe("mcp_bash")
+  })
+
+  test("server-side tools are NOT prefixed", () => {
+    for (const tool of ANTHROPIC_SERVER_SIDE_TOOLS) {
+      const result = prefixToolName({ type: "tool_use", name: tool })
+      expect(result.name).toBe(tool)
+    }
+  })
+
+  test("server_tool_use blocks are never prefixed (existing behavior)", () => {
+    const result = prefixToolName({ type: "server_tool_use", name: "advisor" })
+    expect(result.name).toBe("advisor")
+  })
+
+  test("tool_use without name is not prefixed", () => {
+    const result = prefixToolName({ type: "tool_use" })
+    expect(result.name).toBeUndefined()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Test 14: providerExecuted flag on message-v2 tool parts
+// ---------------------------------------------------------------------------
+
+describe("advisor.providerExecutedFlag", () => {
+  function buildToolPart(toolName: string, status: "completed" | "error" | "pending") {
+    const isServerTool = (ANTHROPIC_SERVER_SIDE_TOOLS as readonly string[]).includes(toolName)
+    const base = {
+      type: `tool-${toolName}`,
+      toolCallId: "toolu_test",
+      input: {},
+    }
+
+    if (status === "completed") {
+      return {
+        ...base,
+        state: "output-available",
+        output: "test output",
+        ...(isServerTool ? { providerExecuted: true } : {}),
+      }
+    }
+    if (status === "error") {
+      return {
+        ...base,
+        state: "output-error",
+        errorText: "something failed",
+        ...(isServerTool ? { providerExecuted: true } : {}),
+      }
+    }
+    return {
+      ...base,
+      state: "output-error",
+      errorText: "[Tool execution was interrupted]",
+      ...(isServerTool ? { providerExecuted: true } : {}),
+    }
+  }
+
+  test("advisor tool parts have providerExecuted: true", () => {
+    for (const status of ["completed", "error", "pending"] as const) {
+      const part = buildToolPart("advisor", status)
+      expect(part.providerExecuted).toBe(true)
+    }
+  })
+
+  test("web_search tool parts have providerExecuted: true", () => {
+    const part = buildToolPart("web_search", "completed")
+    expect(part.providerExecuted).toBe(true)
+  })
+
+  test("regular tool parts do NOT have providerExecuted", () => {
+    for (const status of ["completed", "error", "pending"] as const) {
+      const part = buildToolPart("bash", status)
+      expect(part).not.toHaveProperty("providerExecuted")
+    }
   })
 })

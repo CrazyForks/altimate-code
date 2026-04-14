@@ -1,6 +1,7 @@
 import type { Hooks, PluginInput } from "@opencode-ai/plugin"
 import { generatePKCE } from "@openauthjs/openauth/pkce"
 import { Auth, OAUTH_DUMMY_KEY } from "@/auth"
+import { ANTHROPIC_SERVER_SIDE_TOOLS } from "@/session/constants"
 
 const CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 const TOOL_PREFIX = "mcp_"
@@ -175,17 +176,21 @@ export async function AnthropicAuthPlugin(input: PluginInput): Promise<Hooks> {
                 }
 
                 if (parsed.tools && Array.isArray(parsed.tools)) {
-                  parsed.tools = parsed.tools.map((tool: any) => ({
-                    ...tool,
-                    name: tool.name ? `${TOOL_PREFIX}${tool.name}` : tool.name,
-                  }))
+                  parsed.tools = parsed.tools.map((tool: any) => {
+                    // Skip server-side tools (advisor, web_search, etc.) — their names are fixed by the API
+                    if (tool.type) return tool
+                    return {
+                      ...tool,
+                      name: tool.name ? `${TOOL_PREFIX}${tool.name}` : tool.name,
+                    }
+                  })
                 }
 
                 if (parsed.messages && Array.isArray(parsed.messages)) {
                   parsed.messages = parsed.messages.map((msg: any) => {
                     if (msg.content && Array.isArray(msg.content)) {
                       msg.content = msg.content.map((block: any) => {
-                        if (block.type === "tool_use" && block.name) {
+                        if (block.type === "tool_use" && block.name && !(ANTHROPIC_SERVER_SIDE_TOOLS as readonly string[]).includes(block.name)) {
                           return { ...block, name: `${TOOL_PREFIX}${block.name}` }
                         }
                         return block

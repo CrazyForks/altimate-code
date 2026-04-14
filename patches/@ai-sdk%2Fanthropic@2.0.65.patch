@@ -1,8 +1,82 @@
+diff --git a/node_modules/.bun/@ai-sdk+anthropic@2.0.65+d6123d32214422cb/node_modules/@ai-sdk/anthropic/.bun-tag-4d24fe4a716ef21f b/.bun-tag-4d24fe4a716ef21f
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/node_modules/.bun/@ai-sdk+anthropic@2.0.65+d6123d32214422cb/node_modules/@ai-sdk/anthropic/.bun-tag-4ff7bc889f5bf780 b/.bun-tag-4ff7bc889f5bf780
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/dist/index.js b/dist/index.js
-index 69479f98a22f10f17a11f1bc8a65b8fd2b35ca4c..19d34e7710094ce0dd462ceae4eccbc14e7eff84 100644
+index 69479f98a22f10f17a11f1bc8a65b8fd2b35ca4c..49bbf7e77e9b919e6fac885405656c3bcb22f9f5 100644
 --- a/dist/index.js
 +++ b/dist/index.js
-@@ -1109,6 +1109,17 @@ async function prepareTools({
+@@ -246,6 +246,24 @@ var anthropicMessagesResponseSchema = (0, import_provider_utils2.lazySchema)(
+                 old_start: import_v42.z.number().nullable()
+               })
+             ])
++          }),
++          import_v42.z.object({
++            type: import_v42.z.literal("advisor_tool_result"),
++            tool_use_id: import_v42.z.string(),
++            content: import_v42.z.union([
++              import_v42.z.object({
++                type: import_v42.z.literal("advisor_result"),
++                text: import_v42.z.string()
++              }),
++              import_v42.z.object({
++                type: import_v42.z.literal("advisor_redacted_result"),
++                encrypted_content: import_v42.z.string()
++              }),
++              import_v42.z.object({
++                type: import_v42.z.literal("advisor_tool_result_error"),
++                error_code: import_v42.z.string()
++              })
++            ])
+           })
+         ])
+       ),
+@@ -258,7 +276,7 @@ var anthropicMessagesResponseSchema = (0, import_provider_utils2.lazySchema)(
+         cache_read_input_tokens: import_v42.z.number().nullish(),
+         iterations: import_v42.z.array(
+           import_v42.z.object({
+-            type: import_v42.z.union([import_v42.z.literal("compaction"), import_v42.z.literal("message")]),
++            type: import_v42.z.union([import_v42.z.literal("compaction"), import_v42.z.literal("message"), import_v42.z.literal("advisor_message")]),
+             input_tokens: import_v42.z.number(),
+             output_tokens: import_v42.z.number()
+           })
+@@ -466,6 +484,24 @@ var anthropicMessagesChunkSchema = (0, import_provider_utils2.lazySchema)(
+                 old_start: import_v42.z.number().nullable()
+               })
+             ])
++          }),
++          import_v42.z.object({
++            type: import_v42.z.literal("advisor_tool_result"),
++            tool_use_id: import_v42.z.string(),
++            content: import_v42.z.union([
++              import_v42.z.object({
++                type: import_v42.z.literal("advisor_result"),
++                text: import_v42.z.string()
++              }),
++              import_v42.z.object({
++                type: import_v42.z.literal("advisor_redacted_result"),
++                encrypted_content: import_v42.z.string()
++              }),
++              import_v42.z.object({
++                type: import_v42.z.literal("advisor_tool_result_error"),
++                error_code: import_v42.z.string()
++              })
++            ])
+           })
+         ])
+       }),
+@@ -561,7 +597,7 @@ var anthropicMessagesChunkSchema = (0, import_provider_utils2.lazySchema)(
+           cache_read_input_tokens: import_v42.z.number().nullish(),
+           iterations: import_v42.z.array(
+             import_v42.z.object({
+-              type: import_v42.z.union([import_v42.z.literal("compaction"), import_v42.z.literal("message")]),
++              type: import_v42.z.union([import_v42.z.literal("compaction"), import_v42.z.literal("message"), import_v42.z.literal("advisor_message")]),
+               input_tokens: import_v42.z.number(),
+               output_tokens: import_v42.z.number()
+             })
+@@ -1109,6 +1145,18 @@ async function prepareTools({
              });
              break;
            }
@@ -13,6 +87,7 @@ index 69479f98a22f10f17a11f1bc8a65b8fd2b35ca4c..19d34e7710094ce0dd462ceae4eccbc1
 +              name: "advisor",
 +              model: tool.args.model,
 +              max_uses: tool.args.maxUses,
++              cache_control: void 0,
 +              ...tool.args.caching ? { caching: { type: "ephemeral", ttl: "5m" } } : {}
 +            });
 +            break;
@@ -20,7 +95,7 @@ index 69479f98a22f10f17a11f1bc8a65b8fd2b35ca4c..19d34e7710094ce0dd462ceae4eccbc1
            default: {
              toolWarnings.push({ type: "unsupported-tool", tool });
              break;
-@@ -1644,7 +1655,7 @@ async function convertToAnthropicMessagesPrompt({
+@@ -1644,7 +1692,7 @@ async function convertToAnthropicMessagesPrompt({
                        cache_control: cacheControl
                      });
                    } else if (part.toolName === "code_execution" || // code execution 20250522
@@ -29,13 +104,13 @@ index 69479f98a22f10f17a11f1bc8a65b8fd2b35ca4c..19d34e7710094ce0dd462ceae4eccbc1
                      anthropicContent.push({
                        type: "server_tool_use",
                        id: part.toolCallId,
-@@ -1785,6 +1796,21 @@ async function convertToAnthropicMessagesPrompt({
+@@ -1785,6 +1833,21 @@ async function convertToAnthropicMessagesPrompt({
                    });
                    break;
                  }
 +                if (part.toolName === "advisor") {
 +                  const output = part.output;
-+                  if (output.type === "json" && output.value != null) {
++                  if ((output.type === "json" || output.type === "text") && output.value != null) {
 +                    const parsed = typeof output.value === "string" ? JSON.parse(output.value) : output.value;
 +                    if (parsed.type && ["advisor_result", "advisor_redacted_result", "advisor_tool_result_error"].includes(parsed.type)) {
 +                      anthropicContent.push({
@@ -51,7 +126,7 @@ index 69479f98a22f10f17a11f1bc8a65b8fd2b35ca4c..19d34e7710094ce0dd462ceae4eccbc1
                  warnings.push({
                    type: "other",
                    message: `provider executed tool result for tool ${part.toolName} is not supported`
-@@ -2381,6 +2407,44 @@ var AnthropicMessagesLanguageModel = class {
+@@ -2381,6 +2444,44 @@ var AnthropicMessagesLanguageModel = class {
                input: JSON.stringify(part.input),
                providerExecuted: true
              });
@@ -96,7 +171,7 @@ index 69479f98a22f10f17a11f1bc8a65b8fd2b35ca4c..19d34e7710094ce0dd462ceae4eccbc1
            }
            break;
          }
-@@ -2723,7 +2787,9 @@ var AnthropicMessagesLanguageModel = class {
+@@ -2723,7 +2824,9 @@ var AnthropicMessagesLanguageModel = class {
                      // code execution 20250825 text editor:
                      "text_editor_code_execution",
                      // code execution 20250825 bash:
@@ -107,7 +182,7 @@ index 69479f98a22f10f17a11f1bc8a65b8fd2b35ca4c..19d34e7710094ce0dd462ceae4eccbc1
                    ].includes(value.content_block.name)) {
                      contentBlocks[value.index] = {
                        type: "tool-call",
-@@ -2830,6 +2896,37 @@ var AnthropicMessagesLanguageModel = class {
+@@ -2830,6 +2933,37 @@ var AnthropicMessagesLanguageModel = class {
                    }
                    return;
                  }
@@ -146,10 +221,78 @@ index 69479f98a22f10f17a11f1bc8a65b8fd2b35ca4c..19d34e7710094ce0dd462ceae4eccbc1
                  case "code_execution_tool_result": {
                    const part = value.content_block;
 diff --git a/dist/index.mjs b/dist/index.mjs
-index e6d107875e30a9777d4c687fb97faf9a0a00b2f8..4b69d83e44948bd765a786314c68d555fef9fdd0 100644
+index e6d107875e30a9777d4c687fb97faf9a0a00b2f8..dcc724c677c1fbbf3ef2c971430f582bca2e5450 100644
 --- a/dist/index.mjs
 +++ b/dist/index.mjs
-@@ -1114,6 +1114,17 @@ async function prepareTools({
+@@ -241,6 +241,24 @@ var anthropicMessagesResponseSchema = lazySchema2(
+                 old_start: z2.number().nullable()
+               })
+             ])
++          }),
++          z2.object({
++            type: z2.literal("advisor_tool_result"),
++            tool_use_id: z2.string(),
++            content: z2.union([
++              z2.object({
++                type: z2.literal("advisor_result"),
++                text: z2.string()
++              }),
++              z2.object({
++                type: z2.literal("advisor_redacted_result"),
++                encrypted_content: z2.string()
++              }),
++              z2.object({
++                type: z2.literal("advisor_tool_result_error"),
++                error_code: z2.string()
++              })
++            ])
+           })
+         ])
+       ),
+@@ -253,7 +271,7 @@ var anthropicMessagesResponseSchema = lazySchema2(
+         cache_read_input_tokens: z2.number().nullish(),
+         iterations: z2.array(
+           z2.object({
+-            type: z2.union([z2.literal("compaction"), z2.literal("message")]),
++            type: z2.union([z2.literal("compaction"), z2.literal("message"), z2.literal("advisor_message")]),
+             input_tokens: z2.number(),
+             output_tokens: z2.number()
+           })
+@@ -461,6 +479,24 @@ var anthropicMessagesChunkSchema = lazySchema2(
+                 old_start: z2.number().nullable()
+               })
+             ])
++          }),
++          z2.object({
++            type: z2.literal("advisor_tool_result"),
++            tool_use_id: z2.string(),
++            content: z2.union([
++              z2.object({
++                type: z2.literal("advisor_result"),
++                text: z2.string()
++              }),
++              z2.object({
++                type: z2.literal("advisor_redacted_result"),
++                encrypted_content: z2.string()
++              }),
++              z2.object({
++                type: z2.literal("advisor_tool_result_error"),
++                error_code: z2.string()
++              })
++            ])
+           })
+         ])
+       }),
+@@ -556,7 +592,7 @@ var anthropicMessagesChunkSchema = lazySchema2(
+           cache_read_input_tokens: z2.number().nullish(),
+           iterations: z2.array(
+             z2.object({
+-              type: z2.union([z2.literal("compaction"), z2.literal("message")]),
++              type: z2.union([z2.literal("compaction"), z2.literal("message"), z2.literal("advisor_message")]),
+               input_tokens: z2.number(),
+               output_tokens: z2.number()
+             })
+@@ -1114,6 +1150,18 @@ async function prepareTools({
              });
              break;
            }
@@ -160,6 +303,7 @@ index e6d107875e30a9777d4c687fb97faf9a0a00b2f8..4b69d83e44948bd765a786314c68d555
 +              name: "advisor",
 +              model: tool.args.model,
 +              max_uses: tool.args.maxUses,
++              cache_control: void 0,
 +              ...tool.args.caching ? { caching: { type: "ephemeral", ttl: "5m" } } : {}
 +            });
 +            break;
@@ -167,7 +311,7 @@ index e6d107875e30a9777d4c687fb97faf9a0a00b2f8..4b69d83e44948bd765a786314c68d555
            default: {
              toolWarnings.push({ type: "unsupported-tool", tool });
              break;
-@@ -1663,7 +1674,7 @@ async function convertToAnthropicMessagesPrompt({
+@@ -1663,7 +1711,7 @@ async function convertToAnthropicMessagesPrompt({
                        cache_control: cacheControl
                      });
                    } else if (part.toolName === "code_execution" || // code execution 20250522
@@ -176,13 +320,13 @@ index e6d107875e30a9777d4c687fb97faf9a0a00b2f8..4b69d83e44948bd765a786314c68d555
                      anthropicContent.push({
                        type: "server_tool_use",
                        id: part.toolCallId,
-@@ -1804,6 +1815,21 @@ async function convertToAnthropicMessagesPrompt({
+@@ -1804,6 +1852,21 @@ async function convertToAnthropicMessagesPrompt({
                    });
                    break;
                  }
 +                if (part.toolName === "advisor") {
 +                  const output = part.output;
-+                  if (output.type === "json" && output.value != null) {
++                  if ((output.type === "json" || output.type === "text") && output.value != null) {
 +                    const parsed = typeof output.value === "string" ? JSON.parse(output.value) : output.value;
 +                    if (parsed.type && ["advisor_result", "advisor_redacted_result", "advisor_tool_result_error"].includes(parsed.type)) {
 +                      anthropicContent.push({
@@ -198,7 +342,7 @@ index e6d107875e30a9777d4c687fb97faf9a0a00b2f8..4b69d83e44948bd765a786314c68d555
                  warnings.push({
                    type: "other",
                    message: `provider executed tool result for tool ${part.toolName} is not supported`
-@@ -2400,6 +2426,44 @@ var AnthropicMessagesLanguageModel = class {
+@@ -2400,6 +2463,44 @@ var AnthropicMessagesLanguageModel = class {
                input: JSON.stringify(part.input),
                providerExecuted: true
              });
@@ -243,7 +387,7 @@ index e6d107875e30a9777d4c687fb97faf9a0a00b2f8..4b69d83e44948bd765a786314c68d555
            }
            break;
          }
-@@ -2742,7 +2806,9 @@ var AnthropicMessagesLanguageModel = class {
+@@ -2742,7 +2843,9 @@ var AnthropicMessagesLanguageModel = class {
                      // code execution 20250825 text editor:
                      "text_editor_code_execution",
                      // code execution 20250825 bash:
@@ -254,7 +398,7 @@ index e6d107875e30a9777d4c687fb97faf9a0a00b2f8..4b69d83e44948bd765a786314c68d555
                    ].includes(value.content_block.name)) {
                      contentBlocks[value.index] = {
                        type: "tool-call",
-@@ -2849,6 +2915,37 @@ var AnthropicMessagesLanguageModel = class {
+@@ -2849,6 +2952,37 @@ var AnthropicMessagesLanguageModel = class {
                    }
                    return;
                  }
@@ -293,10 +437,78 @@ index e6d107875e30a9777d4c687fb97faf9a0a00b2f8..4b69d83e44948bd765a786314c68d555
                  case "code_execution_tool_result": {
                    const part = value.content_block;
 diff --git a/dist/internal/index.js b/dist/internal/index.js
-index bdb69ee319f2d895385aea143e8aa32269a48aff..dbb7bbedc7f3eb5e2e9235f4a3a5ea5bacae0a52 100644
+index bdb69ee319f2d895385aea143e8aa32269a48aff..ebf4395dc22e8c250ed6bcdb4f570caf5227bcdb 100644
 --- a/dist/internal/index.js
 +++ b/dist/internal/index.js
-@@ -1102,6 +1102,17 @@ async function prepareTools({
+@@ -239,6 +239,24 @@ var anthropicMessagesResponseSchema = (0, import_provider_utils2.lazySchema)(
+                 old_start: import_v42.z.number().nullable()
+               })
+             ])
++          }),
++          import_v42.z.object({
++            type: import_v42.z.literal("advisor_tool_result"),
++            tool_use_id: import_v42.z.string(),
++            content: import_v42.z.union([
++              import_v42.z.object({
++                type: import_v42.z.literal("advisor_result"),
++                text: import_v42.z.string()
++              }),
++              import_v42.z.object({
++                type: import_v42.z.literal("advisor_redacted_result"),
++                encrypted_content: import_v42.z.string()
++              }),
++              import_v42.z.object({
++                type: import_v42.z.literal("advisor_tool_result_error"),
++                error_code: import_v42.z.string()
++              })
++            ])
+           })
+         ])
+       ),
+@@ -251,7 +269,7 @@ var anthropicMessagesResponseSchema = (0, import_provider_utils2.lazySchema)(
+         cache_read_input_tokens: import_v42.z.number().nullish(),
+         iterations: import_v42.z.array(
+           import_v42.z.object({
+-            type: import_v42.z.union([import_v42.z.literal("compaction"), import_v42.z.literal("message")]),
++            type: import_v42.z.union([import_v42.z.literal("compaction"), import_v42.z.literal("message"), import_v42.z.literal("advisor_message")]),
+             input_tokens: import_v42.z.number(),
+             output_tokens: import_v42.z.number()
+           })
+@@ -459,6 +477,24 @@ var anthropicMessagesChunkSchema = (0, import_provider_utils2.lazySchema)(
+                 old_start: import_v42.z.number().nullable()
+               })
+             ])
++          }),
++          import_v42.z.object({
++            type: import_v42.z.literal("advisor_tool_result"),
++            tool_use_id: import_v42.z.string(),
++            content: import_v42.z.union([
++              import_v42.z.object({
++                type: import_v42.z.literal("advisor_result"),
++                text: import_v42.z.string()
++              }),
++              import_v42.z.object({
++                type: import_v42.z.literal("advisor_redacted_result"),
++                encrypted_content: import_v42.z.string()
++              }),
++              import_v42.z.object({
++                type: import_v42.z.literal("advisor_tool_result_error"),
++                error_code: import_v42.z.string()
++              })
++            ])
+           })
+         ])
+       }),
+@@ -554,7 +590,7 @@ var anthropicMessagesChunkSchema = (0, import_provider_utils2.lazySchema)(
+           cache_read_input_tokens: import_v42.z.number().nullish(),
+           iterations: import_v42.z.array(
+             import_v42.z.object({
+-              type: import_v42.z.union([import_v42.z.literal("compaction"), import_v42.z.literal("message")]),
++              type: import_v42.z.union([import_v42.z.literal("compaction"), import_v42.z.literal("message"), import_v42.z.literal("advisor_message")]),
+               input_tokens: import_v42.z.number(),
+               output_tokens: import_v42.z.number()
+             })
+@@ -1102,6 +1138,18 @@ async function prepareTools({
              });
              break;
            }
@@ -307,6 +519,7 @@ index bdb69ee319f2d895385aea143e8aa32269a48aff..dbb7bbedc7f3eb5e2e9235f4a3a5ea5b
 +              name: "advisor",
 +              model: tool.args.model,
 +              max_uses: tool.args.maxUses,
++              cache_control: void 0,
 +              ...tool.args.caching ? { caching: { type: "ephemeral", ttl: "5m" } } : {}
 +            });
 +            break;
@@ -314,7 +527,7 @@ index bdb69ee319f2d895385aea143e8aa32269a48aff..dbb7bbedc7f3eb5e2e9235f4a3a5ea5b
            default: {
              toolWarnings.push({ type: "unsupported-tool", tool });
              break;
-@@ -1637,7 +1648,7 @@ async function convertToAnthropicMessagesPrompt({
+@@ -1637,7 +1685,7 @@ async function convertToAnthropicMessagesPrompt({
                        cache_control: cacheControl
                      });
                    } else if (part.toolName === "code_execution" || // code execution 20250522
@@ -323,13 +536,13 @@ index bdb69ee319f2d895385aea143e8aa32269a48aff..dbb7bbedc7f3eb5e2e9235f4a3a5ea5b
                      anthropicContent.push({
                        type: "server_tool_use",
                        id: part.toolCallId,
-@@ -1778,6 +1789,21 @@ async function convertToAnthropicMessagesPrompt({
+@@ -1778,6 +1826,21 @@ async function convertToAnthropicMessagesPrompt({
                    });
                    break;
                  }
 +                if (part.toolName === "advisor") {
 +                  const output = part.output;
-+                  if (output.type === "json" && output.value != null) {
++                  if ((output.type === "json" || output.type === "text") && output.value != null) {
 +                    const parsed = typeof output.value === "string" ? JSON.parse(output.value) : output.value;
 +                    if (parsed.type && ["advisor_result", "advisor_redacted_result", "advisor_tool_result_error"].includes(parsed.type)) {
 +                      anthropicContent.push({
@@ -345,7 +558,7 @@ index bdb69ee319f2d895385aea143e8aa32269a48aff..dbb7bbedc7f3eb5e2e9235f4a3a5ea5b
                  warnings.push({
                    type: "other",
                    message: `provider executed tool result for tool ${part.toolName} is not supported`
-@@ -2374,6 +2400,44 @@ var AnthropicMessagesLanguageModel = class {
+@@ -2374,6 +2437,44 @@ var AnthropicMessagesLanguageModel = class {
                input: JSON.stringify(part.input),
                providerExecuted: true
              });
@@ -390,7 +603,7 @@ index bdb69ee319f2d895385aea143e8aa32269a48aff..dbb7bbedc7f3eb5e2e9235f4a3a5ea5b
            }
            break;
          }
-@@ -2716,7 +2780,9 @@ var AnthropicMessagesLanguageModel = class {
+@@ -2716,7 +2817,9 @@ var AnthropicMessagesLanguageModel = class {
                      // code execution 20250825 text editor:
                      "text_editor_code_execution",
                      // code execution 20250825 bash:
@@ -401,7 +614,7 @@ index bdb69ee319f2d895385aea143e8aa32269a48aff..dbb7bbedc7f3eb5e2e9235f4a3a5ea5b
                    ].includes(value.content_block.name)) {
                      contentBlocks[value.index] = {
                        type: "tool-call",
-@@ -2823,6 +2889,37 @@ var AnthropicMessagesLanguageModel = class {
+@@ -2823,6 +2926,37 @@ var AnthropicMessagesLanguageModel = class {
                    }
                    return;
                  }
@@ -440,10 +653,78 @@ index bdb69ee319f2d895385aea143e8aa32269a48aff..dbb7bbedc7f3eb5e2e9235f4a3a5ea5b
                  case "code_execution_tool_result": {
                    const part = value.content_block;
 diff --git a/dist/internal/index.mjs b/dist/internal/index.mjs
-index f2c17a167872841ee4846540e8cc2860e872e69e..62aec53d0a277e168ed132998ea888c3f25ff6c6 100644
+index f2c17a167872841ee4846540e8cc2860e872e69e..2a4796ded4561b09d585eb0141f7623f90b340a5 100644
 --- a/dist/internal/index.mjs
 +++ b/dist/internal/index.mjs
-@@ -1099,6 +1099,17 @@ async function prepareTools({
+@@ -226,6 +226,24 @@ var anthropicMessagesResponseSchema = lazySchema2(
+                 old_start: z2.number().nullable()
+               })
+             ])
++          }),
++          z2.object({
++            type: z2.literal("advisor_tool_result"),
++            tool_use_id: z2.string(),
++            content: z2.union([
++              z2.object({
++                type: z2.literal("advisor_result"),
++                text: z2.string()
++              }),
++              z2.object({
++                type: z2.literal("advisor_redacted_result"),
++                encrypted_content: z2.string()
++              }),
++              z2.object({
++                type: z2.literal("advisor_tool_result_error"),
++                error_code: z2.string()
++              })
++            ])
+           })
+         ])
+       ),
+@@ -238,7 +256,7 @@ var anthropicMessagesResponseSchema = lazySchema2(
+         cache_read_input_tokens: z2.number().nullish(),
+         iterations: z2.array(
+           z2.object({
+-            type: z2.union([z2.literal("compaction"), z2.literal("message")]),
++            type: z2.union([z2.literal("compaction"), z2.literal("message"), z2.literal("advisor_message")]),
+             input_tokens: z2.number(),
+             output_tokens: z2.number()
+           })
+@@ -446,6 +464,24 @@ var anthropicMessagesChunkSchema = lazySchema2(
+                 old_start: z2.number().nullable()
+               })
+             ])
++          }),
++          z2.object({
++            type: z2.literal("advisor_tool_result"),
++            tool_use_id: z2.string(),
++            content: z2.union([
++              z2.object({
++                type: z2.literal("advisor_result"),
++                text: z2.string()
++              }),
++              z2.object({
++                type: z2.literal("advisor_redacted_result"),
++                encrypted_content: z2.string()
++              }),
++              z2.object({
++                type: z2.literal("advisor_tool_result_error"),
++                error_code: z2.string()
++              })
++            ])
+           })
+         ])
+       }),
+@@ -541,7 +577,7 @@ var anthropicMessagesChunkSchema = lazySchema2(
+           cache_read_input_tokens: z2.number().nullish(),
+           iterations: z2.array(
+             z2.object({
+-              type: z2.union([z2.literal("compaction"), z2.literal("message")]),
++              type: z2.union([z2.literal("compaction"), z2.literal("message"), z2.literal("advisor_message")]),
+               input_tokens: z2.number(),
+               output_tokens: z2.number()
+             })
+@@ -1099,6 +1135,18 @@ async function prepareTools({
              });
              break;
            }
@@ -454,6 +735,7 @@ index f2c17a167872841ee4846540e8cc2860e872e69e..62aec53d0a277e168ed132998ea888c3
 +              name: "advisor",
 +              model: tool.args.model,
 +              max_uses: tool.args.maxUses,
++              cache_control: void 0,
 +              ...tool.args.caching ? { caching: { type: "ephemeral", ttl: "5m" } } : {}
 +            });
 +            break;
@@ -461,7 +743,7 @@ index f2c17a167872841ee4846540e8cc2860e872e69e..62aec53d0a277e168ed132998ea888c3
            default: {
              toolWarnings.push({ type: "unsupported-tool", tool });
              break;
-@@ -1648,7 +1659,7 @@ async function convertToAnthropicMessagesPrompt({
+@@ -1648,7 +1696,7 @@ async function convertToAnthropicMessagesPrompt({
                        cache_control: cacheControl
                      });
                    } else if (part.toolName === "code_execution" || // code execution 20250522
@@ -470,13 +752,13 @@ index f2c17a167872841ee4846540e8cc2860e872e69e..62aec53d0a277e168ed132998ea888c3
                      anthropicContent.push({
                        type: "server_tool_use",
                        id: part.toolCallId,
-@@ -1789,6 +1800,21 @@ async function convertToAnthropicMessagesPrompt({
+@@ -1789,6 +1837,21 @@ async function convertToAnthropicMessagesPrompt({
                    });
                    break;
                  }
 +                if (part.toolName === "advisor") {
 +                  const output = part.output;
-+                  if (output.type === "json" && output.value != null) {
++                  if ((output.type === "json" || output.type === "text") && output.value != null) {
 +                    const parsed = typeof output.value === "string" ? JSON.parse(output.value) : output.value;
 +                    if (parsed.type && ["advisor_result", "advisor_redacted_result", "advisor_tool_result_error"].includes(parsed.type)) {
 +                      anthropicContent.push({
@@ -492,7 +774,7 @@ index f2c17a167872841ee4846540e8cc2860e872e69e..62aec53d0a277e168ed132998ea888c3
                  warnings.push({
                    type: "other",
                    message: `provider executed tool result for tool ${part.toolName} is not supported`
-@@ -2385,6 +2411,44 @@ var AnthropicMessagesLanguageModel = class {
+@@ -2385,6 +2448,44 @@ var AnthropicMessagesLanguageModel = class {
                input: JSON.stringify(part.input),
                providerExecuted: true
              });
@@ -537,7 +819,7 @@ index f2c17a167872841ee4846540e8cc2860e872e69e..62aec53d0a277e168ed132998ea888c3
            }
            break;
          }
-@@ -2727,7 +2791,9 @@ var AnthropicMessagesLanguageModel = class {
+@@ -2727,7 +2828,9 @@ var AnthropicMessagesLanguageModel = class {
                      // code execution 20250825 text editor:
                      "text_editor_code_execution",
                      // code execution 20250825 bash:
@@ -548,7 +830,7 @@ index f2c17a167872841ee4846540e8cc2860e872e69e..62aec53d0a277e168ed132998ea888c3
                    ].includes(value.content_block.name)) {
                      contentBlocks[value.index] = {
                        type: "tool-call",
-@@ -2834,6 +2900,37 @@ var AnthropicMessagesLanguageModel = class {
+@@ -2834,6 +2937,37 @@ var AnthropicMessagesLanguageModel = class {
                    }
                    return;
                  }

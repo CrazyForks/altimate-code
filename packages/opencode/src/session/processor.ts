@@ -252,21 +252,27 @@ export namespace SessionProcessor {
                 case "tool-result": {
                   const match = toolcalls[value.toolCallId]
                   if (match && match.state.status === "running") {
+                    // altimate_change start — handle provider-executed tools (advisor, web_search, etc.)
+                    // Provider-executed tools return raw output (string/object) instead of {output, title, metadata}
+                    const isProviderExecuted = value.output == null || typeof value.output !== "object" || !("output" in value.output)
                     await Session.updatePart({
                       ...match,
                       state: {
                         status: "completed",
                         input: value.input ?? match.state.input,
-                        output: value.output.output,
-                        metadata: value.output.metadata,
-                        title: value.output.title,
+                        output: isProviderExecuted
+                          ? (typeof value.output === "string" ? value.output : JSON.stringify(value.output ?? ""))
+                          : value.output.output,
+                        metadata: isProviderExecuted ? {} : value.output.metadata,
+                        title: isProviderExecuted ? (match.tool ?? "tool") : value.output.title,
                         time: {
                           start: match.state.time.start,
                           end: Date.now(),
                         },
-                        attachments: value.output.attachments,
+                        attachments: isProviderExecuted ? undefined : value.output.attachments,
                       },
                     })
+                    // altimate_change end
 
                     delete toolcalls[value.toolCallId]
                   }
