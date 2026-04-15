@@ -112,6 +112,7 @@ describe("File.status()", () => {
       directory: tmp.path,
       fn: async () => {
         const changed = await File.status()
+        expect(changed.length).toBeGreaterThan(0)
         for (const file of changed) {
           // All paths should be relative, not absolute
           expect(path.isAbsolute(file.path)).toBe(false)

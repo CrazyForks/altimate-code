@@ -354,7 +354,7 @@ describe("loadRawManifest", () => {
 
     const viaReal = loadRawManifest(realPath)
     const viaSym = loadRawManifest(symPath)
-    expect(viaSym).toEqual(viaReal)
+    expect(viaSym).toBe(viaReal)
     expect(viaSym.nodes.sym).toBe(true)
   })
 })

@@ -557,6 +557,7 @@ describe("detectEnvVars", () => {
       expect(ch).toBeDefined()
       expect(ch!.signal).toBe("DATABASE_URL")
       expect(ch!.type).toBe("clickhouse")
+      expect(ch!.config.connection_string).toBe("***")
     }
   })
 
