@@ -433,9 +433,10 @@ function generateSystem(colors: TerminalColors, mode: "dark" | "light"): ThemeJs
   const transparent = RGBA.fromInts(0, 0, 0, 0)
   const isDark = mode == "dark"
 
-  // palette[7] (#c0c0c0) is invisible on light backgrounds — use dark fallback instead
+  // altimate_change start — fix: light-mode foreground fallback
   const fgFallback = isDark ? colors.palette[7]! : "#1a1a1a"
   const fg = RGBA.fromHex(colors.defaultForeground ?? fgFallback)
+  // altimate_change end
 
   const col = (i: number) => {
     const value = colors.palette[i]
@@ -951,8 +952,9 @@ function getSyntaxRules(theme: Theme) {
       scope: ["markup.raw.inline"],
       style: {
         foreground: theme.markdownCode,
-        // backgroundElement (not background) ensures contrast when background is transparent
+        // altimate_change start — fix: inline code contrast on transparent backgrounds
         background: theme.backgroundElement,
+        // altimate_change end
       },
     },
     {

@@ -165,7 +165,7 @@ async function getTerminalBackgroundColor(): Promise<"dark" | "light"> {
 
     timeout = setTimeout(() => {
       cleanup()
-      // Fallback: check COLORFGBG env var (set by many terminals) before defaulting to dark
+      // altimate_change start — fix: COLORFGBG fallback for light terminal detection
       const colorfgbg = process.env.COLORFGBG
       if (colorfgbg) {
         const parts = colorfgbg.split(";")
@@ -176,6 +176,7 @@ async function getTerminalBackgroundColor(): Promise<"dark" | "light"> {
         }
       }
       resolve("dark")
+      // altimate_change end
     }, 1000)
   })
 }
