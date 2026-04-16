@@ -73,7 +73,12 @@ mock.module("@azure/identity", () => ({
   },
 }))
 
+// Bun's mock.module() replaces the module for ALL test files in the same run,
+// so we re-export every symbol other tests might import (spawn, exec, fork, etc.)
+// in addition to the execSync stub used by the Azure CLI fallback path.
+const realChildProcess = await import("node:child_process")
 mock.module("node:child_process", () => ({
+  ...realChildProcess,
   execSync: (_cmd: string) => "mock-cli-token-fallback\n",
 }))
 
@@ -193,7 +198,7 @@ describe("SQL Server driver unit tests", () => {
       expect(cfg.password).toBeUndefined()
     })
 
-    test("azure-active-directory-access-token passes token", async () => {
+    test("azure-active-directory-access-token passes supplied token unchanged", async () => {
       resetMocks()
       const c = await connect({
         host: "myserver.database.windows.net",
@@ -207,6 +212,22 @@ describe("SQL Server driver unit tests", () => {
         type: "azure-active-directory-access-token",
         options: { token: "eyJhbGciOi..." },
       })
+    })
+
+    test("azure-active-directory-access-token with no token auto-acquires one", async () => {
+      // Regression: prior to this, omitting `token`/`access_token` resulted in
+      // `options.token: undefined`, which tedious rejects with
+      // "config.authentication.options.token must be of type string".
+      resetMocks()
+      const c = await connect({
+        host: "myserver.database.windows.net",
+        database: "db",
+        authentication: "azure-active-directory-access-token",
+      })
+      await c.connect()
+      const cfg = mockConnectCalls[0]
+      expect(cfg.authentication.type).toBe("azure-active-directory-access-token")
+      expect(cfg.authentication.options.token).toBe("mock-azure-token-12345")
     })
 
     test("azure-active-directory-service-principal-secret builds SP auth", async () => {

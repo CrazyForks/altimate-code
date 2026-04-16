@@ -56,21 +56,23 @@ export async function connect(config: ConnectionConfig): Promise<Connector> {
       if (authType?.startsWith("azure-active-directory")) {
         ;(mssqlConfig.options as any).encrypt = true
 
-        if (authType === "azure-active-directory-default") {
-          // Acquire a token ourselves and pass it as a raw access token string.
-          // We avoid using @azure/identity's DefaultAzureCredential because:
-          //  1. Bun can resolve @azure/identity to the browser bundle (inside
-          //     tedious or even our own import), where DefaultAzureCredential
-          //     is a non-functional stub that throws.
-          //  2. Passing a credential object via type:"token-credential" hits a
-          //     CJS/ESM isTokenCredential boundary mismatch in Bun.
-          //
-          // Strategy: try @azure/identity first (works when module resolution
-          // is correct), fall back to shelling out to `az account get-access-token`
-          // (works everywhere Azure CLI is installed).
+        // Resolve a raw Azure AD access token.
+        // Used by both `azure-active-directory-default` and by
+        // `azure-active-directory-access-token` when no token was provided.
+        //
+        // We acquire the token ourselves rather than letting tedious do it because:
+        //  1. Bun can resolve @azure/identity to the browser bundle (inside
+        //     tedious or even our own import), where DefaultAzureCredential
+        //     is a non-functional stub that throws.
+        //  2. Passing a credential object via type:"token-credential" hits a
+        //     CJS/ESM isTokenCredential boundary mismatch in Bun.
+        //
+        // Strategy: try @azure/identity first (works when module resolution
+        // is correct), fall back to shelling out to `az account get-access-token`
+        // (works everywhere Azure CLI is installed).
+        const acquireAzureToken = async (): Promise<string> => {
           let token: string | undefined
 
-          // Attempt 1: @azure/identity (fast, no subprocess)
           try {
             const azureIdentity = await import("@azure/identity")
             const credential = new azureIdentity.DefaultAzureCredential(
@@ -84,15 +86,14 @@ export async function connect(config: ConnectionConfig): Promise<Connector> {
             // @azure/identity unavailable or browser bundle — fall through
           }
 
-          // Attempt 2: Azure CLI subprocess (universal fallback)
           if (!token) {
             try {
               const { execSync } = await import("node:child_process")
-              const json = execSync(
+              const out = execSync(
                 "az account get-access-token --resource https://database.windows.net/ --query accessToken -o tsv",
                 { encoding: "utf-8", timeout: 15000, stdio: ["pipe", "pipe", "pipe"] },
               ).trim()
-              if (json) token = json
+              if (out) token = out
             } catch {
               // az CLI not installed or not logged in
             }
@@ -100,14 +101,17 @@ export async function connect(config: ConnectionConfig): Promise<Connector> {
 
           if (!token) {
             throw new Error(
-              "Azure AD default auth failed. Either install @azure/identity (npm install @azure/identity) " +
+              "Azure AD token acquisition failed. Either install @azure/identity (npm install @azure/identity) " +
               "or log in with Azure CLI (az login).",
             )
           }
+          return token
+        }
 
+        if (authType === "azure-active-directory-default") {
           mssqlConfig.authentication = {
             type: "azure-active-directory-access-token",
-            options: { token },
+            options: { token: await acquireAzureToken() },
           }
         } else if (authType === "azure-active-directory-password") {
           mssqlConfig.authentication = {
@@ -120,9 +124,12 @@ export async function connect(config: ConnectionConfig): Promise<Connector> {
             },
           }
         } else if (authType === "azure-active-directory-access-token") {
+          // If the caller supplied a token, use it; otherwise acquire one
+          // automatically (DefaultAzureCredential → az CLI).
+          const suppliedToken = (config.token ?? config.access_token) as string | undefined
           mssqlConfig.authentication = {
             type: "azure-active-directory-access-token",
-            options: { token: config.token ?? config.access_token },
+            options: { token: suppliedToken ?? (await acquireAzureToken()) },
           }
         } else if (
           authType === "azure-active-directory-msi-vm" ||
