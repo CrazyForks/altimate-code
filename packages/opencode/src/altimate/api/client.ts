@@ -84,6 +84,17 @@ export namespace AltimateApi {
     }
   }
 
+  /**
+   * Parse a user-entered Altimate credential string into its component fields.
+   *
+   * Accepts two `::`-delimited forms:
+   *   - 2 parts: `instance-name::api-key` — URL defaults to {@link DEFAULT_ALTIMATE_URL}.
+   *   - 3+ parts: `api-url::instance-name::api-key` — first segment is the API base URL
+   *     and must be http(s)://. Extra `::` segments are joined back into the API key.
+   *
+   * Returns `null` if the input is malformed (fewer than 2 parts, empty fields,
+   * or a non-http(s) URL in the 3-part form).
+   */
   export function parseAltimateKey(value: string): {
     altimateUrl: string
     altimateInstanceName: string
