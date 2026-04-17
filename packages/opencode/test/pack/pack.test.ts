@@ -314,6 +314,44 @@ describe("Pack manifest + integrity", () => {
     })
   })
 
+  test("manifest-vs-yaml metadata mismatch is flagged as tamper (name, version, tier)", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+      init: async (dir) => {
+        const packFile = await writePackFile(dir, {
+          name: "meta-pack",
+          version: "1.0.0",
+          tier: "community",
+        })
+        // Write a manifest whose `tier` disagrees with PACK.yaml. This simulates
+        // an attempt to elevate trust by editing only the manifest, or to
+        // downgrade the yaml after install.
+        const matterMod = (await import("gray-matter")).default
+        const raw = await fs.readFile(packFile, "utf-8")
+        const parsed = matterMod("---\n" + raw + "\n---")
+        await Pack.writeManifest(
+          path.dirname(packFile),
+          packFile,
+          {
+            name: (parsed.data.name as string) || "meta-pack",
+            version: (parsed.data.version as string) || "1.0.0",
+            tier: "verified", // ← manifest claims verified, yaml says community
+          },
+        )
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const pack = await Pack.get("meta-pack")
+        expect(pack).toBeDefined()
+        // Metadata mismatch must trigger tamper detection even if content_hash matches.
+        expect(pack!.trust?.tamper_detected).toBe(true)
+      },
+    })
+  })
+
   test("packs without a manifest load without tamper detection (user-authored local packs)", async () => {
     await using tmp = await tmpdir({
       git: true,

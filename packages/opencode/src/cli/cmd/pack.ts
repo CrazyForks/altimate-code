@@ -2,6 +2,7 @@
 import { EOL } from "os"
 import path from "path"
 import fs from "fs/promises"
+import z from "zod"
 import { Pack } from "../../pack"
 import { Skill } from "../../skill"
 import { bootstrap } from "../bootstrap"
@@ -103,6 +104,165 @@ async function removeConfigField(filePath: string, fieldPath: string[]): Promise
   const result = applyEdits(text, edits)
   await fs.writeFile(filePath, result, "utf-8")
   return true
+}
+
+/**
+ * Read a field value directly from the file on disk (bypass any parsed cache).
+ * Returns undefined if the file doesn't exist, can't be parsed, or field is absent.
+ */
+async function readConfigField(filePath: string, fieldPath: string[]): Promise<unknown> {
+  let text: string
+  try { text = await fs.readFile(filePath, "utf-8") } catch { return undefined }
+  try {
+    const parsed = JSON.parse(
+      filePath.endsWith(".jsonc")
+        ? text.replace(/^\s*\/\/.*$/gm, "").replace(/,(\s*[}\]])/g, "$1")
+        : text,
+    ) as Record<string, unknown>
+    let cursor: unknown = parsed
+    for (const key of fieldPath) {
+      if (cursor == null || typeof cursor !== "object") return undefined
+      cursor = (cursor as Record<string, unknown>)[key]
+    }
+    return cursor
+  } catch {
+    return undefined
+  }
+}
+// altimate_change end
+
+// altimate_change start — pack: shared cleanup helper used by both deactivate and remove.
+// Ownership-aware: reads the activation sidecar written on activate and only
+// removes config entries the pack actually wrote — user edits and entries owned
+// by other active packs are preserved.
+//
+// Returns cleanup counts for telemetry + UI, plus a `sidecarMissing` flag so
+// callers can warn when they're operating on a pack that was activated before
+// the sidecar mechanism landed.
+//
+// Exported for testing — not a public API. Tests import via the CLI module.
+export async function cleanupPackActivation(
+  rootDir: string,
+  pack: Pack.Info | undefined,
+  packName: string,
+  remainingActive: Pack.Info[],
+): Promise<{
+  mcpCleaned: number
+  pluginsCleaned: number
+  instructionsCleaned: boolean
+  skippedMcpKeys: string[]
+  sidecarMissing: boolean
+}> {
+  const sidecar = await Pack.readActivationSidecar(rootDir, packName)
+  const skippedMcpKeys: string[] = []
+  let mcpCleaned = 0
+  let pluginsCleaned = 0
+  let instructionsCleaned = false
+
+  // Resolve config file path once. If config doesn't exist at all, there's
+  // nothing to clean; skip without creating a file.
+  let configFilePath: string | undefined
+  try {
+    const candidates = [
+      path.join(rootDir, ".opencode", "opencode.json"),
+      path.join(rootDir, ".opencode", "opencode.jsonc"),
+      path.join(rootDir, ".altimate-code", "altimate-code.json"),
+      path.join(rootDir, ".altimate-code", "altimate-code.jsonc"),
+      path.join(rootDir, "opencode.json"),
+      path.join(rootDir, "opencode.jsonc"),
+      path.join(rootDir, "altimate-code.json"),
+      path.join(rootDir, "altimate-code.jsonc"),
+    ]
+    for (const candidate of candidates) {
+      try {
+        await fs.access(candidate)
+        configFilePath = candidate
+        break
+      } catch {
+        // try next
+      }
+    }
+  } catch {
+    // no config at all — nothing to clean
+  }
+
+  // --- Instructions cleanup (always by convention — pack-<name>.md) ---
+  const instructionsFile = path.join(rootDir, ".opencode", "instructions", `pack-${packName}.md`)
+  try {
+    await fs.access(instructionsFile)
+    await fs.rm(instructionsFile, { force: true })
+    instructionsCleaned = true
+  } catch {
+    // missing instructions file is fine
+  }
+
+  if (!configFilePath) {
+    return {
+      mcpCleaned,
+      pluginsCleaned,
+      instructionsCleaned,
+      skippedMcpKeys,
+      sidecarMissing: !sidecar,
+    }
+  }
+
+  // --- MCP cleanup (ownership-aware) ---
+  if (sidecar && sidecar.mcp.length > 0) {
+    for (const [serverName, recordedSerialized] of sidecar.mcp) {
+      const currentValue = await readConfigField(configFilePath, ["mcp", serverName])
+      if (currentValue === undefined) continue
+      const currentSerialized = JSON.stringify(currentValue)
+      if (currentSerialized === recordedSerialized) {
+        if (await removeConfigField(configFilePath, ["mcp", serverName])) {
+          mcpCleaned++
+        }
+      } else {
+        skippedMcpKeys.push(serverName)
+      }
+    }
+  } else if (pack?.mcp && Object.keys(pack.mcp).length > 0) {
+    // Legacy path: pack was activated before the sidecar mechanism. Fall back
+    // to the old name-only removal but announce the limitation to the caller.
+    for (const serverName of Object.keys(pack.mcp)) {
+      if (await removeConfigField(configFilePath, ["mcp", serverName])) {
+        mcpCleaned++
+      }
+    }
+  }
+
+  // --- Plugin cleanup (refcount by canonical name) ---
+  const ownedSpecs = sidecar ? sidecar.plugins : pack?.plugins ?? []
+  if (ownedSpecs.length > 0) {
+    const stillNeededCanonicals = new Set<string>()
+    for (const other of remainingActive) {
+      if (other.name === packName) continue
+      for (const spec of other.plugins || []) {
+        stillNeededCanonicals.add(Config.getPluginName(spec))
+      }
+    }
+    const specsToRemove = ownedSpecs.filter(
+      (spec) => !stillNeededCanonicals.has(Config.getPluginName(spec)),
+    )
+    if (specsToRemove.length > 0) {
+      const currentPlugins = ((await readConfigField(configFilePath, ["plugin"])) ?? []) as string[]
+      const next = currentPlugins.filter((spec) => !specsToRemove.includes(spec))
+      if (next.length !== currentPlugins.length) {
+        await writeConfigField(configFilePath, ["plugin"], next)
+        pluginsCleaned = currentPlugins.length - next.length
+      }
+    }
+  }
+
+  // --- Delete the sidecar last (keeps cleanup idempotent on retry) ---
+  await Pack.deleteActivationSidecar(rootDir, packName)
+
+  return {
+    mcpCleaned,
+    pluginsCleaned,
+    instructionsCleaned,
+    skippedMcpKeys,
+    sidecarMissing: !sidecar,
+  }
 }
 // altimate_change end
 
@@ -569,7 +729,11 @@ const PackInstallCommand = cmd({
             await fs.cp(src, dst, { recursive: true, dereference: false })
           }
         }
-        // altimate_change start — pack: write manifest.json at install time for later integrity checks
+        // altimate_change start — pack: atomic install — write manifest.json at
+        // install time, and roll back the copied files on failure so a partial
+        // install can't silently weaken integrity posture. Local-path installs
+        // (cloned === false) still log-and-continue because the "install" there
+        // is a symbolic reference — manifest loss is expected for dev loops.
         try {
           const destPackFile = path.join(dest, path.basename(packFile))
           const matterMod = (await import("gray-matter")).default
@@ -588,8 +752,19 @@ const PackInstallCommand = cmd({
             source,
           )
         } catch (err) {
-          // Manifest is best-effort; pack still works without one (treated as user-authored).
-          process.stdout.write(`  ⚠ Could not write manifest for "${packName}" — ${(err as Error).message}` + EOL)
+          if (cloned) {
+            // Remote install: roll back to avoid a pack sitting on disk without
+            // an integrity manifest. Partners would see this as a silent
+            // downgrade; fail loud instead.
+            await fs.rm(dest, { recursive: true, force: true }).catch(() => {})
+            process.stderr.write(
+              `  ✗ Failed to write manifest for "${packName}" — rolled back install: ${(err as Error).message}` + EOL,
+            )
+            continue
+          }
+          process.stdout.write(
+            `  ⚠ Could not write manifest for local "${packName}" — ${(err as Error).message}` + EOL,
+          )
         }
         // altimate_change end
 
@@ -657,6 +832,31 @@ const PackRemoveCommand = cmd({
         process.exit(1)
       }
 
+      // altimate_change start — pack: ownership-aware cleanup BEFORE deleting
+      // the pack files so we still have the sidecar available to drive cleanup.
+      // Without this, `pack remove` of a still-active pack would leak MCP + plugin
+      // config entries that `pack deactivate` would have cleaned up.
+      const rootDir = Instance.worktree !== "/" ? Instance.worktree : Instance.directory
+      await Pack.deactivate(name)
+      Pack.invalidate()
+      const remaining = await Pack.active()
+      const cleanup = await cleanupPackActivation(rootDir, pack, name, remaining)
+      if (cleanup.mcpCleaned > 0) {
+        process.stdout.write(`  ✓ Removed ${cleanup.mcpCleaned} MCP server(s) from config` + EOL)
+      }
+      if (cleanup.skippedMcpKeys.length > 0) {
+        process.stdout.write(
+          `  ⚠ Left ${cleanup.skippedMcpKeys.length} MCP entry(ies) in place — modified after activation: ${cleanup.skippedMcpKeys.join(", ")}` + EOL,
+        )
+      }
+      if (cleanup.pluginsCleaned > 0) {
+        process.stdout.write(`  ✓ Removed ${cleanup.pluginsCleaned} plugin(s) from config` + EOL)
+      }
+      if (cleanup.instructionsCleaned) {
+        process.stdout.write(`  ✓ Removed instructions file` + EOL)
+      }
+      // altimate_change end
+
       // Safety: only remove if the directory looks like a pack directory
       // (contains the PACK file and is not a top-level scan directory)
       const packBasename = path.basename(packDir)
@@ -668,22 +868,6 @@ const PackRemoveCommand = cmd({
         await fs.rm(packDir, { recursive: true, force: true })
         process.stdout.write(`  ✓ Removed pack: ${packDir}` + EOL)
       }
-
-      // Deactivate if active, then invalidate cache
-      await Pack.deactivate(name)
-      Pack.invalidate()
-
-      // altimate_change start — pack: clean up instruction file on remove
-      const rootDir = Instance.worktree !== "/" ? Instance.worktree : Instance.directory
-      const instructionsFile = path.join(rootDir, ".opencode", "instructions", `pack-${name}.md`)
-      try {
-        await fs.access(instructionsFile)
-        await fs.rm(instructionsFile, { force: true })
-        process.stdout.write(`  ✓ Removed instructions: ${path.relative(rootDir, instructionsFile)}` + EOL)
-      } catch {
-        // No instructions file, that's fine
-      }
-      // altimate_change end
 
       // altimate_change start — telemetry
       try {
@@ -949,6 +1133,11 @@ const PackActivateCommand = cmd({
       }
 
       // --- 2. Configure MCP servers and plugins (JSONC-aware, preserves comments) ---
+      // altimate_change start — pack: track exactly what we wrote so the sidecar
+      // can drive ownership-aware cleanup on deactivate/remove.
+      const writtenMcp: Array<[string, string]> = []
+      const writtenPlugins: string[] = []
+      // altimate_change end
       if (mcpCount > 0 || pluginCount > 0) {
         const { filePath } = await findConfigFile(rootDir)
         const missingEnvKeys: string[] = []
@@ -968,6 +1157,9 @@ const PackActivateCommand = cmd({
 
             // Write each MCP server using JSONC-preserving modify
             await writeConfigField(filePath, ["mcp", serverName], configEntry)
+            // altimate_change start — pack: record for ownership-aware deactivate
+            writtenMcp.push([serverName, JSON.stringify(configEntry)])
+            // altimate_change end
             process.stdout.write(`  ✓ Configured MCP server "${serverName}"` + EOL)
 
             const envKeys = def.env_keys
@@ -980,13 +1172,16 @@ const PackActivateCommand = cmd({
         }
 
         if (pluginCount > 0) {
-          // Read current plugins, add new ones, write back
-          const { config } = await findConfigFile(rootDir)
-          const plugins = (config.plugin ?? []) as string[]
+          // altimate_change start — pack: read plugins directly from the file text
+          // we're about to edit (avoids TOCTOU between findConfigFile's cached
+          // parse and the JSONC modify we'll apply).
+          const currentPlugins = ((await readConfigField(filePath, ["plugin"])) ?? []) as string[]
+          const plugins = [...currentPlugins]
           let changed = false
           for (const plugin of pack.plugins!) {
             if (!plugins.includes(plugin)) {
               plugins.push(plugin)
+              writtenPlugins.push(plugin)
               changed = true
               process.stdout.write(`  ✓ Added plugin "${plugin}"` + EOL)
             }
@@ -994,6 +1189,7 @@ const PackActivateCommand = cmd({
           if (changed) {
             await writeConfigField(filePath, ["plugin"], plugins)
           }
+          // altimate_change end
         }
 
         process.stdout.write(`  ✓ Updated config: ${path.relative(rootDir, filePath)}` + EOL)
@@ -1009,17 +1205,44 @@ const PackActivateCommand = cmd({
       }
 
       // --- 3. Add instructions ---
+      let writtenInstructionsRel: string | null = null
       if (hasInstructions) {
         const instructionsDir = path.join(rootDir, ".opencode", "instructions")
         const instructionsFile = path.join(instructionsDir, `pack-${name}.md`)
         await fs.mkdir(instructionsDir, { recursive: true })
         await fs.writeFile(instructionsFile, pack.instructions!, "utf-8")
-        process.stdout.write(`  ✓ Created instructions: ${path.relative(rootDir, instructionsFile)}` + EOL)
+        writtenInstructionsRel = path.relative(rootDir, instructionsFile)
+        process.stdout.write(`  ✓ Created instructions: ${writtenInstructionsRel}` + EOL)
       }
 
       // --- 4. Activate (add to active-packs) ---
       await Pack.activate(name)
       Pack.invalidate()
+
+      // altimate_change start — pack: write activation sidecar so deactivate/remove
+      // can clean up ownership-aware (see cleanupPackActivation).
+      try {
+        await Pack.writeActivationSidecar(rootDir, {
+          pack_name: name,
+          activated_at: new Date().toISOString(),
+          mcp: writtenMcp,
+          plugins: writtenPlugins,
+          instructions_file: writtenInstructionsRel,
+        })
+      } catch (err) {
+        process.stdout.write(
+          `  ⚠ Could not write activation sidecar — deactivate will fall back to name-only cleanup: ${(err as Error).message}` + EOL,
+        )
+      }
+
+      // Nudge user to restart so the plugin loader picks up new specs.
+      if (writtenPlugins.length > 0) {
+        process.stdout.write(EOL)
+        process.stdout.write(
+          `  ℹ Plugins will finish installing on the next altimate-code start. Restart to use them.` + EOL,
+        )
+      }
+      // altimate_change end
 
       process.stdout.write(EOL)
       // altimate_change start — pack: report partial failures in activation message
@@ -1086,7 +1309,8 @@ const PackDeactivateCommand = cmd({
   async handler(args) {
     const name = args.name as string
     await bootstrap(process.cwd(), async () => {
-      // Read pack BEFORE deactivating so we know what MCP servers to clean
+      // Read pack BEFORE deactivating so we have fallback metadata if the
+      // sidecar is missing (legacy packs activated under an older CLI).
       const pack = await Pack.get(name)
 
       await Pack.deactivate(name)
@@ -1094,70 +1318,41 @@ const PackDeactivateCommand = cmd({
 
       const rootDir = Instance.worktree !== "/" ? Instance.worktree : Instance.directory
 
-      // altimate_change start — pack: clean up instruction file on deactivate
-      const instructionsFile = path.join(rootDir, ".opencode", "instructions", `pack-${name}.md`)
-      let instructionsCleaned = false
-      try {
-        await fs.access(instructionsFile)
-        await fs.rm(instructionsFile, { force: true })
-        instructionsCleaned = true
-        process.stdout.write(`  ✓ Removed instructions: ${path.relative(rootDir, instructionsFile)}` + EOL)
-      } catch {}
-      // altimate_change end
+      // altimate_change start — pack: ownership-aware cleanup via sidecar, with
+      // canonical-name refcounting so shared plugins between active packs survive.
+      Pack.invalidate()
+      const remaining = await Pack.active()
+      const result = await cleanupPackActivation(rootDir, pack, name, remaining)
 
-      // altimate_change start — pack: clean up MCP config entries added by this pack (JSONC-preserving)
-      let mcpCleaned = 0
-      if (pack?.mcp && Object.keys(pack.mcp).length > 0) {
-        try {
-          const { filePath } = await findConfigFile(rootDir)
-          for (const serverName of Object.keys(pack.mcp)) {
-            if (await removeConfigField(filePath, ["mcp", serverName])) {
-              mcpCleaned++
-            }
-          }
-          if (mcpCleaned > 0) {
-            process.stdout.write(`  ✓ Removed ${mcpCleaned} MCP server(s) from config` + EOL)
-          }
-        } catch {}
+      if (result.instructionsCleaned) {
+        process.stdout.write(`  ✓ Removed instructions file` + EOL)
       }
-      // altimate_change end
-
-      // altimate_change start — pack: clean up plugin entries that no other active pack still needs
-      let pluginsCleaned = 0
-      if (pack?.plugins && pack.plugins.length > 0) {
-        try {
-          Pack.invalidate()
-          const remaining = await Pack.active()
-          const stillNeeded = new Set<string>()
-          for (const other of remaining) {
-            if (other.name === name) continue
-            for (const p of other.plugins || []) stillNeeded.add(p)
-          }
-          const toRemove = pack.plugins.filter((p) => !stillNeeded.has(p))
-          if (toRemove.length > 0) {
-            const { filePath, config } = await findConfigFile(rootDir)
-            const current = (config.plugin ?? []) as string[]
-            const next = current.filter((p) => !toRemove.includes(p))
-            if (next.length !== current.length) {
-              await writeConfigField(filePath, ["plugin"], next)
-              pluginsCleaned = toRemove.length
-              process.stdout.write(`  ✓ Removed ${pluginsCleaned} plugin(s) from config` + EOL)
-            }
-          }
-        } catch {}
+      if (result.mcpCleaned > 0) {
+        process.stdout.write(`  ✓ Removed ${result.mcpCleaned} MCP server(s) from config` + EOL)
       }
-      // altimate_change end
+      if (result.skippedMcpKeys.length > 0) {
+        process.stdout.write(
+          `  ⚠ Left ${result.skippedMcpKeys.length} MCP entry(ies) in place — they were modified after activation: ${result.skippedMcpKeys.join(", ")}` + EOL,
+        )
+      }
+      if (result.pluginsCleaned > 0) {
+        process.stdout.write(`  ✓ Removed ${result.pluginsCleaned} plugin(s) from config` + EOL)
+      }
+      if (result.sidecarMissing) {
+        process.stdout.write(
+          `  ⚠ No activation sidecar found — cleaned up by name only (may leave user-modified entries).` + EOL,
+        )
+      }
 
-      // altimate_change start — pack: telemetry for deactivation lifecycle
       try {
         Telemetry.track({
           type: "pack_deactivated",
           timestamp: Date.now(),
           session_id: Telemetry.getContext().sessionId || "",
           pack_name: name,
-          mcp_cleaned: mcpCleaned,
-          plugins_cleaned: pluginsCleaned,
-          instructions_cleaned: instructionsCleaned,
+          mcp_cleaned: result.mcpCleaned,
+          plugins_cleaned: result.pluginsCleaned,
+          instructions_cleaned: result.instructionsCleaned,
           source: "cli",
         })
       } catch {}
@@ -1171,6 +1366,14 @@ const PackDeactivateCommand = cmd({
 const DEFAULT_REGISTRY_URL = "https://raw.githubusercontent.com/AltimateAI/data-engineering-skills/main/registry.json"
 const REGISTRY_CACHE_TTL_MS = 24 * 60 * 60 * 1000
 const REGISTRY_FETCH_TIMEOUT_MS = 5000
+
+// Schema for the cache wrapper on disk. We validate shape explicitly so a
+// corrupted cache file degrades to "no cache" instead of crashing the search.
+const CachedRegistry = z.object({
+  url: z.string(),
+  fetched_at: z.string(),
+  data: z.unknown(),
+})
 
 async function resolveRegistryUrl(): Promise<string> {
   const envUrl = process.env.ALTIMATE_CODE_PACK_REGISTRY
@@ -1194,11 +1397,15 @@ async function readRegistryCache(
 ): Promise<{ data: unknown; fetchedAtMs: number; stale: boolean } | undefined> {
   try {
     const raw = await fs.readFile(registryCachePath(), "utf-8")
-    const parsed = JSON.parse(raw) as { url?: string; fetched_at?: string; data?: unknown }
-    if (parsed.url !== url || !parsed.fetched_at) return undefined
-    const fetchedAtMs = new Date(parsed.fetched_at).getTime()
+    const parsed = CachedRegistry.safeParse(JSON.parse(raw))
+    if (!parsed.success) return undefined
+    if (parsed.data.url !== url) return undefined
+    const fetchedAtMs = new Date(parsed.data.fetched_at).getTime()
     if (!Number.isFinite(fetchedAtMs)) return undefined
-    return { data: parsed.data, fetchedAtMs, stale: Date.now() - fetchedAtMs > REGISTRY_CACHE_TTL_MS }
+    // Clamp negative age (clock skew) to 0 so a regressed system clock doesn't
+    // mask stale cache as fresh.
+    const ageMs = Math.max(0, Date.now() - fetchedAtMs)
+    return { data: parsed.data.data, fetchedAtMs, stale: ageMs > REGISTRY_CACHE_TTL_MS }
   } catch {
     return undefined
   }

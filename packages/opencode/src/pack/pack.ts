@@ -240,6 +240,61 @@ export namespace Pack {
   }
   // altimate_change end
 
+  // altimate_change start — pack: activation sidecar records what a pack wrote,
+  // so deactivate can clean up ownership-aware (don't delete the user's unrelated
+  // MCP server that happens to share a name, don't drop a plugin another pack
+  // still needs). Written on successful activate; read-then-deleted on deactivate.
+  export const ActivationSidecar = z.object({
+    pack_name: z.string(),
+    activated_at: z.string(),
+    // MCP entries this pack wrote. Stored as [server_name, serialized_value]
+    // — the serialized value is what we wrote, so we only remove if the current
+    // config still matches. Prevents stomping on user edits.
+    mcp: z.array(z.tuple([z.string(), z.string()])).default([]),
+    // npm plugin specs this pack appended to `config.plugin[]`.
+    plugins: z.array(z.string()).default([]),
+    // Relative path under root dir, or null if no instructions were written.
+    instructions_file: z.string().nullable().default(null),
+  })
+  export type ActivationSidecar = z.infer<typeof ActivationSidecar>
+
+  function sidecarPath(rootDir: string, packName: string): string {
+    return path.join(rootDir, ".opencode", "pack-state", `${packName}.json`)
+  }
+
+  export async function writeActivationSidecar(
+    rootDir: string,
+    sidecar: ActivationSidecar,
+  ): Promise<void> {
+    const file = sidecarPath(rootDir, sidecar.pack_name)
+    await mkdir(path.dirname(file), { recursive: true })
+    await writeFile(file, JSON.stringify(sidecar, null, 2) + "\n", "utf-8")
+  }
+
+  export async function readActivationSidecar(
+    rootDir: string,
+    packName: string,
+  ): Promise<ActivationSidecar | undefined> {
+    try {
+      const file = sidecarPath(rootDir, packName)
+      const raw = await Filesystem.readText(file)
+      if (!raw) return undefined
+      const parsed = ActivationSidecar.safeParse(JSON.parse(raw))
+      return parsed.success ? parsed.data : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  export async function deleteActivationSidecar(rootDir: string, packName: string): Promise<void> {
+    try {
+      await unlink(sidecarPath(rootDir, packName))
+    } catch {
+      // best-effort — missing file is fine
+    }
+  }
+  // altimate_change end
+
   // --- State management (mirrors Skill.state pattern) ---
 
   const PACK_FILE_PATTERN = "PACK.{yaml,yml,md}"
@@ -373,7 +428,10 @@ export namespace Pack {
         return undefined
       }
 
-      // altimate_change start — pack: manifest integrity check + tier allowlist enforcement
+      // altimate_change start — pack: manifest integrity check + tier allowlist enforcement.
+      // We check BOTH the content hash and the metadata fields (name/version/tier)
+      // against the manifest so a vendor can't edit only PACK.yaml metadata while
+      // leaving the manifest stale — either would be caught as tampering.
       const packDir = path.dirname(filePath)
       const manifest = await readManifest(packDir)
       let tamperDetected = false
@@ -385,6 +443,31 @@ export namespace Pack {
             pack: result.data.name,
             expected: manifest.content_hash,
             actual: actualHash,
+          })
+        }
+        if (manifest.name !== result.data.name) {
+          tamperDetected = true
+          log.warn("pack manifest name mismatch", {
+            expected: manifest.name,
+            actual: result.data.name,
+          })
+        }
+        const yamlVersion = result.data.version || "1.0.0"
+        if (manifest.version !== yamlVersion) {
+          tamperDetected = true
+          log.warn("pack manifest version mismatch", {
+            pack: result.data.name,
+            expected: manifest.version,
+            actual: yamlVersion,
+          })
+        }
+        const yamlTier = result.data.tier || "community"
+        if (manifest.tier !== yamlTier) {
+          tamperDetected = true
+          log.warn("pack manifest tier mismatch — possible tier-elevation attempt", {
+            pack: result.data.name,
+            expected: manifest.tier,
+            actual: yamlTier,
           })
         }
       }
@@ -519,8 +602,11 @@ export namespace Pack {
 
   /** Deactivate a pack for the current project */
   export async function deactivate(name: string): Promise<void> {
-    const rootDir = Instance.worktree !== "/" ? Instance.worktree : Instance.directory
-    const activeFile = path.join(rootDir, ".opencode", "active-packs")
+    // altimate_change start — pack: use findActivePacksFile so we correctly
+    // handle legacy `.altimate-code/active-packs` instead of silently no-op
+    const activeFile = await findActivePacksFile()
+    if (!activeFile) return
+    // altimate_change end
 
     let names: string[] = []
     try {
