@@ -94,10 +94,10 @@ For example: `acme::your-api-key` — this uses the default API URL `https://api
 - **Instance Name** — the subdomain from your Altimate dashboard URL (e.g. `acme` from `https://acme.app.myaltimate.com`)
 - **API Key** — go to **Settings > API Keys** in your Altimate dashboard and click **Copy**
 
-If your instance uses a different API URL (e.g. a self-hosted or `getaltimate.com` deployment), prepend it:
+If your instance uses a different API URL (e.g. a self-hosted or `getaltimate.com` deployment), prepend the full URL — it must include the `http://` or `https://` scheme, hostname-only values will fail validation:
 
 ```text
-api-url::instance-name::api-key
+https://api.example.com::instance-name::api-key
 ```
 
 For example: `https://api.getaltimate.com::acme::your-api-key`

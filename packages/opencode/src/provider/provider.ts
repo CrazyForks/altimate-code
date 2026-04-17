@@ -1022,12 +1022,16 @@ export namespace Provider {
     // altimate_change start — register altimate-backend as an OpenAI-compatible provider
     if (!database["altimate-backend"]) {
       const backendModels: Record<string, Model> = {
-        "altimate-llm-gateway": {
-          id: ModelID.make("altimate-llm-gateway"),
+        // ID "altimate-default" is kept for backward compatibility — existing
+        // users have it persisted in their model.json favorites/recents and in
+        // opencode.json `model:` entries. Display name ("Altimate LLM Gateway")
+        // is what the TUI actually shows, so branding stays correct.
+        "altimate-default": {
+          id: ModelID.make("altimate-default"),
           providerID: ProviderID.make("altimate-backend"),
           name: "Altimate LLM Gateway",
           family: "openai",
-          api: { id: "altimate-llm-gateway", url: "", npm: "@ai-sdk/openai-compatible" },
+          api: { id: "altimate-default", url: "", npm: "@ai-sdk/openai-compatible" },
           status: "active",
           headers: {},
           options: {},
@@ -1642,15 +1646,15 @@ export namespace Provider {
     const altimateProvider = providers[altimateProviderID]
     if (
       altimateProvider &&
-      altimateProvider.models[ModelID.make("altimate-llm-gateway")] &&
+      altimateProvider.models[ModelID.make("altimate-default")] &&
       (!cfg.provider || Object.keys(cfg.provider).includes(String(altimateProviderID)))
     ) {
       // altimate_change start — log when altimate-backend auto-selected
-      log.info("defaulting to altimate-backend/altimate-llm-gateway (no model configured)")
+      log.info("defaulting to altimate-backend/altimate-default (no model configured)")
       // altimate_change end
       return {
         providerID: altimateProviderID,
-        modelID: ModelID.make("altimate-llm-gateway"),
+        modelID: ModelID.make("altimate-default"),
       }
     }
     // altimate_change end

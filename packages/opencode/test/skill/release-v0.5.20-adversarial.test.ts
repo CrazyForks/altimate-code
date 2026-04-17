@@ -256,9 +256,9 @@ describe("v0.5.20 release: listTracesPaginated adversarial", () => {
 
 describe("v0.5.20 release: Provider.parseModel adversarial", () => {
   test("model string with multiple slashes preserves all parts", () => {
-    const result = Provider.parseModel("altimate-backend/altimate-llm-gateway")
+    const result = Provider.parseModel("altimate-backend/altimate-default")
     expect(String(result.providerID)).toBe("altimate-backend")
-    expect(String(result.modelID)).toBe("altimate-llm-gateway")
+    expect(String(result.modelID)).toBe("altimate-default")
   })
 
   test("model string with nested slashes preserves full model ID", () => {

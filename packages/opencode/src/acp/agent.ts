@@ -1581,12 +1581,12 @@ export namespace ACP {
     const altimateProvider = providers.find((p) => p.id === "altimate-backend")
     if (
       altimateProvider &&
-      altimateProvider.models["altimate-llm-gateway"] &&
+      altimateProvider.models["altimate-default"] &&
       (!providerFilter || Object.keys(providerFilter).includes("altimate-backend"))
     ) {
       return {
         providerID: ProviderID.make("altimate-backend"),
-        modelID: ModelID.make("altimate-llm-gateway"),
+        modelID: ModelID.make("altimate-default"),
       }
     }
     // altimate_change end
