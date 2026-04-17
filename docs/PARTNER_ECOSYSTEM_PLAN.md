@@ -1,10 +1,10 @@
 # Altimate Code — Extension Ecosystem Plan
 
-> **Purpose:** Enable anyone — vendors, solution architects, team leads, individual engineers — to extend Altimate Code with kits that bundle skills, MCP servers, and instructions.
+> **Purpose:** Enable anyone — vendors, solution architects, team leads, individual engineers — to extend Altimate Code with packs that bundle skills, MCP servers, and instructions.
 >
 > **Date:** 2026-03-28 | **Status:** Validated through 5 scenario simulations (12 personas)
 >
-> **Key rename:** "Recipe" → "Kit" (differentiation from Goose, clearer mental model)
+> **Key rename:** "Recipe" → "Pack" (differentiation from Goose, clearer mental model)
 
 ### Simulation Results (2026-03-28)
 | Scenario | Score | Key Finding |
@@ -12,8 +12,8 @@
 | Snowflake (Large Enterprise) | 5/10 | Demo-ready core, 5 deal blockers |
 | Dagster (Growth Startup) | 6/10 | Would partner conditionally |
 | Fortune 500 Bank (Enterprise) | 3/10 | Missing enforcement, use AGENTS.md today |
-| Solo Consultant (SA) | 5/10 | Best natural fit, needs `kit switch` + cleanup |
-| Series A Self-Serve | 3/10 | Nobody discovers kit without being told |
+| Solo Consultant (SA) | 5/10 | Best natural fit, needs `pack switch` + cleanup |
+| Series A Self-Serve | 3/10 | Nobody discovers pack without being told |
 
 **Universal finding:** Authoring experience is good. Single-developer workflow works. Discovery and multi-person story are broken. Auto-detect on startup is the #1 priority.
 
@@ -28,7 +28,7 @@
 5. [Layer 1: Agent Skills (SKILL.md)](#5-layer-1-agent-skills)
 6. [Layer 2: MCP Servers](#6-layer-2-mcp-servers)
 7. [Layer 3: Plugins (Deep Integration)](#7-layer-3-plugins)
-8. [Kits: The Distribution Unit](#8-kits-the-distribution-unit)
+8. [Packs: The Distribution Unit](#8-packs-the-distribution-unit)
 9. [data-engineering-skills: The Open-Source Foundation](#9-data-engineering-skills-the-open-source-foundation)
 10. [Onboarding Playbook](#10-onboarding-playbook)
 11. [What We Need to Build](#11-what-we-need-to-build)
@@ -67,11 +67,11 @@ Goose made the boldest architectural decision: **Extensions ARE MCP servers.** N
 | Pattern | How Goose Does It | Our Equivalent |
 |---------|-------------------|----------------|
 | Extension = MCP server | Any MCP server is auto-discovered | We support this via `config.mcp` |
-| **Recipes** | YAML bundles: extensions + prompts + settings + parameters | **Kits** (KIT.yaml) — our equivalent |
+| **Recipes** | YAML bundles: extensions + prompts + settings + parameters | **Packs** (PACK.yaml) — our equivalent |
 | Deep links | `goose://extension?cmd=...` one-click install | Not yet |
 | Extension directory | Curated browse page (70+ servers) | Not yet |
 | Custom distros | Full white-label with bundled extensions | Possible via our config system |
-| Subagent composition | Recipes spawn parallel sub-agents | We have agents but no kit system yet |
+| Subagent composition | Recipes spawn parallel sub-agents | We have agents but no pack system yet |
 | Malware scanning | Auto-scan before extension activation | Not yet |
 
 **Goose's real partner integrations:**
@@ -588,20 +588,20 @@ altimate-code plugin install @dagster/altimate-plugin
 
 ---
 
-## 8. Kits: The Distribution Unit
+## 8. Packs: The Distribution Unit
 
 ### 8.1 The Missing Piece
 
-Goose's most innovative pattern is **Recipes** — YAML files that bundle extensions + prompts + settings into shareable workflows. We should adopt this concept (renamed to **Kits** for differentiation).
+Goose's most innovative pattern is **Recipes** — YAML files that bundle extensions + prompts + settings into shareable workflows. We should adopt this concept (renamed to **Packs** for differentiation).
 
-**Why kits matter for partners:**
+**Why packs matter for partners:**
 - A Dagster skill alone is useful. A Dagster skill + Dagster MCP server + curated prompt + recommended settings = a **complete workflow**.
-- Kits are the unit of distribution that partners can share with their community.
+- Packs are the unit of distribution that partners can share with their community.
 
-### 8.2 Proposed Kit Format
+### 8.2 Proposed Pack Format
 
 ```yaml
-# dagster-asset-development/KIT.yaml
+# dagster-asset-development/PACK.yaml
 name: dagster-asset-development
 version: "1.0"
 description: "Complete workflow for building Dagster assets with AI assistance"
@@ -642,26 +642,26 @@ settings:
     dagster.check: true
 ```
 
-### 8.3 Kit Installation
+### 8.3 Pack Installation
 
 ```bash
 # From URL
-altimate-code kit install https://dagster.io/kits/asset-development
+altimate-code pack install https://dagster.io/packs/asset-development
 
 # From GitHub
-altimate-code kit install DagsterHQ/dagster-kits/asset-development
+altimate-code pack install DagsterHQ/dagster-packs/asset-development
 
 # One-liner deep link (for docs/blog posts)
-altimate-code://kit?url=https://dagster.io/kits/asset-development
+altimate-code://pack?url=https://dagster.io/packs/asset-development
 ```
 
-### 8.4 Kit as the Partner Onboarding Unit
+### 8.4 Pack as the Partner Onboarding Unit
 
-When a partner says "I want my tool to work with Altimate Code," the deliverable is a kit:
+When a partner says "I want my tool to work with Altimate Code," the deliverable is a pack:
 1. Partner writes skills (Layer 1) — 1 day
 2. Partner already has MCP server (Layer 2) — 0 days (usually exists)
-3. Partner bundles into kit — 1 hour
-4. Kit goes into their docs: "Use Dagster with AI → install this kit"
+3. Partner bundles into pack — 1 hour
+4. Pack goes into their docs: "Use Dagster with AI → install this pack"
 
 ---
 
@@ -696,10 +696,10 @@ data-engineering-skills/
 │   ├── bigquery/               # 🆕 Community-contributed
 │   ├── databricks/             # 🆕 Community-contributed
 │   └── great-expectations/     # 🆕 Community-contributed
-├── kits/                       # 🆕 Bundled kits
-│   ├── dagster-development/KIT.yaml
-│   ├── dbt-snowflake-pipeline/KIT.yaml
-│   └── airbyte-ingestion/KIT.yaml
+├── packs/                       # 🆕 Bundled packs
+│   ├── dagster-development/PACK.yaml
+│   ├── dbt-snowflake-pipeline/PACK.yaml
+│   └── airbyte-ingestion/PACK.yaml
 ├── .claude-plugin/
 │   └── marketplace.json
 ├── benchmarks/                 # 🆕 Benchmark results per skill
@@ -743,8 +743,8 @@ data-engineering-skills/
 - Install: `pip install "dg[mcp]"`
 - Docs: https://dagster.io/docs/mcp
 
-### Kit (optional)
-- [ ] KIT.yaml included in `kits/`
+### Pack (optional)
+- [ ] PACK.yaml included in `packs/`
 ```
 
 ---
@@ -769,8 +769,8 @@ Week 2 (MCP — if applicable)
 ├── We add recommended config to our docs
 └── Test skill + MCP combination
 
-Week 3 (Kit + Launch)
-├── Bundle into KIT.yaml
+Week 3 (Pack + Launch)
+├── Bundle into PACK.yaml
 ├── Co-authored blog post / announcement
 ├── Listed in our extension directory
 └── Partner adds "Works with Altimate Code" badge to their docs
@@ -793,7 +793,7 @@ Week 3 (Kit + Launch)
 |-------------|-----------|--------|
 | 3-5 SKILL.md files | Yes | Markdown (PR to data-engineering-skills) |
 | MCP server config | If they have one | JSON snippet for our docs |
-| KIT.yaml | Recommended | YAML file |
+| PACK.yaml | Recommended | YAML file |
 | Plugin package | Optional | npm package |
 | Blog post draft | Recommended | Markdown (co-authored) |
 
@@ -801,24 +801,24 @@ Week 3 (Kit + Launch)
 
 ## 11. What We Need to Build
 
-### 11.1 Priority 1: Kit System (Weeks 1-3)
+### 11.1 Priority 1: Pack System (Weeks 1-3)
 
-The single biggest gap vs. Goose. Kits bundle skills + MCP + plugins + instructions into one installable unit.
+The single biggest gap vs. Goose. Packs bundle skills + MCP + plugins + instructions into one installable unit.
 
 **Implementation:**
-- KIT.yaml schema and parser
-- `altimate-code kit install <source>` CLI command
-- Kit auto-detection (suggest kit when project type detected)
-- Kit storage in `~/.altimate/kits/`
+- PACK.yaml schema and parser
+- `altimate-code pack install <source>` CLI command
+- Pack auto-detection (suggest pack when project type detected)
+- Pack storage in `~/.altimate/packs/`
 
 **Files to modify:**
-- New: `packages/opencode/src/kit/` (schema, loader, installer)
-- New: `packages/opencode/src/cli/cmd/kit.ts` (CLI command)
-- Modify: `packages/opencode/src/config/` (kit config integration)
+- New: `packages/opencode/src/pack/` (schema, loader, installer)
+- New: `packages/opencode/src/cli/cmd/pack.ts` (CLI command)
+- Modify: `packages/opencode/src/config/` (pack config integration)
 
 ### 11.2 Priority 2: Extension Directory (Weeks 2-4)
 
-A browseable catalog of skills, MCP servers, and kits.
+A browseable catalog of skills, MCP servers, and packs.
 
 **Options:**
 - **Minimal:** Curated page on docs site (like Goose's browse page)
@@ -835,7 +835,7 @@ When a user opens Altimate Code in a Dagster project, automatically suggest:
 **Implementation:**
 - Project type detection (look for `dagster.yaml`, `dbt_project.yml`, `airbyte/`, etc.)
 - Suggestion UI in TUI
-- One-command install of recommended kit
+- One-command install of recommended pack
 
 ### 11.4 Priority 4: Partner SDK Documentation (Week 1)
 
@@ -843,7 +843,7 @@ Publish clear documentation for each layer:
 - Skill Authoring Guide (from Section 5 above)
 - MCP Integration Guide (from Section 6 above)
 - Plugin Development Guide (from Section 7 above)
-- Kit Bundling Guide (from Section 8 above)
+- Pack Bundling Guide (from Section 8 above)
 
 ### 11.5 Priority 5: Skill Versioning (Weeks 4-6)
 
@@ -862,13 +862,13 @@ Current gap: no way to pin skill versions or handle updates.
 
 | Item | Effort | Priority | Dependency |
 |------|--------|----------|------------|
-| KIT.yaml schema + parser | 3 days | P0 | None |
-| `kit install` CLI command | 2 days | P0 | Schema |
-| Kit auto-detection | 2 days | P1 | Kit system |
+| PACK.yaml schema + parser | 3 days | P0 | None |
+| `pack install` CLI command | 2 days | P0 | Schema |
+| Pack auto-detection | 2 days | P1 | Pack system |
 | Extension directory (GitHub-based) | 3 days | P1 | None |
 | Partner SDK documentation site | 3 days | P1 | None |
 | Skill versioning (git tags) | 2 days | P2 | None |
-| Deep links (`altimate-code://`) | 2 days | P2 | Kit system |
+| Deep links (`altimate-code://`) | 2 days | P2 | Pack system |
 | Extension malware scanning | 3 days | P3 | None |
 | Install count telemetry | 1 day | P3 | None |
 
@@ -884,7 +884,7 @@ Current gap: no way to pin skill versions or handle updates.
 | Skills system | No skills | SKILL.md + benchmark-proven | **Altimate** |
 | MCP support | Primary interface | Full support + auto-detect | Tie |
 | Plugin hooks | None (MCP only) | 20+ hooks for deep integration | **Altimate** |
-| Recipes / Kits | Yes (mature) | Kits (planned) | **Goose** |
+| Recipes / Packs | Yes (mature) | Packs (planned) | **Goose** |
 | Extension directory | 70+ servers listed | Not yet (planned) | **Goose** |
 | Deep links | Yes | Not yet (planned) | **Goose** |
 | Warehouse integrations | None built-in | 10 warehouses native | **Altimate** |
@@ -934,6 +934,6 @@ Current gap: no way to pin skill versions or handle updates.
 | **MCP** | Model Context Protocol — standard for AI tools (Anthropic-led, adopted by industry) |
 | **MCP Server** | A process that exposes tools/resources via the MCP protocol |
 | **Plugin** | npm package that hooks into Altimate Code's runtime (auth, tools, chat) |
-| **Kit** | YAML bundle of skills + MCP + plugins + instructions (KIT.yaml) |
+| **Pack** | YAML bundle of skills + MCP + plugins + instructions (PACK.yaml) |
 | **Hook** | Interception point in plugin system (e.g., `tool.execute.before`) |
 | **Agent Skills Standard** | Open standard at agentskills.io for portable AI skills |

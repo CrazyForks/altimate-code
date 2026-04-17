@@ -1,25 +1,25 @@
-// altimate_change start — kit: top-level `kit` command for managing kit bundles
+// altimate_change start — pack: top-level `pack` command for managing pack bundles
 import { EOL } from "os"
 import path from "path"
 import fs from "fs/promises"
-import { Kit } from "../../kit"
+import { Pack } from "../../pack"
 import { Skill } from "../../skill"
 import { bootstrap } from "../bootstrap"
 import { cmd } from "./cmd"
 import { Instance } from "../../project/instance"
 import { Global } from "@/global"
 import { Telemetry } from "@/altimate/telemetry"
-// altimate_change start — kit: jsonc-parser for comment-preserving config writes
+// altimate_change start — pack: jsonc-parser for comment-preserving config writes
 import { modify, applyEdits } from "jsonc-parser"
 // altimate_change end
 
 // ---------------------------------------------------------------------------
-// KIT.yaml template
+// PACK.yaml template
 // ---------------------------------------------------------------------------
 
-function kitTemplate(name: string): string {
+function packTemplate(name: string): string {
   return `name: ${name}
-description: TODO — describe what this kit configures
+description: TODO — describe what this pack configures
 version: 1.0.0
 
 # Skills to install (from external repos or already-installed names)
@@ -36,7 +36,7 @@ mcp:
 # Auto-detection rules
 detect:
   # - files: ["config.yaml"]
-  #   message: "Detected my-tool — activate kit?"
+  #   message: "Detected my-tool — activate pack?"
 
 # Instructions added to every conversation
 instructions: |
@@ -81,7 +81,7 @@ async function findConfigFile(rootDir: string): Promise<{ filePath: string; conf
   return { filePath: defaultPath, config: defaultConfig }
 }
 
-// altimate_change start — kit: JSONC-aware config writes that preserve comments
+// altimate_change start — pack: JSONC-aware config writes that preserve comments
 async function writeConfigField(filePath: string, fieldPath: string[], value: unknown): Promise<void> {
   let text = "{}"
   try { text = await fs.readFile(filePath, "utf-8") } catch {}
@@ -116,7 +116,7 @@ async function cloneSource(source: string): Promise<{ dir: string; cloned: boole
   } else if (normalized.startsWith("http://") || normalized.startsWith("https://")) {
     url = normalized
   } else if (normalized.match(/^[a-zA-Z0-9_-]+\/[a-zA-Z0-9._-]+$/)) {
-    // Check if it's a local path first (e.g., "examples/kits" looks like "owner/repo")
+    // Check if it's a local path first (e.g., "examples/packs" looks like "owner/repo")
     const resolvedLocal = path.isAbsolute(normalized) ? normalized : path.resolve(normalized)
     try {
       await fs.access(resolvedLocal)
@@ -129,7 +129,7 @@ async function cloneSource(source: string): Promise<{ dir: string; cloned: boole
   }
 
   if (url) {
-    const tmpDir = path.join(Global.Path.cache, "kit-install-" + Date.now())
+    const tmpDir = path.join(Global.Path.cache, "pack-install-" + Date.now())
     const proc = Bun.spawnSync(["git", "clone", "--depth", "1", "--", url, tmpDir], {
       stdout: "pipe",
       stderr: "pipe",
@@ -160,9 +160,9 @@ async function cleanupTmp(dir: string, cloned: boolean) {
 // Subcommands
 // ---------------------------------------------------------------------------
 
-const KitListCommand = cmd({
+const PackListCommand = cmd({
   command: "list",
-  describe: "list all available kits",
+  describe: "list all available packs",
   builder: (yargs) =>
     yargs
       .option("json", {
@@ -172,41 +172,41 @@ const KitListCommand = cmd({
       })
       .option("detect", {
         type: "boolean",
-        describe: "show only kits matching the current project",
+        describe: "show only packs matching the current project",
         default: false,
       }),
   async handler(args) {
     await bootstrap(process.cwd(), async () => {
-      let kits = await Kit.all()
+      let packs = await Pack.all()
 
       if (args.detect) {
-        const detected = await Kit.detect()
-        const detectedNames = new Set(detected.map((d) => d.kit.name))
-        kits = kits.filter((r) => detectedNames.has(r.name))
+        const detected = await Pack.detect()
+        const detectedNames = new Set(detected.map((d) => d.pack.name))
+        packs = packs.filter((r) => detectedNames.has(r.name))
       }
 
       // Sort alphabetically
-      kits.sort((a, b) => a.name.localeCompare(b.name))
+      packs.sort((a, b) => a.name.localeCompare(b.name))
 
       if (args.json) {
-        // altimate_change start — kit: add tier + skill_packs to JSON output
-        const enriched = kits.map((kit) => {
-          const hasPacks = kit.skill_packs && Object.keys(kit.skill_packs).length > 0
+        // altimate_change start — pack: add tier + skill_groups to JSON output
+        const enriched = packs.map((pack) => {
+          const hasPacks = pack.skill_groups && Object.keys(pack.skill_groups).length > 0
           return {
-            name: kit.name,
-            tier: kit.tier || "community",
-            version: kit.version,
-            author: kit.author,
-            description: kit.description,
+            name: pack.name,
+            tier: pack.tier || "community",
+            version: pack.version,
+            author: pack.author,
+            description: pack.description,
             components: {
               skills: hasPacks
-                ? Object.values(kit.skill_packs!).reduce((sum, pack) => sum + (pack.skills?.length || 0), 0)
-                : (Array.isArray(kit.skills) ? kit.skills.length : 0),
-              skill_packs: hasPacks ? Object.keys(kit.skill_packs!).length : 0,
-              mcp: kit.mcp ? Object.keys(kit.mcp).length : 0,
-              plugins: Array.isArray(kit.plugins) ? kit.plugins.length : 0,
+                ? Object.values(pack.skill_groups!).reduce((sum, pack) => sum + (pack.skills?.length || 0), 0)
+                : (Array.isArray(pack.skills) ? pack.skills.length : 0),
+              skill_groups: hasPacks ? Object.keys(pack.skill_groups!).length : 0,
+              mcp: pack.mcp ? Object.keys(pack.mcp).length : 0,
+              plugins: Array.isArray(pack.plugins) ? pack.plugins.length : 0,
             },
-            location: kit.location,
+            location: pack.location,
           }
         })
         // altimate_change end
@@ -215,47 +215,47 @@ const KitListCommand = cmd({
       }
 
       // Human-readable table output
-      if (kits.length === 0) {
+      if (packs.length === 0) {
         if (args.detect) {
-          process.stdout.write("No kits matched detection rules for this project." + EOL)
-          process.stdout.write(EOL + `See all kits: altimate-code kit list` + EOL)
+          process.stdout.write("No packs matched detection rules for this project." + EOL)
+          process.stdout.write(EOL + `See all packs: altimate-code pack list` + EOL)
         } else {
-          process.stdout.write("No kits found." + EOL)
-          process.stdout.write(EOL + `Create one with: altimate-code kit create <name>` + EOL)
+          process.stdout.write("No packs found." + EOL)
+          process.stdout.write(EOL + `Create one with: altimate-code pack create <name>` + EOL)
         }
         return
       }
 
-      // altimate_change start — kit: add tier column to table output
+      // altimate_change start — pack: add tier column to table output
       // Calculate column widths
-      const nameWidth = Math.max(6, ...kits.map((r) => r.name.length))
+      const nameWidth = Math.max(6, ...packs.map((r) => r.name.length))
       const tierWidth = 12
-      const versionWidth = Math.max(7, ...kits.map((r) => (r.version || "").length))
+      const versionWidth = Math.max(7, ...packs.map((r) => (r.version || "").length))
 
-      const header = `${"KIT".padEnd(nameWidth)}  ${"TIER".padEnd(tierWidth)}  ${"VERSION".padEnd(versionWidth)}  ${"COMPONENTS".padEnd(20)}  DESCRIPTION`
+      const header = `${"PACK".padEnd(nameWidth)}  ${"TIER".padEnd(tierWidth)}  ${"VERSION".padEnd(versionWidth)}  ${"COMPONENTS".padEnd(20)}  DESCRIPTION`
       const separator = "─".repeat(header.length)
 
       process.stdout.write(EOL)
       process.stdout.write(header + EOL)
       process.stdout.write(separator + EOL)
 
-      for (const kit of kits) {
-        // Count skills from skill_packs if present, otherwise flat skills array
-        const hasPacks = kit.skill_packs && Object.keys(kit.skill_packs).length > 0
+      for (const pack of packs) {
+        // Count skills from skill_groups if present, otherwise flat skills array
+        const hasPacks = pack.skill_groups && Object.keys(pack.skill_groups).length > 0
         const skillCount = hasPacks
-          ? Object.values(kit.skill_packs!).reduce((sum, pack) => sum + (pack.skills?.length || 0), 0)
-          : (Array.isArray(kit.skills) ? kit.skills.length : 0)
-        const mcpCount = kit.mcp ? Object.keys(kit.mcp).length : 0
-        const pluginCount = Array.isArray(kit.plugins) ? kit.plugins.length : 0
-        const packCount = hasPacks ? Object.keys(kit.skill_packs!).length : 0
+          ? Object.values(pack.skill_groups!).reduce((sum, pack) => sum + (pack.skills?.length || 0), 0)
+          : (Array.isArray(pack.skills) ? pack.skills.length : 0)
+        const mcpCount = pack.mcp ? Object.keys(pack.mcp).length : 0
+        const pluginCount = Array.isArray(pack.plugins) ? pack.plugins.length : 0
+        const packCount = hasPacks ? Object.keys(pack.skill_groups!).length : 0
         const components = hasPacks
           ? `${skillCount}sk ${packCount}pk ${mcpCount}mcp`
           : `${skillCount}sk ${mcpCount}mcp ${pluginCount}pl`
 
-        const tier = kit.tier || "community"
+        const tier = pack.tier || "community"
         const tierBadge = tier !== "community" ? `[${tier}]` : ""
 
-        let desc = kit.description || ""
+        let desc = pack.description || ""
         if (desc.length > 50) {
           desc = desc.slice(0, 50)
           const lastSpace = desc.lastIndexOf(" ")
@@ -264,25 +264,25 @@ const KitListCommand = cmd({
         }
 
         process.stdout.write(
-          `${kit.name.padEnd(nameWidth)}  ${tierBadge.padEnd(tierWidth)}  ${(kit.version || "—").padEnd(versionWidth)}  ${components.padEnd(20)}  ${desc}` + EOL,
+          `${pack.name.padEnd(nameWidth)}  ${tierBadge.padEnd(tierWidth)}  ${(pack.version || "—").padEnd(versionWidth)}  ${components.padEnd(20)}  ${desc}` + EOL,
         )
       }
       // altimate_change end
 
       process.stdout.write(EOL)
-      process.stdout.write(`${kits.length} kit(s) found.` + EOL)
-      process.stdout.write(`Create a new kit: altimate-code kit create <name>` + EOL)
+      process.stdout.write(`${packs.length} pack(s) found.` + EOL)
+      process.stdout.write(`Create a new pack: altimate-code pack create <name>` + EOL)
     })
   },
 })
 
-const KitCreateCommand = cmd({
+const PackCreateCommand = cmd({
   command: "create <name>",
-  describe: "scaffold a new kit",
+  describe: "scaffold a new pack",
   builder: (yargs) =>
     yargs.positional("name", {
       type: "string",
-      describe: "name of the kit to create",
+      describe: "name of the pack to create",
       demandOption: true,
     }),
   async handler(args) {
@@ -291,40 +291,40 @@ const KitCreateCommand = cmd({
     // Validate name before bootstrap (fast fail)
     if (!/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/.test(name) || name.length < 2) {
       process.stderr.write(
-        `Error: Kit name must be lowercase alphanumeric with hyphens, at least 2 chars (e.g., "dbt-snowflake")` + EOL,
+        `Error: Pack name must be lowercase alphanumeric with hyphens, at least 2 chars (e.g., "dbt-snowflake")` + EOL,
       )
       process.exit(1)
     }
     if (name.length > 64) {
-      process.stderr.write(`Error: Kit name must be 64 characters or fewer` + EOL)
+      process.stderr.write(`Error: Pack name must be 64 characters or fewer` + EOL)
       process.exit(1)
     }
 
     await bootstrap(process.cwd(), async () => {
       const rootDir = Instance.worktree !== "/" ? Instance.worktree : Instance.directory
 
-      const kitDir = path.join(rootDir, ".opencode", "kits", name)
-      const kitFile = path.join(kitDir, "KIT.yaml")
+      const packDir = path.join(rootDir, ".opencode", "packs", name)
+      const packFile = path.join(packDir, "PACK.yaml")
 
       try {
-        await fs.access(kitFile)
-        process.stderr.write(`Error: Kit already exists at ${kitFile}` + EOL)
+        await fs.access(packFile)
+        process.stderr.write(`Error: Pack already exists at ${packFile}` + EOL)
         process.exit(1)
       } catch {
         // File doesn't exist, good
       }
 
-      await fs.mkdir(kitDir, { recursive: true })
-      await fs.writeFile(kitFile, kitTemplate(name), "utf-8")
-      process.stdout.write(`✓ Created kit: ${path.relative(rootDir, kitFile)}` + EOL)
+      await fs.mkdir(packDir, { recursive: true })
+      await fs.writeFile(packFile, packTemplate(name), "utf-8")
+      process.stdout.write(`✓ Created pack: ${path.relative(rootDir, packFile)}` + EOL)
 
       // altimate_change start — telemetry
       try {
         Telemetry.track({
-          type: "kit_created",
+          type: "pack_created",
           timestamp: Date.now(),
           session_id: Telemetry.getContext().sessionId || "",
-          kit_name: name,
+          pack_name: name,
           source: "cli",
         })
       } catch {}
@@ -332,50 +332,50 @@ const KitCreateCommand = cmd({
 
       process.stdout.write(EOL)
       process.stdout.write(`Next steps:` + EOL)
-      process.stdout.write(`  1. Edit .opencode/kits/${name}/KIT.yaml — configure skills, MCP servers, and instructions` + EOL)
-      process.stdout.write(`  2. Activate it: altimate-code kit activate ${name}` + EOL)
+      process.stdout.write(`  1. Edit .opencode/packs/${name}/PACK.yaml — configure skills, MCP servers, and instructions` + EOL)
+      process.stdout.write(`  2. Activate it: altimate-code pack activate ${name}` + EOL)
     })
   },
 })
 
-const KitShowCommand = cmd({
+const PackShowCommand = cmd({
   command: "show <name>",
-  describe: "display kit details",
+  describe: "display pack details",
   builder: (yargs) =>
     yargs.positional("name", {
       type: "string",
-      describe: "name of the kit to show",
+      describe: "name of the pack to show",
       demandOption: true,
     }),
   async handler(args) {
     const name = args.name as string
     await bootstrap(process.cwd(), async () => {
-      const kit = await Kit.get(name)
-      if (!kit) {
-        process.stderr.write(`Error: Kit "${name}" not found.` + EOL)
+      const pack = await Pack.get(name)
+      if (!pack) {
+        process.stderr.write(`Error: Pack "${name}" not found.` + EOL)
         process.exit(1)
       }
 
-      const hasPacks = kit.skill_packs && Object.keys(kit.skill_packs).length > 0
+      const hasPacks = pack.skill_groups && Object.keys(pack.skill_groups).length > 0
       const skillCount = hasPacks
-        ? Object.values(kit.skill_packs!).reduce((sum, pack) => sum + (pack.skills?.length || 0), 0)
-        : (Array.isArray(kit.skills) ? kit.skills.length : 0)
-      const mcpCount = kit.mcp ? Object.keys(kit.mcp).length : 0
-      const pluginCount = Array.isArray(kit.plugins) ? kit.plugins.length : 0
+        ? Object.values(pack.skill_groups!).reduce((sum, pack) => sum + (pack.skills?.length || 0), 0)
+        : (Array.isArray(pack.skills) ? pack.skills.length : 0)
+      const mcpCount = pack.mcp ? Object.keys(pack.mcp).length : 0
+      const pluginCount = Array.isArray(pack.plugins) ? pack.plugins.length : 0
 
       process.stdout.write(EOL)
-      process.stdout.write(`  Name:         ${kit.name}` + EOL)
-      process.stdout.write(`  Description:  ${kit.description || "—"}` + EOL)
-      process.stdout.write(`  Version:      ${kit.version || "—"}` + EOL)
-      process.stdout.write(`  Author:       ${kit.author || "—"}` + EOL)
-      process.stdout.write(`  Tier:         ${kit.tier || "community"}` + EOL)
-      process.stdout.write(`  Location:     ${kit.location}` + EOL)
+      process.stdout.write(`  Name:         ${pack.name}` + EOL)
+      process.stdout.write(`  Description:  ${pack.description || "—"}` + EOL)
+      process.stdout.write(`  Version:      ${pack.version || "—"}` + EOL)
+      process.stdout.write(`  Author:       ${pack.author || "—"}` + EOL)
+      process.stdout.write(`  Tier:         ${pack.tier || "community"}` + EOL)
+      process.stdout.write(`  Location:     ${pack.location}` + EOL)
       process.stdout.write(EOL)
 
-      // Skill packs (if present, takes precedence over flat skills)
+      // Skill groups (if present, takes precedence over flat skills)
       if (hasPacks) {
-        const packs = Object.entries(kit.skill_packs!)
-        process.stdout.write(`  Skill Packs (${packs.length}):` + EOL)
+        const packs = Object.entries(pack.skill_groups!)
+        process.stdout.write(`  Skill Groups (${packs.length}):` + EOL)
         for (const [packName, pack] of packs) {
           const badge = pack.activation === "always" ? "●" : pack.activation === "detect" ? "◐" : "○"
           process.stdout.write(`    ${badge} ${packName} (${pack.activation}, ${pack.skills.length} skills)` + EOL)
@@ -395,7 +395,7 @@ const KitShowCommand = cmd({
         // Flat skills
         process.stdout.write(`  Skills (${skillCount}):` + EOL)
         if (skillCount > 0) {
-          for (const skill of kit.skills!) {
+          for (const skill of pack.skills!) {
             if (typeof skill === "string") {
               process.stdout.write(`    - ${skill}` + EOL)
             } else {
@@ -411,7 +411,7 @@ const KitShowCommand = cmd({
       // MCP servers
       process.stdout.write(`  MCP Servers (${mcpCount}):` + EOL)
       if (mcpCount > 0) {
-        for (const [serverName, serverConfig] of Object.entries(kit.mcp!)) {
+        for (const [serverName, serverConfig] of Object.entries(pack.mcp!)) {
           const desc = (serverConfig as Record<string, unknown>).description || ""
           process.stdout.write(`    - ${serverName}${desc ? `: ${desc}` : ""}` + EOL)
         }
@@ -422,7 +422,7 @@ const KitShowCommand = cmd({
       // Plugins
       process.stdout.write(`  Plugins (${pluginCount}):` + EOL)
       if (pluginCount > 0) {
-        for (const plugin of kit.plugins!) {
+        for (const plugin of pack.plugins!) {
           process.stdout.write(`    - ${plugin}` + EOL)
         }
       } else {
@@ -430,11 +430,11 @@ const KitShowCommand = cmd({
       }
 
       // Detection rules
-      const detectCount = Array.isArray(kit.detect) ? kit.detect.length : 0
+      const detectCount = Array.isArray(pack.detect) ? pack.detect.length : 0
       if (detectCount > 0) {
         process.stdout.write(EOL)
         process.stdout.write(`  Detection Rules (${detectCount}):` + EOL)
-        for (const rule of kit.detect!) {
+        for (const rule of pack.detect!) {
           const files = Array.isArray(rule.files) ? rule.files.join(", ") : "—"
           process.stdout.write(`    - files: [${files}]` + EOL)
           if (rule.message) {
@@ -444,18 +444,18 @@ const KitShowCommand = cmd({
       }
 
       // Instructions
-      if (kit.instructions) {
+      if (pack.instructions) {
         process.stdout.write(EOL + "─".repeat(60) + EOL + EOL)
         process.stdout.write(`Instructions:` + EOL + EOL)
-        process.stdout.write(kit.instructions + EOL)
+        process.stdout.write(pack.instructions + EOL)
       }
     })
   },
 })
 
-const KitInstallCommand = cmd({
+const PackInstallCommand = cmd({
   command: "install <source>",
-  describe: "install a kit from GitHub or a local path",
+  describe: "install a pack from GitHub or a local path",
   builder: (yargs) =>
     yargs
       .positional("source", {
@@ -481,8 +481,8 @@ const KitInstallCommand = cmd({
     await bootstrap(process.cwd(), async () => {
       const rootDir = Instance.worktree !== "/" ? Instance.worktree : Instance.directory
       const targetDir = isGlobal
-        ? path.join(Global.Path.config, "kits")
-        : path.join(rootDir, ".opencode", "kits")
+        ? path.join(Global.Path.config, "packs")
+        : path.join(rootDir, ".opencode", "packs")
 
       let fetchDir: string
       let cloned = false
@@ -500,9 +500,9 @@ const KitInstallCommand = cmd({
         return // unreachable but satisfies TS
       }
 
-      // Find all KIT.yaml / KIT.yml / KIT.md files
+      // Find all PACK.yaml / PACK.yml / PACK.md files
       const { Glob: BunGlob } = globalThis.Bun
-      const patterns = ["**/KIT.yaml", "**/KIT.yml", "**/KIT.md"]
+      const patterns = ["**/PACK.yaml", "**/PACK.yml", "**/PACK.md"]
       const matches: string[] = []
       for (const pattern of patterns) {
         const glob = new BunGlob(pattern)
@@ -512,7 +512,7 @@ const KitInstallCommand = cmd({
       }
 
       if (matches.length === 0) {
-        process.stderr.write(`Error: No KIT.yaml/KIT.yml/KIT.md files found in ${source}` + EOL)
+        process.stderr.write(`Error: No PACK.yaml/PACK.yml/PACK.md files found in ${source}` + EOL)
         await cleanupTmp(fetchDir, cloned)
         process.exit(1)
       }
@@ -520,45 +520,45 @@ const KitInstallCommand = cmd({
       let installed = 0
       const installedNames: string[] = []
 
-      for (const kitFile of matches) {
-        const kitParent = path.dirname(kitFile)
+      for (const packFile of matches) {
+        const packParent = path.dirname(packFile)
 
-        // Parse the YAML to get the kit name (don't rely on directory name)
-        let kitName: string
+        // Parse the YAML to get the pack name (don't rely on directory name)
+        let packName: string
         try {
           const matter = (await import("gray-matter")).default
-          const raw = await fs.readFile(kitFile, "utf-8")
-          const ext = path.extname(kitFile).toLowerCase()
+          const raw = await fs.readFile(packFile, "utf-8")
+          const ext = path.extname(packFile).toLowerCase()
           const parsed = ext === ".md" ? matter(raw) : matter("---\n" + raw + "\n---")
-          kitName = (parsed.data.name as string) || path.basename(kitParent)
+          packName = (parsed.data.name as string) || path.basename(packParent)
         } catch {
-          kitName = path.basename(kitParent)
+          packName = path.basename(packParent)
         }
 
-        // Avoid using temp dir names as kit names
-        if (kitName.startsWith("kit-install-")) {
-          process.stdout.write(`  ⚠ Skipping "${kitFile}" — could not determine kit name` + EOL)
+        // Avoid using temp dir names as pack names
+        if (packName.startsWith("pack-install-")) {
+          process.stdout.write(`  ⚠ Skipping "${packFile}" — could not determine pack name` + EOL)
           continue
         }
 
-        const dest = path.join(targetDir, kitName)
+        const dest = path.join(targetDir, packName)
 
         // Check if already installed
         try {
           await fs.access(dest)
-          process.stdout.write(`  ⚠ Skipping "${kitName}" — already exists` + EOL)
+          process.stdout.write(`  ⚠ Skipping "${packName}" — already exists` + EOL)
           continue
         } catch {
           // Not installed, proceed
         }
 
-        // Copy only the kit directory (not repo root — skip .git, node_modules, etc.)
+        // Copy only the pack directory (not repo root — skip .git, node_modules, etc.)
         await fs.mkdir(dest, { recursive: true })
-        const files = await fs.readdir(kitParent)
+        const files = await fs.readdir(packParent)
         for (const file of files) {
-          // Skip common non-kit files when copying from repo root
+          // Skip common non-pack files when copying from repo root
           if ([".git", "node_modules", ".github", "LICENSE", "README.md"].includes(file)) continue
-          const src = path.join(kitParent, file)
+          const src = path.join(packParent, file)
           const dst = path.join(dest, file)
           const stat = await fs.lstat(src)
           if (stat.isSymbolicLink()) continue
@@ -568,8 +568,8 @@ const KitInstallCommand = cmd({
             await fs.cp(src, dst, { recursive: true, dereference: false })
           }
         }
-        process.stdout.write(`  ✓ Installed "${kitName}" → ${path.relative(rootDir, dest)}` + EOL)
-        installedNames.push(kitName)
+        process.stdout.write(`  ✓ Installed "${packName}" → ${path.relative(rootDir, dest)}` + EOL)
+        installedNames.push(packName)
         installed++
       }
 
@@ -577,80 +577,80 @@ const KitInstallCommand = cmd({
 
       process.stdout.write(EOL)
       if (installed > 0) {
-        process.stdout.write(`${installed} kit(s) installed${isGlobal ? " globally" : ""}.` + EOL)
+        process.stdout.write(`${installed} pack(s) installed${isGlobal ? " globally" : ""}.` + EOL)
         // altimate_change start — telemetry
         try {
           Telemetry.track({
-            type: "kit_installed",
+            type: "pack_installed",
             timestamp: Date.now(),
             session_id: Telemetry.getContext().sessionId || "",
             install_source: source,
-            kit_count: installed,
-            kit_names: installedNames,
+            pack_count: installed,
+            pack_names: installedNames,
             source: "cli",
           })
         } catch {}
         // altimate_change end
       } else {
-        process.stdout.write(`No new kits installed.` + EOL)
+        process.stdout.write(`No new packs installed.` + EOL)
       }
     })
   },
 })
 
-// altimate_change start — kit: KitApplyCommand removed, functionality merged into KitActivateCommand
+// altimate_change start — pack: PackApplyCommand removed, functionality merged into PackActivateCommand
 // altimate_change end
 
-const KitRemoveCommand = cmd({
+const PackRemoveCommand = cmd({
   command: "remove <name>",
-  describe: "remove an installed kit",
+  describe: "remove an installed pack",
   builder: (yargs) =>
     yargs.positional("name", {
       type: "string",
-      describe: "name of the kit to remove",
+      describe: "name of the pack to remove",
       demandOption: true,
     }),
   async handler(args) {
     const name = args.name as string
     await bootstrap(process.cwd(), async () => {
-      const kit = await Kit.get(name)
-      if (!kit) {
-        process.stderr.write(`Error: Kit "${name}" not found.` + EOL)
+      const pack = await Pack.get(name)
+      if (!pack) {
+        process.stderr.write(`Error: Pack "${name}" not found.` + EOL)
         process.exit(1)
       }
 
-      // Check if kit is tracked by git (part of the repo, not user-installed)
-      const kitDir = path.dirname(kit.location)
-      const gitCheck = Bun.spawnSync(["git", "ls-files", "--error-unmatch", kit.location], {
-        cwd: path.dirname(kitDir),
+      // Check if pack is tracked by git (part of the repo, not user-installed)
+      const packDir = path.dirname(pack.location)
+      const gitCheck = Bun.spawnSync(["git", "ls-files", "--error-unmatch", pack.location], {
+        cwd: path.dirname(packDir),
         stdout: "pipe",
         stderr: "pipe",
       })
       if (gitCheck.exitCode === 0) {
         process.stderr.write(`Error: Cannot remove "${name}" — it is tracked by git.` + EOL)
-        process.stderr.write(`This kit is part of the repository, not user-installed.` + EOL)
+        process.stderr.write(`This pack is part of the repository, not user-installed.` + EOL)
         process.exit(1)
       }
 
-      // Safety: only remove if the directory looks like a kit directory
-      // (contains the KIT file and is not a top-level scan directory)
-      const kitBasename = path.basename(kitDir)
-      if (kitBasename === "kits" || kitBasename === "kit" || kitDir === Instance.directory) {
-        // The KIT.yaml is at a scan root — only remove the file, not the directory
-        await fs.rm(kit.location, { force: true })
-        process.stdout.write(`  ✓ Removed kit file: ${kit.location}` + EOL)
+      // Safety: only remove if the directory looks like a pack directory
+      // (contains the PACK file and is not a top-level scan directory)
+      const packBasename = path.basename(packDir)
+      if (packBasename === "packs" || packBasename === "pack" || packDir === Instance.directory) {
+        // The PACK.yaml is at a scan root — only remove the file, not the directory
+        await fs.rm(pack.location, { force: true })
+        process.stdout.write(`  ✓ Removed pack file: ${pack.location}` + EOL)
       } else {
-        await fs.rm(kitDir, { recursive: true, force: true })
-        process.stdout.write(`  ✓ Removed kit: ${kitDir}` + EOL)
+        await fs.rm(packDir, { recursive: true, force: true })
+        process.stdout.write(`  ✓ Removed pack: ${packDir}` + EOL)
       }
 
       // Deactivate if active, then invalidate cache
-      await Kit.deactivate(name)
-      Kit.invalidate()
+      await Pack.deactivate(name)
+      Pack.invalidate()
 
-      // altimate_change start — kit: clean up instruction file on remove
+      // altimate_change start — pack: clean up instruction file on remove
       const rootDir = Instance.worktree !== "/" ? Instance.worktree : Instance.directory
-      const instructionsFile = path.join(rootDir, ".opencode", "instructions", `kit-${name}.md`)
+      const instructionsFile = path.join(rootDir, ".opencode", "instructions", `pack-${name}.md`)
       try {
         await fs.access(instructionsFile)
         await fs.rm(instructionsFile, { force: true })
@@ -663,67 +663,67 @@ const KitRemoveCommand = cmd({
       // altimate_change start — telemetry
       try {
         Telemetry.track({
-          type: "kit_removed",
+          type: "pack_removed",
           timestamp: Date.now(),
           session_id: Telemetry.getContext().sessionId || "",
-          kit_name: name,
+          pack_name: name,
           source: "cli",
         })
       } catch {}
       // altimate_change end
 
-      process.stdout.write(EOL + `Kit "${name}" removed.` + EOL)
+      process.stdout.write(EOL + `Pack "${name}" removed.` + EOL)
     })
   },
 })
 
-const KitDetectCommand = cmd({
+const PackDetectCommand = cmd({
   command: "detect",
-  describe: "auto-detect which kits match the current project",
+  describe: "auto-detect which packs match the current project",
   builder: (yargs) => yargs,
   async handler() {
     await bootstrap(process.cwd(), async () => {
-      const detected = await Kit.detect()
+      const detected = await Pack.detect()
 
       if (detected.length === 0) {
-        process.stdout.write("No matching kits detected for this project." + EOL)
-        process.stdout.write(EOL + `Browse available kits: altimate-code kit list` + EOL)
+        process.stdout.write("No matching packs detected for this project." + EOL)
+        process.stdout.write(EOL + `Browse available packs: altimate-code pack list` + EOL)
         return
       }
 
       process.stdout.write(EOL)
-      process.stdout.write(`Detected ${detected.length} matching kit(s):` + EOL + EOL)
+      process.stdout.write(`Detected ${detected.length} matching pack(s):` + EOL + EOL)
 
       for (const match of detected) {
-        process.stdout.write(`  ${match.kit.name}` + EOL)
-        if (match.kit.description) {
-          process.stdout.write(`    ${match.kit.description}` + EOL)
+        process.stdout.write(`  ${match.pack.name}` + EOL)
+        if (match.pack.description) {
+          process.stdout.write(`    ${match.pack.description}` + EOL)
         }
         if (match.matched && match.matched.length > 0) {
           process.stdout.write(`    Matched files: ${match.matched.join(", ")}` + EOL)
         }
         // Show the first detection rule that has a message
-        const firstRuleWithMessage = match.kit.detect?.find((d) => d.message)
+        const firstRuleWithMessage = match.pack.detect?.find((d) => d.message)
         if (firstRuleWithMessage?.message) {
           process.stdout.write(`    ${firstRuleWithMessage.message}` + EOL)
         }
         process.stdout.write(EOL)
       }
 
-      process.stdout.write(`Activate a kit: altimate-code kit activate <name>` + EOL)
+      process.stdout.write(`Activate a pack: altimate-code pack activate <name>` + EOL)
     })
   },
 })
 
-// altimate_change start — kit: activate subcommand (merged apply + activate into one command)
-const KitActivateCommand = cmd({
+// altimate_change start — pack: activate subcommand (merged apply + activate into one command)
+const PackActivateCommand = cmd({
   command: "activate <name>",
-  describe: "activate a kit — install skills, configure MCP, and enable for this project",
+  describe: "activate a pack — install skills, configure MCP, and enable for this project",
   builder: (yargs) =>
     yargs
       .positional("name", {
         type: "string",
-        describe: "name of the kit to activate",
+        describe: "name of the pack to activate",
         demandOption: true,
       })
       .option("yes", {
@@ -735,29 +735,29 @@ const KitActivateCommand = cmd({
   async handler(args) {
     const name = args.name as string
     await bootstrap(process.cwd(), async () => {
-      const kit = await Kit.get(name)
-      if (!kit) {
-        process.stderr.write(`Error: Kit "${name}" not found. Install it first with: altimate-code kit install <source>` + EOL)
+      const pack = await Pack.get(name)
+      if (!pack) {
+        process.stderr.write(`Error: Pack "${name}" not found. Install it first with: altimate-code pack install <source>` + EOL)
         process.exit(1)
       }
 
       const rootDir = Instance.worktree !== "/" ? Instance.worktree : Instance.directory
-      const tier = kit.tier || "community"
+      const tier = pack.tier || "community"
       const tierBadge = tier !== "community" ? ` [${tier}]` : ""
 
-      // Get all skills — from skill_packs if present, otherwise flat skills
-      const allSkills = (kit.skill_packs && Object.keys(kit.skill_packs).length > 0)
-        ? Kit.allSkillsFromPacks(kit)
-        : (kit.skills || [])
+      // Get all skills — from skill_groups if present, otherwise flat skills
+      const allSkills = (pack.skill_groups && Object.keys(pack.skill_groups).length > 0)
+        ? Pack.allSkillsFromGroups(pack)
+        : (pack.skills || [])
       const skillCount = allSkills.length
-      const mcpCount = kit.mcp ? Object.keys(kit.mcp).length : 0
-      const pluginCount = Array.isArray(kit.plugins) ? kit.plugins.length : 0
-      const hasInstructions = !!kit.instructions && !kit.instructions.startsWith("TODO")
+      const mcpCount = pack.mcp ? Object.keys(pack.mcp).length : 0
+      const pluginCount = Array.isArray(pack.plugins) ? pack.plugins.length : 0
+      const hasInstructions = !!pack.instructions && !pack.instructions.startsWith("TODO")
 
       // --- Preview ---
       process.stdout.write(EOL)
-      process.stdout.write(`Kit: ${kit.name}${tierBadge} (v${kit.version || "0.0.0"})` + EOL)
-      process.stdout.write(`${kit.description || ""}` + EOL)
+      process.stdout.write(`Pack: ${pack.name}${tierBadge} (v${pack.version || "0.0.0"})` + EOL)
+      process.stdout.write(`${pack.description || ""}` + EOL)
       process.stdout.write(EOL + "The following changes will be applied:" + EOL + EOL)
 
       if (skillCount > 0) {
@@ -775,7 +775,7 @@ const KitActivateCommand = cmd({
 
       if (mcpCount > 0) {
         process.stdout.write(`  MCP Servers (${mcpCount}):` + EOL)
-        for (const [serverName, serverConfig] of Object.entries(kit.mcp!)) {
+        for (const [serverName, serverConfig] of Object.entries(pack.mcp!)) {
           const desc = (serverConfig as Record<string, unknown>).description || ""
           process.stdout.write(`    + ${serverName}${desc ? ` — ${desc}` : ""}` + EOL)
         }
@@ -784,21 +784,21 @@ const KitActivateCommand = cmd({
 
       if (hasInstructions) {
         process.stdout.write(`  Instructions:` + EOL)
-        process.stdout.write(`    + .opencode/instructions/kit-${name}.md` + EOL)
+        process.stdout.write(`    + .opencode/instructions/pack-${name}.md` + EOL)
         process.stdout.write(EOL)
       }
 
       if (skillCount === 0 && mcpCount === 0 && pluginCount === 0 && !hasInstructions) {
-        // Still activate (add to active-kits) even if empty — user explicitly asked
-        await Kit.activate(name)
-        Kit.invalidate()
-        process.stdout.write(`Kit "${name}" activated (no changes to apply — kit is empty).` + EOL)
+        // Still activate (add to active-packs) even if empty — user explicitly asked
+        await Pack.activate(name)
+        Pack.invalidate()
+        process.stdout.write(`Pack "${name}" activated (no changes to apply — pack is empty).` + EOL)
         return
       }
 
       // --- Confirmation ---
       if (!args.yes) {
-        process.stdout.write(`Activate this kit? [y/N] `)
+        process.stdout.write(`Activate this pack? [y/N] `)
         const response = await new Promise<string>((resolve) => {
           let data = ""
           const onData = (chunk: Buffer) => {
@@ -826,7 +826,7 @@ const KitActivateCommand = cmd({
 
       process.stdout.write(EOL)
 
-      // altimate_change start — kit: track skill install failures for accurate status message
+      // altimate_change start — pack: track skill install failures for accurate status message
       let skillFailures = 0
       // altimate_change end
 
@@ -902,12 +902,12 @@ const KitActivateCommand = cmd({
         const missingEnvKeys: string[] = []
 
         if (mcpCount > 0) {
-          for (const [serverName, serverDef] of Object.entries(kit.mcp!)) {
+          for (const [serverName, serverDef] of Object.entries(pack.mcp!)) {
             const def = serverDef as Record<string, unknown>
-            const kitType = (def.type as string) || "stdio"
+            const packType = (def.type as string) || "stdio"
             let configEntry: Record<string, unknown>
 
-            if (kitType === "sse" || kitType === "streamable-http" || kitType === "remote") {
+            if (packType === "sse" || packType === "streamable-http" || packType === "remote") {
               configEntry = { type: "remote", url: def.url as string, ...(def.headers ? { headers: def.headers } : {}) }
             } else {
               const command = [...((def.command as string[]) || []), ...((def.args as string[]) || [])]
@@ -932,7 +932,7 @@ const KitActivateCommand = cmd({
           const { config } = await findConfigFile(rootDir)
           const plugins = (config.plugin ?? []) as string[]
           let changed = false
-          for (const plugin of kit.plugins!) {
+          for (const plugin of pack.plugins!) {
             if (!plugins.includes(plugin)) {
               plugins.push(plugin)
               changed = true
@@ -959,32 +959,32 @@ const KitActivateCommand = cmd({
       // --- 3. Add instructions ---
       if (hasInstructions) {
         const instructionsDir = path.join(rootDir, ".opencode", "instructions")
-        const instructionsFile = path.join(instructionsDir, `kit-${name}.md`)
+        const instructionsFile = path.join(instructionsDir, `pack-${name}.md`)
         await fs.mkdir(instructionsDir, { recursive: true })
-        await fs.writeFile(instructionsFile, kit.instructions!, "utf-8")
+        await fs.writeFile(instructionsFile, pack.instructions!, "utf-8")
         process.stdout.write(`  ✓ Created instructions: ${path.relative(rootDir, instructionsFile)}` + EOL)
       }
 
-      // --- 4. Activate (add to active-kits) ---
-      await Kit.activate(name)
-      Kit.invalidate()
+      // --- 4. Activate (add to active-packs) ---
+      await Pack.activate(name)
+      Pack.invalidate()
 
       process.stdout.write(EOL)
-      // altimate_change start — kit: report partial failures in activation message
+      // altimate_change start — pack: report partial failures in activation message
       if (skillFailures > 0) {
-        process.stdout.write(`Kit "${name}" activated with ${skillFailures} skill source(s) unavailable.` + EOL)
-        process.stdout.write(`Run 'altimate-code kit show ${name}' to see expected skills.` + EOL)
+        process.stdout.write(`Pack "${name}" activated with ${skillFailures} skill source(s) unavailable.` + EOL)
+        process.stdout.write(`Run 'altimate-code pack show ${name}' to see expected skills.` + EOL)
       } else {
-        process.stdout.write(`Kit "${name}" activated successfully.` + EOL)
+        process.stdout.write(`Pack "${name}" activated successfully.` + EOL)
       }
       // altimate_change end
 
       try {
         Telemetry.track({
-          type: "kit_applied",
+          type: "pack_applied",
           timestamp: Date.now(),
           session_id: Telemetry.getContext().sessionId || "",
-          kit_name: name,
+          pack_name: name,
           skill_count: skillCount,
           mcp_count: mcpCount,
           plugin_count: pluginCount,
@@ -997,29 +997,29 @@ const KitActivateCommand = cmd({
 })
 // altimate_change end
 
-// altimate_change start — kit: deactivate subcommand
-const KitDeactivateCommand = cmd({
+// altimate_change start — pack: deactivate subcommand
+const PackDeactivateCommand = cmd({
   command: "deactivate <name>",
-  describe: "deactivate a kit for the current project",
+  describe: "deactivate a pack for the current project",
   builder: (yargs) =>
     yargs.positional("name", {
       type: "string",
-      describe: "name of the kit to deactivate",
+      describe: "name of the pack to deactivate",
       demandOption: true,
     }),
   async handler(args) {
     const name = args.name as string
     await bootstrap(process.cwd(), async () => {
-      // Read kit BEFORE deactivating so we know what MCP servers to clean
-      const kit = await Kit.get(name)
+      // Read pack BEFORE deactivating so we know what MCP servers to clean
+      const pack = await Pack.get(name)
 
-      await Kit.deactivate(name)
-      process.stdout.write(`✓ Deactivated kit: ${name}` + EOL)
+      await Pack.deactivate(name)
+      process.stdout.write(`✓ Deactivated pack: ${name}` + EOL)
 
       const rootDir = Instance.worktree !== "/" ? Instance.worktree : Instance.directory
 
-      // altimate_change start — kit: clean up instruction file on deactivate
-      const instructionsFile = path.join(rootDir, ".opencode", "instructions", `kit-${name}.md`)
+      // altimate_change start — pack: clean up instruction file on deactivate
+      const instructionsFile = path.join(rootDir, ".opencode", "instructions", `pack-${name}.md`)
       try {
         await fs.access(instructionsFile)
         await fs.rm(instructionsFile, { force: true })
@@ -1027,12 +1027,12 @@ const KitDeactivateCommand = cmd({
       } catch {}
       // altimate_change end
 
-      // altimate_change start — kit: clean up MCP config entries added by this kit (JSONC-preserving)
-      if (kit?.mcp && Object.keys(kit.mcp).length > 0) {
+      // altimate_change start — pack: clean up MCP config entries added by this pack (JSONC-preserving)
+      if (pack?.mcp && Object.keys(pack.mcp).length > 0) {
         try {
           const { filePath } = await findConfigFile(rootDir)
           let removed = 0
-          for (const serverName of Object.keys(kit.mcp)) {
+          for (const serverName of Object.keys(pack.mcp)) {
             if (await removeConfigField(filePath, ["mcp", serverName])) {
               removed++
             }
@@ -1048,12 +1048,12 @@ const KitDeactivateCommand = cmd({
 })
 // altimate_change end
 
-// altimate_change start — kit: search subcommand
+// altimate_change start — pack: search subcommand
 const REGISTRY_URL = "https://raw.githubusercontent.com/AltimateAI/data-engineering-skills/main/registry.json"
 
-const KitSearchCommand = cmd({
+const PackSearchCommand = cmd({
   command: "search [query]",
-  describe: "search the kit registry",
+  describe: "search the pack registry",
   builder: (yargs) =>
     yargs
       .positional("query", {
@@ -1069,9 +1069,9 @@ const KitSearchCommand = cmd({
     const query = ((args.query as string) || "").toLowerCase().trim()
 
     await bootstrap(process.cwd(), async () => {
-      process.stdout.write(`Searching kit registry...` + EOL)
+      process.stdout.write(`Searching pack registry...` + EOL)
 
-      // altimate_change start — kit: graceful 404 + timeout for registry fetch
+      // altimate_change start — pack: graceful 404 + timeout for registry fetch
       let registry: any
       const controller = new AbortController()
       const timeout = setTimeout(() => controller.abort(), 5000)
@@ -1080,9 +1080,9 @@ const KitSearchCommand = cmd({
         clearTimeout(timeout)
         if (!response.ok) {
           if (response.status === 404) {
-            process.stdout.write(`Kit registry not available yet.` + EOL)
-            process.stdout.write(EOL + `Browse local kits: altimate-code kit list` + EOL)
-            process.stdout.write(`Create your own: altimate-code kit create <name>` + EOL)
+            process.stdout.write(`Pack registry not available yet.` + EOL)
+            process.stdout.write(EOL + `Browse local packs: altimate-code pack list` + EOL)
+            process.stdout.write(`Create your own: altimate-code pack create <name>` + EOL)
             return
           }
           process.stderr.write(`Error: Failed to fetch registry (${response.status})` + EOL)
@@ -1092,16 +1092,16 @@ const KitSearchCommand = cmd({
       } catch (err) {
         clearTimeout(timeout)
         if ((err as Error).name === "AbortError") {
-          process.stdout.write(`Kit registry unavailable (timeout).` + EOL)
+          process.stdout.write(`Pack registry unavailable (timeout).` + EOL)
         } else {
           process.stderr.write(`Error: Failed to fetch registry: ${(err as Error).message}` + EOL)
         }
-        process.stdout.write(EOL + `Browse local kits: altimate-code kit list` + EOL)
+        process.stdout.write(EOL + `Browse local packs: altimate-code pack list` + EOL)
         process.exit(1)
       }
       // altimate_change end
 
-      const kits = (registry.kits || []) as Array<{
+      const packs = (registry.packs || []) as Array<{
         name: string
         description: string
         version: string
@@ -1116,11 +1116,11 @@ const KitSearchCommand = cmd({
 
       // Filter by query
       const results = query
-        ? kits.filter((r) => {
+        ? packs.filter((r) => {
             const searchable = [r.name, r.description, ...(r.tags || []), r.author || ""].join(" ").toLowerCase()
             return searchable.includes(query)
           })
-        : kits
+        : packs
 
       if (args.json) {
         process.stdout.write(JSON.stringify(results, null, 2) + EOL)
@@ -1128,7 +1128,7 @@ const KitSearchCommand = cmd({
       }
 
       if (results.length === 0) {
-        process.stdout.write(`No kits found${query ? ` matching "${query}"` : ""}.` + EOL)
+        process.stdout.write(`No packs found${query ? ` matching "${query}"` : ""}.` + EOL)
         return
       }
 
@@ -1136,15 +1136,15 @@ const KitSearchCommand = cmd({
       const nameWidth = Math.max(6, ...results.map((r) => r.name.length))
       const tierWidth = 10
 
-      const header = `${"KIT".padEnd(nameWidth)}  ${"TIER".padEnd(tierWidth)}  DESCRIPTION`
+      const header = `${"PACK".padEnd(nameWidth)}  ${"TIER".padEnd(tierWidth)}  DESCRIPTION`
       const separator = "─".repeat(header.length)
 
       process.stdout.write(EOL)
       process.stdout.write(header + EOL)
       process.stdout.write(separator + EOL)
 
-      for (const kit of results) {
-        let desc = kit.description || ""
+      for (const pack of results) {
+        let desc = pack.description || ""
         if (desc.length > 50) {
           desc = desc.slice(0, 50)
           const lastSpace = desc.lastIndexOf(" ")
@@ -1152,50 +1152,50 @@ const KitSearchCommand = cmd({
           desc += "..."
         }
 
-        const tier = kit.tier || "community"
-        process.stdout.write(`${kit.name.padEnd(nameWidth)}  ${tier.padEnd(tierWidth)}  ${desc}` + EOL)
+        const tier = pack.tier || "community"
+        process.stdout.write(`${pack.name.padEnd(nameWidth)}  ${tier.padEnd(tierWidth)}  ${desc}` + EOL)
       }
 
       process.stdout.write(EOL)
-      process.stdout.write(`${results.length} kit(s) found in registry.` + EOL)
-      process.stdout.write(`Install with: altimate-code kit install <repo>` + EOL)
+      process.stdout.write(`${results.length} pack(s) found in registry.` + EOL)
+      process.stdout.write(`Install with: altimate-code pack install <repo>` + EOL)
     })
   },
 })
 // altimate_change end
 
-// altimate_change start — kit: status subcommand
-const KitStatusCommand = cmd({
+// altimate_change start — pack: status subcommand
+const PackStatusCommand = cmd({
   command: "status",
-  describe: "show active kits for the current project",
+  describe: "show active packs for the current project",
   builder: (yargs) => yargs,
   async handler() {
     await bootstrap(process.cwd(), async () => {
-      const activeKits = await Kit.active()
+      const activePacks = await Pack.active()
 
-      if (activeKits.length === 0) {
-        process.stdout.write("No active kits for this project." + EOL)
-        process.stdout.write(EOL + `Activate one: altimate-code kit activate <name>` + EOL)
-        process.stdout.write(`Auto-detect: altimate-code kit detect` + EOL)
+      if (activePacks.length === 0) {
+        process.stdout.write("No active packs for this project." + EOL)
+        process.stdout.write(EOL + `Activate one: altimate-code pack activate <name>` + EOL)
+        process.stdout.write(`Auto-detect: altimate-code pack detect` + EOL)
         return
       }
 
       process.stdout.write(EOL)
-      process.stdout.write(`Active kits (${activeKits.length}):` + EOL + EOL)
+      process.stdout.write(`Active packs (${activePacks.length}):` + EOL + EOL)
 
-      for (const kit of activeKits) {
-        const tier = kit.tier || "community"
+      for (const pack of activePacks) {
+        const tier = pack.tier || "community"
         const tierBadge = tier !== "community" ? ` [${tier}]` : ""
-        process.stdout.write(`  ${kit.name}${tierBadge}` + EOL)
-        if (kit.description) {
-          process.stdout.write(`    ${kit.description}` + EOL)
+        process.stdout.write(`  ${pack.name}${tierBadge}` + EOL)
+        if (pack.description) {
+          process.stdout.write(`    ${pack.description}` + EOL)
         }
 
-        // Show skill packs if any
-        if (kit.skill_packs && Object.keys(kit.skill_packs).length > 0) {
-          for (const [packName, pack] of Object.entries(kit.skill_packs)) {
-            const badge = pack.activation === "always" ? "●" : pack.activation === "detect" ? "◐" : "○"
-            process.stdout.write(`    ${badge} ${packName} (${pack.activation}, ${pack.skills.length} skills)` + EOL)
+        // Show skill groups if any
+        if (pack.skill_groups && Object.keys(pack.skill_groups).length > 0) {
+          for (const [groupName, group] of Object.entries(pack.skill_groups)) {
+            const badge = group.activation === "always" ? "●" : group.activation === "detect" ? "◐" : "○"
+            process.stdout.write(`    ${badge} ${groupName} (${group.activation}, ${group.skills.length} skills)` + EOL)
           }
         }
 
@@ -1206,26 +1206,26 @@ const KitStatusCommand = cmd({
 })
 // altimate_change end
 
-// altimate_change start — kit: validate subcommand
-const KitValidateCommand = cmd({
+// altimate_change start — pack: validate subcommand
+const PackValidateCommand = cmd({
   command: "validate [name]",
-  describe: "validate a kit's YAML format and references",
+  describe: "validate a pack's YAML format and references",
   builder: (yargs) =>
     yargs.positional("name", {
       type: "string",
-      describe: "name of the kit to validate (defaults to all)",
+      describe: "name of the pack to validate (defaults to all)",
     }),
   async handler(args) {
     const targetName = args.name as string | undefined
     await bootstrap(process.cwd(), async () => {
-      const kits = targetName ? [await Kit.get(targetName)].filter(Boolean) : await Kit.all()
+      const packs = targetName ? [await Pack.get(targetName)].filter(Boolean) : await Pack.all()
 
-      if (kits.length === 0) {
+      if (packs.length === 0) {
         if (targetName) {
-          process.stderr.write(`Error: Kit "${targetName}" not found.` + EOL)
+          process.stderr.write(`Error: Pack "${targetName}" not found.` + EOL)
           process.exit(1)
         }
-        process.stdout.write("No kits to validate." + EOL)
+        process.stdout.write("No packs to validate." + EOL)
         return
       }
 
@@ -1234,34 +1234,34 @@ const KitValidateCommand = cmd({
       const fail = (msg: string) => { process.stdout.write(`  ✗ ${msg}` + EOL); hasErrors = true }
       const warn = (msg: string) => process.stdout.write(`  ⚠ ${msg}` + EOL)
 
-      for (const kit of kits as Kit.Info[]) {
-        process.stdout.write(EOL + `Validating: ${kit.name}` + EOL + EOL)
+      for (const pack of packs as Pack.Info[]) {
+        process.stdout.write(EOL + `Validating: ${pack.name}` + EOL + EOL)
 
         // 1. Name format
-        if (/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/.test(kit.name)) {
-          pass(`Name "${kit.name}" is valid`)
+        if (/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/.test(pack.name)) {
+          pass(`Name "${pack.name}" is valid`)
         } else {
-          fail(`Name "${kit.name}" has invalid format (must be lowercase, hyphens, 2+ chars)`)
+          fail(`Name "${pack.name}" has invalid format (must be lowercase, hyphens, 2+ chars)`)
         }
 
         // 2. Description
-        if (kit.description && !kit.description.startsWith("TODO")) {
+        if (pack.description && !pack.description.startsWith("TODO")) {
           pass(`Description present`)
         } else {
           warn(`Description is missing or starts with TODO`)
         }
 
         // 3. Version
-        if (kit.version && /^\d+\.\d+\.\d+/.test(kit.version)) {
-          pass(`Version "${kit.version}" is valid semver`)
+        if (pack.version && /^\d+\.\d+\.\d+/.test(pack.version)) {
+          pass(`Version "${pack.version}" is valid semver`)
         } else {
-          warn(`Version "${kit.version || "(none)"}" may not be valid semver`)
+          warn(`Version "${pack.version || "(none)"}" may not be valid semver`)
         }
 
         // 4. Skills references
-        const allSkills = (kit.skill_packs && Object.keys(kit.skill_packs).length > 0)
-          ? Kit.allSkillsFromPacks(kit)
-          : (kit.skills || [])
+        const allSkills = (pack.skill_groups && Object.keys(pack.skill_groups).length > 0)
+          ? Pack.allSkillsFromGroups(pack)
+          : (pack.skills || [])
         if (allSkills.length > 0) {
           pass(`${allSkills.length} skill source(s) defined`)
           for (const skill of allSkills) {
@@ -1280,8 +1280,8 @@ const KitValidateCommand = cmd({
         }
 
         // 5. MCP servers
-        if (kit.mcp && Object.keys(kit.mcp).length > 0) {
-          for (const [name, config] of Object.entries(kit.mcp)) {
+        if (pack.mcp && Object.keys(pack.mcp).length > 0) {
+          for (const [name, config] of Object.entries(pack.mcp)) {
             const cfg = config as Record<string, unknown>
             const type = (cfg.type as string) || "stdio"
             if (type === "stdio" || type === "local") {
@@ -1312,15 +1312,15 @@ const KitValidateCommand = cmd({
         }
 
         // 6. Detection rules
-        if (kit.detect && kit.detect.length > 0) {
-          pass(`${kit.detect.length} detection rule(s) defined`)
+        if (pack.detect && pack.detect.length > 0) {
+          pass(`${pack.detect.length} detection rule(s) defined`)
         } else {
-          warn(`No detection rules — kit won't appear in 'kit detect'`)
+          warn(`No detection rules — pack won't appear in 'pack detect'`)
         }
 
         // 7. Instructions
-        if (kit.instructions && !kit.instructions.startsWith("TODO")) {
-          pass(`Instructions present (${kit.instructions.split("\n").length} lines)`)
+        if (pack.instructions && !pack.instructions.startsWith("TODO")) {
+          pass(`Instructions present (${pack.instructions.split("\n").length} lines)`)
         } else {
           warn(`Instructions missing or placeholder`)
         }
@@ -1339,26 +1339,26 @@ const KitValidateCommand = cmd({
 // altimate_change end
 
 // ---------------------------------------------------------------------------
-// Top-level kit command
+// Top-level pack command
 // ---------------------------------------------------------------------------
 
-export const KitCommand = cmd({
-  command: "kit",
-  describe: "manage kits — bundles of skills, MCP servers, and plugins",
+export const PackCommand = cmd({
+  command: "pack",
+  describe: "manage packs — bundles of skills, MCP servers, and plugins",
   builder: (yargs) =>
     yargs
-      .command(KitListCommand)
-      .command(KitCreateCommand)
-      .command(KitShowCommand)
-      .command(KitInstallCommand)
-      .command(KitRemoveCommand)
-      .command(KitDetectCommand)
-      // altimate_change start — kit: register new subcommands
-      .command(KitActivateCommand)
-      .command(KitDeactivateCommand)
-      .command(KitSearchCommand)
-      .command(KitStatusCommand)
-      .command(KitValidateCommand)
+      .command(PackListCommand)
+      .command(PackCreateCommand)
+      .command(PackShowCommand)
+      .command(PackInstallCommand)
+      .command(PackRemoveCommand)
+      .command(PackDetectCommand)
+      // altimate_change start — pack: register new subcommands
+      .command(PackActivateCommand)
+      .command(PackDeactivateCommand)
+      .command(PackSearchCommand)
+      .command(PackStatusCommand)
+      .command(PackValidateCommand)
       // altimate_change end
       .demandCommand(),
   async handler() {},

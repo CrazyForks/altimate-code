@@ -440,28 +440,28 @@ export namespace Telemetry {
         source: "cli" | "tui"
       }
     // altimate_change end
-    // altimate_change start — kit: telemetry events for kit management
+    // altimate_change start — pack: telemetry events for pack management
     | {
-        type: "kit_created"
+        type: "pack_created"
         timestamp: number
         session_id: string
-        kit_name: string
+        pack_name: string
         source: "cli" | "tui"
       }
     | {
-        type: "kit_installed"
+        type: "pack_installed"
         timestamp: number
         session_id: string
         install_source: string
-        kit_count: number
-        kit_names: string[]
+        pack_count: number
+        pack_names: string[]
         source: "cli" | "tui"
       }
     | {
-        type: "kit_applied"
+        type: "pack_applied"
         timestamp: number
         session_id: string
-        kit_name: string
+        pack_name: string
         skill_count: number
         mcp_count: number
         plugin_count: number
@@ -469,10 +469,10 @@ export namespace Telemetry {
         source: "cli" | "tui"
       }
     | {
-        type: "kit_removed"
+        type: "pack_removed"
         timestamp: number
         session_id: string
-        kit_name: string
+        pack_name: string
         source: "cli" | "tui"
       }
     // altimate_change end

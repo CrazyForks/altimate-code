@@ -38,13 +38,13 @@ Set up your warehouses, LLM providers, and preferences. For agents, tools, skill
 
     [:octicons-arrow-right-24: MCP Servers](mcp-servers.md) · [:octicons-arrow-right-24: ACP Support](acp.md)
 
--   :material-package-variant:{ .lg .middle } **Kits**
+-   :material-package-variant:{ .lg .middle } **Packs**
 
     ---
 
-    Bundles of skills, MCP servers, and instructions. Activate a kit to get a complete development setup for dbt, Snowflake, Dagster, and more.
+    Bundles of skills, MCP servers, and instructions. Activate a pack to get a complete development setup for dbt, Snowflake, Dagster, and more.
 
-    [:octicons-arrow-right-24: Kits](kits.md)
+    [:octicons-arrow-right-24: Packs](packs.md)
 
 -   :material-palette:{ .lg .middle } **Appearance**
 

@@ -1,29 +1,29 @@
-# Building Kits
+# Building Packs
 
-This guide is for anyone who wants to **create and distribute kits** — vendors, solution architects, team leads, or community contributors. For using kits, see [Configure > Kits](../configure/kits.md).
+This guide is for anyone who wants to **create and distribute packs** — vendors, solution architects, team leads, or community contributors. For using packs, see [Configure > Packs](../configure/packs.md).
 
-## What's in a Kit?
+## What's in a Pack?
 
-A kit is a `KIT.yaml` file that bundles:
+A pack is a `PACK.yaml` file that bundles:
 
 - **Skills** — teach the AI how to approach tasks (from any Git repo)
 - **MCP servers** — give the AI tools to execute tasks (standard MCP protocol)
 - **Instructions** — project-specific rules injected into every conversation
-- **Detection rules** — auto-suggest the kit when matching files exist
+- **Detection rules** — auto-suggest the pack when matching files exist
 
-## Tutorial: Build Your First Kit in 5 Minutes
+## Tutorial: Build Your First Pack in 5 Minutes
 
 ### Step 1: Scaffold
 
 ```bash
-altimate-code kit create my-first-kit
+altimate-code pack create my-first-pack
 ```
 
-This creates `.opencode/kits/my-first-kit/KIT.yaml`:
+This creates `.opencode/packs/my-first-pack/PACK.yaml`:
 
 ```yaml
-name: my-first-kit
-description: TODO — describe what this kit configures
+name: my-first-pack
+description: TODO — describe what this pack configures
 version: 1.0.0
 
 skills:
@@ -37,7 +37,7 @@ mcp:
 
 detect:
   # - files: ["config.yaml"]
-  #   message: "Detected my-tool — activate kit?"
+  #   message: "Detected my-tool — activate pack?"
 
 instructions: |
   TODO — add project-specific instructions here.
@@ -70,7 +70,7 @@ mcp:
 
 detect:
   - files: ["dbt_project.yml"]
-    message: "Detected dbt project — activate ACME data team kit?"
+    message: "Detected dbt project — activate ACME data team pack?"
 
 instructions: |
   ## ACME Data Team Conventions
@@ -85,14 +85,14 @@ instructions: |
 ### Step 3: Validate
 
 ```bash
-altimate-code kit validate my-first-kit
+altimate-code pack validate my-first-pack
 ```
 
 Output:
 ```
-Validating: my-first-kit
+Validating: my-first-pack
 
-  ✓ Name "my-first-kit" is valid
+  ✓ Name "my-first-pack" is valid
   ✓ Description present
   ✓ Version "1.0.0" is valid semver
   ✓ 1 skill source(s) defined
@@ -107,25 +107,25 @@ Validation: PASS
 ### Step 4: Activate
 
 ```bash
-altimate-code kit activate my-first-kit
+altimate-code pack activate my-first-pack
 ```
 
 ### Step 5: Share
 
-Commit the kit to your repo. Others install with:
+Commit the pack to your repo. Others install with:
 
 ```bash
-altimate-code kit install owner/repo
+altimate-code pack install owner/repo
 ```
 
-## KIT.yaml Schema Reference
+## PACK.yaml Schema Reference
 
 ### Required Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `name` | string | Lowercase, hyphens, 2-64 chars. Must match `^[a-z][a-z0-9]*(-[a-z0-9]+)*$` |
-| `description` | string | One-line summary of what the kit configures |
+| `description` | string | One-line summary of what the pack configures |
 
 ### Optional Fields
 
@@ -135,11 +135,11 @@ altimate-code kit install owner/repo
 | `author` | string | — | Author name or organization |
 | `tier` | string | `"community"` | Trust tier: `built-in`, `verified`, `community`, `archived` |
 | `skills` | array | `[]` | Skills to install (see below) |
-| `skill_packs` | object | `{}` | Grouped skills with activation modes (see below) |
+| `skill_groups` | object | `{}` | Grouped skills with activation modes (see below) |
 | `mcp` | object | `{}` | MCP servers to configure (see below) |
 | `plugins` | array | `[]` | npm packages to install |
 | `instructions` | string | — | Text injected into every AI conversation |
-| `detect` | array | `[]` | File patterns that trigger kit suggestion |
+| `detect` | array | `[]` | File patterns that trigger pack suggestion |
 
 ### Skills
 
@@ -165,12 +165,12 @@ The `source` field accepts:
 - Full URL: `https://github.com/owner/repo`
 - Local path: `./my-skills`
 
-### Skill Packs
+### Skill Groups
 
-For kits with many skills, organize them into packs with activation modes:
+For packs with many skills, organize them into packs with activation modes:
 
 ```yaml
-skill_packs:
+skill_groups:
   core:
     description: "Essential skills loaded every session"
     activation: always
@@ -197,12 +197,12 @@ skill_packs:
 
 | Activation | Behavior |
 |-----------|----------|
-| `always` | Skills loaded every session when kit is active |
+| `always` | Skills loaded every session when pack is active |
 | `detect` | Skills loaded when matching files exist in the project |
 | `manual` | Skills loaded only when the user explicitly requests them |
 
 !!! note
-    When `skill_packs` is present, it takes precedence over the flat `skills` array. Use one or the other, not both.
+    When `skill_groups` is present, it takes precedence over the flat `skills` array. Use one or the other, not both.
 
 ### MCP Servers
 
@@ -220,9 +220,9 @@ mcp:
     description: "What this server provides"
 ```
 
-**Type mapping:** The kit uses user-friendly names that are translated to the config format:
+**Type mapping:** The pack uses user-friendly names that are translated to the config format:
 
-| Kit type | Config type | Use case |
+| Pack type | Config type | Use case |
 |----------|-----------|----------|
 | `stdio` (default) | `local` | Local process via stdin/stdout |
 | `sse` | `remote` | Server-sent events over HTTP |
@@ -231,16 +231,16 @@ mcp:
 **Environment variables:**
 
 - `env`: Default values passed to the MCP server process
-- `env_keys`: Names of variables the user must set. Kit activation warns if these are missing. Use this for API keys and secrets that shouldn't have defaults.
+- `env_keys`: Names of variables the user must set. Pack activation warns if these are missing. Use this for API keys and secrets that shouldn't have defaults.
 
 ### Detection Rules
 
-Auto-suggest the kit when certain files exist in the project:
+Auto-suggest the pack when certain files exist in the project:
 
 ```yaml
 detect:
   - files: ["dbt_project.yml", "dbt_project.yaml"]
-    message: "Detected dbt project — activate this kit?"
+    message: "Detected dbt project — activate this pack?"
 
   - files: ["**/dagster/**", "workspace.yaml"]
     message: "Detected Dagster project"
@@ -249,11 +249,11 @@ detect:
 - `files`: Array of glob patterns matched against the project directory
 - `message`: Optional suggestion text shown to the user
 
-Users discover matching kits via `kit detect` or `kit list --detect`. The TUI also shows a nudge on startup when matching kits are found.
+Users discover matching packs via `pack detect` or `pack list --detect`. The TUI also shows a nudge on startup when matching packs are found.
 
 ### Instructions
 
-Free-form text injected into the AI's system context for every conversation when the kit is active:
+Free-form text injected into the AI's system context for every conversation when the pack is active:
 
 ```yaml
 instructions: |
@@ -275,23 +275,23 @@ instructions: |
 
 ## Publishing to the Registry
 
-The kit registry is hosted at [AltimateAI/data-engineering-skills](https://github.com/AltimateAI/data-engineering-skills).
+The pack registry is hosted at [AltimateAI/data-engineering-skills](https://github.com/AltimateAI/data-engineering-skills).
 
 ### For Community Contributors
 
-1. Create your kit in your own GitHub repo
-2. Test with `kit validate` and `kit activate`
+1. Create your pack in your own GitHub repo
+2. Test with `pack validate` and `pack activate`
 3. Submit a PR to [data-engineering-skills](https://github.com/AltimateAI/data-engineering-skills) adding an entry to `registry.json`:
 
 ```json
 {
-  "name": "my-kit",
+  "name": "my-pack",
   "description": "What it does",
   "version": "1.0.0",
   "author": "Your Name",
   "tier": "community",
   "repo": "your-org/your-repo",
-  "path": "kits/my-kit",
+  "path": "packs/my-pack",
   "tags": ["dbt", "bigquery"],
   "detect": ["dbt_project.yml"]
 }
@@ -299,13 +299,13 @@ The kit registry is hosted at [AltimateAI/data-engineering-skills](https://githu
 
 ### For Vendors (Verified Tier)
 
-To get your kit listed as `verified`:
+To get your pack listed as `verified`:
 
-1. Create skills and a kit in your organization's GitHub repo
-2. Test thoroughly with `kit validate` and real-world projects
+1. Create skills and a pack in your organization's GitHub repo
+2. Test thoroughly with `pack validate` and real-world projects
 3. Submit a PR to the registry with `"tier": "verified"`
-4. The Altimate team reviews the kit for quality and correctness
-5. Once approved, your kit appears with a `[verified]` badge
+4. The Altimate team reviews the pack for quality and correctness
+5. Once approved, your pack appears with a `[verified]` badge
 
 **Verified tier requirements:**
 
@@ -313,11 +313,11 @@ To get your kit listed as `verified`:
 - MCP server is published to PyPI or npm
 - Detection rules are accurate (no false positives)
 - Instructions are clear and well-structured
-- Kit is actively maintained
+- Pack is actively maintained
 
 ## Examples
 
-### Instructions-Only Kit (Team Standards)
+### Instructions-Only Pack (Team Standards)
 
 No skills, no MCP — just team conventions:
 
@@ -336,7 +336,7 @@ detect:
   - files: ["dbt_project.yml"]
 ```
 
-### MCP-Only Kit (Tool Integration)
+### MCP-Only Pack (Tool Integration)
 
 No skills, no instructions — just MCP configuration:
 
@@ -356,7 +356,7 @@ detect:
   - files: ["**/airbyte_*.py", "airbyte.yaml"]
 ```
 
-### Full Kit (Skills + MCP + Instructions)
+### Full Pack (Skills + MCP + Instructions)
 
 The complete package:
 
@@ -392,18 +392,18 @@ instructions: |
 
 detect:
   - files: ["dbt_project.yml"]
-    message: "Detected dbt project — activate dbt-snowflake kit?"
+    message: "Detected dbt project — activate dbt-snowflake pack?"
 ```
 
 ## Troubleshooting
 
-### Kit not showing in `kit list`
+### Pack not showing in `pack list`
 
-- Check the `KIT.yaml` file is valid: `kit validate <name>`
-- Ensure the file is named exactly `KIT.yaml` (case-sensitive)
-- Check the kit directory is under `.opencode/kits/` or another scanned location
+- Check the `PACK.yaml` file is valid: `pack validate <name>`
+- Ensure the file is named exactly `PACK.yaml` (case-sensitive)
+- Check the pack directory is under `.opencode/packs/` or another scanned location
 
-### Skills fail to install during `kit activate`
+### Skills fail to install during `pack activate`
 
 - The `source` repo must be accessible (public GitHub or reachable URL)
 - Skills that already exist locally are skipped with a warning
@@ -411,12 +411,12 @@ detect:
 
 ### MCP server doesn't start after activation
 
-- Check `kit validate` for missing environment variables
+- Check `pack validate` for missing environment variables
 - Set required env vars in your shell profile or `.env` file
 - Verify the MCP command is installed: run the command manually (e.g., `uvx dbt-mcp --help`)
 
-### `kit deactivate` didn't clean up
+### `pack deactivate` didn't clean up
 
-- `kit deactivate` removes: instruction files, active-kits entry, and MCP config entries
-- Skills installed by the kit are NOT removed (they may be shared with other kits)
+- `pack deactivate` removes: instruction files, active-packs entry, and MCP config entries
+- Skills installed by the pack are NOT removed (they may be shared with other packs)
 - To fully clean up skills, remove them from `.opencode/skills/` manually

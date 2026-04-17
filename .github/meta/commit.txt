@@ -1,1 +1,22 @@
-release: v0.5.20
+refactor: rename `Kit` → `Pack` for clearer vendor-distribution semantics
+
+Renames the extension-system primitive from "Kit" to "Pack" before any vendor
+content has shipped publicly. "Pack" reads more naturally ("skill pack" is
+already common language), differentiates from Claude Code's "plugin" noun,
+and avoids the generic-SDK connotation of "kit".
+
+Scope of rename:
+- `Kit` namespace/types → `Pack` (runtime, CLI, config, telemetry)
+- `KIT.yaml` → `PACK.yaml` file convention
+- `.opencode/kits/` → `.opencode/packs/`; `active-kits` → `active-packs`
+- Nested `SkillPack` type → `SkillGroup` / `skill_packs` field → `skill_groups`
+  to resolve the "pack contains packs" nesting collision
+- Telemetry events `kit_*` → `pack_*`
+- File moves: `src/kit/` → `src/pack/`; `cli/cmd/kit.ts` → `cli/cmd/pack.ts`;
+  `docs/{configure,develop}/kits.md` → `packs.md`
+- CLI command group: `altimate-code kit ...` → `altimate-code pack ...`
+
+No behavior change — pure rename + internal variable-shadow fix in
+`allSkillsFromGroups` (inner loop variable `pack` → `group`).
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>

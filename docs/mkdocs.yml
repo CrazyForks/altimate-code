@@ -122,7 +122,7 @@ nav:
       - MCPs & ACPs:
           - MCP Servers: configure/mcp-servers.md
           - ACP Support: configure/acp.md
-      - Kits: configure/kits.md
+      - Packs: configure/packs.md
       - Appearance:
           - Themes: configure/themes.md
           - Keybinds: configure/keybinds.md
@@ -149,5 +149,5 @@ nav:
           - SDK: develop/sdk.md
           - Server API: develop/server.md
           - Plugins: develop/plugins.md
-          - Building Kits: develop/kits.md
+          - Building Packs: develop/packs.md
           - Ecosystem: develop/ecosystem.md

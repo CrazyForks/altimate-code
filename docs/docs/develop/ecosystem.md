@@ -8,7 +8,7 @@ altimate has a growing ecosystem of plugins, tools, and integrations.
 |---------|------------|
 | `@altimateai/altimate-code` | CLI and TUI |
 | `@altimateai/altimate-code-sdk` | TypeScript SDK |
-| `@altimateai/altimate-code-plugin` | Plugin development kit |
+| `@altimateai/altimate-code-plugin` | Plugin development pack |
 
 ## Integrations
 
@@ -19,22 +19,22 @@ altimate has a growing ecosystem of plugins, tools, and integrations.
 - **MCP**: Model Context Protocol servers
 - **ACP**: Agent Communication Protocol for editors
 
-## Kits
+## Packs
 
-Kits bundle skills, MCP servers, and instructions into shareable development setups. Anyone can create and distribute kits.
+Packs bundle skills, MCP servers, and instructions into shareable development setups. Anyone can create and distribute packs.
 
-| Kit | Description |
+| Pack | Description |
 |-----|-------------|
-| [dbt-snowflake](https://github.com/AltimateAI/data-engineering-skills/tree/main/kits/dbt-snowflake) | Complete dbt + Snowflake setup |
+| [dbt-snowflake](https://github.com/AltimateAI/data-engineering-skills/tree/main/packs/dbt-snowflake) | Complete dbt + Snowflake setup |
 
-Browse the [kit registry](https://github.com/AltimateAI/data-engineering-skills/blob/main/registry.json) for more.
+Browse the [pack registry](https://github.com/AltimateAI/data-engineering-skills/blob/main/registry.json) for more.
 
-### Creating Kits
+### Creating Packs
 
-See the [Kit documentation](../configure/kits.md) for the full guide, or run:
+See the [Pack documentation](../configure/packs.md) for the full guide, or run:
 
 ```bash
-altimate-code kit create my-kit
+altimate-code pack create my-pack
 ```
 
 ## Community

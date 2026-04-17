@@ -14,7 +14,7 @@ import type { EventSource } from "./context/sdk"
 import { win32DisableProcessedInput, win32InstallCtrlCGuard } from "./win32"
 import { TuiConfig } from "@/config/tui"
 import { Instance } from "@/project/instance"
-// altimate_change start — kit: Kit imported dynamically in setTimeout below to avoid test mock issues
+// altimate_change start — pack: Pack imported dynamically in setTimeout below to avoid test mock issues
 import { EOL } from "os"
 // altimate_change end
 
@@ -176,23 +176,23 @@ export const TuiThreadCommand = cmd({
         fn: () => TuiConfig.get(),
       })
 
-      // altimate_change start — kit: non-blocking kit detection nudge on TUI startup
+      // altimate_change start — pack: non-blocking pack detection nudge on TUI startup
       // Deferred to avoid interfering with TUI initialization and test mocks.
-      // Uses setTimeout + dynamic import so Kit module is not required at parse time.
+      // Uses setTimeout + dynamic import so Pack module is not required at parse time.
       setTimeout(async () => {
         try {
-          const { Kit } = await import("../../../kit")
-          const activeKits = await Kit.active()
-          if (activeKits.length > 0) return
-          const detected = await Kit.detect()
+          const { Pack } = await import("../../../pack")
+          const activePacks = await Pack.active()
+          if (activePacks.length > 0) return
+          const detected = await Pack.detect()
           if (detected.length > 0) {
             const first = detected[0]
             process.stderr.write(
-              `\x1b[2m\u{1F4A1} Kit available: ${first.kit.name} \u2014 run /kit activate ${first.kit.name}\x1b[0m` + EOL,
+              `\x1b[2m\u{1F4A1} Pack available: ${first.pack.name} \u2014 run /pack activate ${first.pack.name}\x1b[0m` + EOL,
             )
           }
         } catch {
-          // Kit detection is best-effort; never block startup
+          // Pack detection is best-effort; never block startup
         }
       }, 100)
       // altimate_change end
