@@ -233,6 +233,34 @@ mcp:
 - `env`: Default values passed to the MCP server process
 - `env_keys`: Names of variables the user must set. Pack activation warns if these are missing. Use this for API keys and secrets that shouldn't have defaults.
 
+### Plugins
+
+Packs can list npm plugin packages to extend altimate-code with custom hooks, auth flows, tools, and providers. On `pack activate`, the plugin specs are appended to your project's `plugin[]` config; on `pack deactivate` they're removed unless another active pack still lists them (reference-counted).
+
+```yaml
+plugins:
+  - "@dagster/altimate-plugin@^1.0"
+  - "@atlan/governance-plugin@latest"
+  - "file:///Users/me/local-plugin"
+```
+
+**Format:** Each entry is an npm package spec (`name`, `name@version`, or `file://path`). At load time, altimate-code installs the package via Bun and loads its exported `Plugin` function, which can register hooks for:
+
+| Hook | Purpose |
+|------|---------|
+| `auth` | Custom OAuth / API-key flows for vendor providers |
+| `tool` | Ship custom tools usable by the AI |
+| `tool.execute.before` / `.after` | Cost guards, audit logging, write gating |
+| `permission.ask` | Custom permission prompts |
+| `chat.params` / `chat.headers` | Modify outgoing model requests |
+| `command.execute.before` | Intercept shell commands |
+| `shell.env` | Inject env vars for tools |
+
+See the [`@opencode-ai/plugin`](https://www.npmjs.com/package/@opencode-ai/plugin) package for the full hook surface.
+
+!!! warning
+    Plugins run with full Node.js privileges. Only activate packs from trusted sources — `pack activate` always warns when it is about to install plugin packages.
+
 ### Detection Rules
 
 Auto-suggest the pack when certain files exist in the project:
@@ -272,6 +300,38 @@ instructions: |
 - Use markdown headers to organize sections
 - Include "DO NOT" rules for common mistakes
 - Avoid duplicating what skills already teach
+
+## Trust & Integrity
+
+Every installed pack gets a `manifest.json` written next to `PACK.yaml` containing a SHA256 hash of the pack's content. On every load, altimate-code re-hashes the pack and compares against the manifest:
+
+- **Hash match:** pack is trusted as-installed.
+- **Hash mismatch:** the runtime logs a warning and `pack activate` prints an **INTEGRITY WARNING** prompting the user. This protects against accidental corruption and naive tampering — it is **not** a substitute for code signing.
+
+### Tier enforcement
+
+Trust tiers (`built-in`, `verified`, `community`, `archived`) are enforced at load time against hardcoded allowlists:
+
+- Packs claiming `built-in` or `verified` that are **not** in the allowlist are automatically **downgraded to `community`** and logged.
+- The CLI prints a **TIER DOWNGRADE** notice during `pack activate`.
+- For local development, you can inject entries via env vars: `ALTIMATE_CODE_VERIFIED_PACKS=my-pack,other-pack` and `ALTIMATE_CODE_BUILTIN_PACKS=...`.
+
+This means: **claiming a tier in `PACK.yaml` does not grant that tier.** The allowlist is the root of trust. To become verified, partners submit PRs to the registry review process.
+
+### Telemetry events
+
+The pack system emits these events for operators monitoring the installed base:
+
+| Event | Fields | Emitted when |
+|-------|--------|-------------|
+| `pack_created` | `pack_name` | `pack create` scaffolds a new pack |
+| `pack_installed` | `install_source`, `pack_count`, `pack_names` | `pack install` completes |
+| `pack_applied` | `pack_name`, `skill_count`, `mcp_count`, `plugin_count`, `has_instructions`, `tier`, `tamper_detected`, `tier_downgraded` | `pack activate` completes |
+| `pack_deactivated` | `pack_name`, `mcp_cleaned`, `plugins_cleaned`, `instructions_cleaned` | `pack deactivate` completes |
+| `pack_removed` | `pack_name` | `pack remove` completes |
+| `pack_integrity_warning` | `pack_name`, `warning` (`tamper_detected`\|`tier_downgraded`), `claimed_tier` | Loaded pack fails integrity or tier check |
+
+Vendors authoring plugins can emit their own telemetry by calling `Telemetry.track(...)` from plugin hooks — attach `pack_name` in a custom event type to correlate with the lifecycle events above.
 
 ## Publishing to the Registry
 

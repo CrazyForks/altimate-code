@@ -8,6 +8,7 @@ import { bootstrap } from "../bootstrap"
 import { cmd } from "./cmd"
 import { Instance } from "../../project/instance"
 import { Global } from "@/global"
+import { Config } from "@/config/config"
 import { Telemetry } from "@/altimate/telemetry"
 // altimate_change start — pack: jsonc-parser for comment-preserving config writes
 import { modify, applyEdits } from "jsonc-parser"
@@ -568,6 +569,30 @@ const PackInstallCommand = cmd({
             await fs.cp(src, dst, { recursive: true, dereference: false })
           }
         }
+        // altimate_change start — pack: write manifest.json at install time for later integrity checks
+        try {
+          const destPackFile = path.join(dest, path.basename(packFile))
+          const matterMod = (await import("gray-matter")).default
+          const destRaw = await fs.readFile(destPackFile, "utf-8")
+          const destExt = path.extname(destPackFile).toLowerCase()
+          const destParsed =
+            destExt === ".md" ? matterMod(destRaw) : matterMod("---\n" + destRaw + "\n---")
+          await Pack.writeManifest(
+            dest,
+            destPackFile,
+            {
+              name: (destParsed.data.name as string) || packName,
+              version: (destParsed.data.version as string) || "1.0.0",
+              tier: (destParsed.data.tier as string) || "community",
+            },
+            source,
+          )
+        } catch (err) {
+          // Manifest is best-effort; pack still works without one (treated as user-authored).
+          process.stdout.write(`  ⚠ Could not write manifest for "${packName}" — ${(err as Error).message}` + EOL)
+        }
+        // altimate_change end
+
         process.stdout.write(`  ✓ Installed "${packName}" → ${path.relative(rootDir, dest)}` + EOL)
         installedNames.push(packName)
         installed++
@@ -758,6 +783,22 @@ const PackActivateCommand = cmd({
       process.stdout.write(EOL)
       process.stdout.write(`Pack: ${pack.name}${tierBadge} (v${pack.version || "0.0.0"})` + EOL)
       process.stdout.write(`${pack.description || ""}` + EOL)
+
+      // altimate_change start — pack: surface trust/integrity issues up-front so users can abort
+      const trust = pack.trust
+      if (trust?.tamper_detected) {
+        process.stdout.write(EOL)
+        process.stdout.write(`  ⚠ INTEGRITY WARNING: PACK.yaml hash does not match install manifest.` + EOL)
+        process.stdout.write(`    This pack was modified after install. Only proceed if you edited it yourself.` + EOL)
+      }
+      if (trust?.tier_downgraded && trust.original_tier) {
+        process.stdout.write(EOL)
+        process.stdout.write(
+          `  ⚠ TIER DOWNGRADE: pack claims "${trust.original_tier}" but is not in the allowlist — treating as "community".` + EOL,
+        )
+      }
+      // altimate_change end
+
       process.stdout.write(EOL + "The following changes will be applied:" + EOL + EOL)
 
       if (skillCount > 0) {
@@ -781,6 +822,17 @@ const PackActivateCommand = cmd({
         }
         process.stdout.write(EOL)
       }
+
+      // altimate_change start — pack: plugin preview so users see what npm packages will be installed
+      if (pluginCount > 0) {
+        process.stdout.write(`  Plugins (${pluginCount}):` + EOL)
+        for (const plugin of pack.plugins!) {
+          process.stdout.write(`    + ${plugin}` + EOL)
+        }
+        process.stdout.write(`    ⚠ Plugins are npm packages loaded with full Node.js privileges — only activate packs from trusted sources.` + EOL)
+        process.stdout.write(EOL)
+      }
+      // altimate_change end
 
       if (hasInstructions) {
         process.stdout.write(`  Instructions:` + EOL)
@@ -990,7 +1042,31 @@ const PackActivateCommand = cmd({
           plugin_count: pluginCount,
           has_instructions: hasInstructions,
           source: "cli",
+          tier: pack.tier || "community",
+          tamper_detected: pack.trust?.tamper_detected || false,
+          tier_downgraded: pack.trust?.tier_downgraded || false,
         })
+        // altimate_change start — pack: emit integrity warning events so we can monitor the installed base
+        if (pack.trust?.tamper_detected) {
+          Telemetry.track({
+            type: "pack_integrity_warning",
+            timestamp: Date.now(),
+            session_id: Telemetry.getContext().sessionId || "",
+            pack_name: name,
+            warning: "tamper_detected",
+          })
+        }
+        if (pack.trust?.tier_downgraded) {
+          Telemetry.track({
+            type: "pack_integrity_warning",
+            timestamp: Date.now(),
+            session_id: Telemetry.getContext().sessionId || "",
+            pack_name: name,
+            warning: "tier_downgraded",
+            claimed_tier: pack.trust.original_tier,
+          })
+        }
+        // altimate_change end
       } catch {}
     })
   },
@@ -1020,36 +1096,148 @@ const PackDeactivateCommand = cmd({
 
       // altimate_change start — pack: clean up instruction file on deactivate
       const instructionsFile = path.join(rootDir, ".opencode", "instructions", `pack-${name}.md`)
+      let instructionsCleaned = false
       try {
         await fs.access(instructionsFile)
         await fs.rm(instructionsFile, { force: true })
+        instructionsCleaned = true
         process.stdout.write(`  ✓ Removed instructions: ${path.relative(rootDir, instructionsFile)}` + EOL)
       } catch {}
       // altimate_change end
 
       // altimate_change start — pack: clean up MCP config entries added by this pack (JSONC-preserving)
+      let mcpCleaned = 0
       if (pack?.mcp && Object.keys(pack.mcp).length > 0) {
         try {
           const { filePath } = await findConfigFile(rootDir)
-          let removed = 0
           for (const serverName of Object.keys(pack.mcp)) {
             if (await removeConfigField(filePath, ["mcp", serverName])) {
-              removed++
+              mcpCleaned++
             }
           }
-          if (removed > 0) {
-            process.stdout.write(`  ✓ Removed ${removed} MCP server(s) from config` + EOL)
+          if (mcpCleaned > 0) {
+            process.stdout.write(`  ✓ Removed ${mcpCleaned} MCP server(s) from config` + EOL)
           }
         } catch {}
       }
+      // altimate_change end
+
+      // altimate_change start — pack: clean up plugin entries that no other active pack still needs
+      let pluginsCleaned = 0
+      if (pack?.plugins && pack.plugins.length > 0) {
+        try {
+          Pack.invalidate()
+          const remaining = await Pack.active()
+          const stillNeeded = new Set<string>()
+          for (const other of remaining) {
+            if (other.name === name) continue
+            for (const p of other.plugins || []) stillNeeded.add(p)
+          }
+          const toRemove = pack.plugins.filter((p) => !stillNeeded.has(p))
+          if (toRemove.length > 0) {
+            const { filePath, config } = await findConfigFile(rootDir)
+            const current = (config.plugin ?? []) as string[]
+            const next = current.filter((p) => !toRemove.includes(p))
+            if (next.length !== current.length) {
+              await writeConfigField(filePath, ["plugin"], next)
+              pluginsCleaned = toRemove.length
+              process.stdout.write(`  ✓ Removed ${pluginsCleaned} plugin(s) from config` + EOL)
+            }
+          }
+        } catch {}
+      }
+      // altimate_change end
+
+      // altimate_change start — pack: telemetry for deactivation lifecycle
+      try {
+        Telemetry.track({
+          type: "pack_deactivated",
+          timestamp: Date.now(),
+          session_id: Telemetry.getContext().sessionId || "",
+          pack_name: name,
+          mcp_cleaned: mcpCleaned,
+          plugins_cleaned: pluginsCleaned,
+          instructions_cleaned: instructionsCleaned,
+          source: "cli",
+        })
+      } catch {}
       // altimate_change end
     })
   },
 })
 // altimate_change end
 
-// altimate_change start — pack: search subcommand
-const REGISTRY_URL = "https://raw.githubusercontent.com/AltimateAI/data-engineering-skills/main/registry.json"
+// altimate_change start — pack: search subcommand with config-driven URL, 24h cache, and offline fallback
+const DEFAULT_REGISTRY_URL = "https://raw.githubusercontent.com/AltimateAI/data-engineering-skills/main/registry.json"
+const REGISTRY_CACHE_TTL_MS = 24 * 60 * 60 * 1000
+const REGISTRY_FETCH_TIMEOUT_MS = 5000
+
+async function resolveRegistryUrl(): Promise<string> {
+  const envUrl = process.env.ALTIMATE_CODE_PACK_REGISTRY
+  if (envUrl && envUrl.trim()) return envUrl.trim()
+  try {
+    const config = await Config.get()
+    const fromConfig = (config.packs as { registry?: string } | undefined)?.registry
+    if (fromConfig && fromConfig.trim()) return fromConfig.trim()
+  } catch {
+    // fall through to default — config read failures should not block search
+  }
+  return DEFAULT_REGISTRY_URL
+}
+
+function registryCachePath(): string {
+  return path.join(Global.Path.cache, "pack-registry-cache.json")
+}
+
+async function readRegistryCache(
+  url: string,
+): Promise<{ data: unknown; fetchedAtMs: number; stale: boolean } | undefined> {
+  try {
+    const raw = await fs.readFile(registryCachePath(), "utf-8")
+    const parsed = JSON.parse(raw) as { url?: string; fetched_at?: string; data?: unknown }
+    if (parsed.url !== url || !parsed.fetched_at) return undefined
+    const fetchedAtMs = new Date(parsed.fetched_at).getTime()
+    if (!Number.isFinite(fetchedAtMs)) return undefined
+    return { data: parsed.data, fetchedAtMs, stale: Date.now() - fetchedAtMs > REGISTRY_CACHE_TTL_MS }
+  } catch {
+    return undefined
+  }
+}
+
+async function writeRegistryCache(url: string, data: unknown): Promise<void> {
+  try {
+    const cachePath = registryCachePath()
+    await fs.mkdir(path.dirname(cachePath), { recursive: true })
+    const payload = { url, fetched_at: new Date().toISOString(), data }
+    await fs.writeFile(cachePath, JSON.stringify(payload, null, 2) + EOL, "utf-8")
+  } catch {
+    // Cache write is best-effort — don't surface errors to the user.
+  }
+}
+
+function formatAge(ms: number): string {
+  if (ms < 60_000) return "<1 min ago"
+  const minutes = Math.floor(ms / 60_000)
+  if (minutes < 60) return `${minutes} min ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours} hr ago`
+  const days = Math.floor(hours / 24)
+  return `${days} day${days === 1 ? "" : "s"} ago`
+}
+
+async function fetchRegistry(
+  url: string,
+  signal: AbortSignal,
+): Promise<{ ok: true; data: unknown } | { ok: false; status?: number; error?: string }> {
+  try {
+    const response = await fetch(url, { signal })
+    if (!response.ok) return { ok: false, status: response.status }
+    const data = await response.json()
+    return { ok: true, data }
+  } catch (err) {
+    return { ok: false, error: (err as Error).message }
+  }
+}
 
 const PackSearchCommand = cmd({
   command: "search [query]",
@@ -1064,40 +1252,67 @@ const PackSearchCommand = cmd({
         type: "boolean",
         describe: "output as JSON",
         default: false,
+      })
+      .option("refresh", {
+        type: "boolean",
+        describe: "bypass the 24h cache and re-fetch the registry",
+        default: false,
       }),
   async handler(args) {
     const query = ((args.query as string) || "").toLowerCase().trim()
 
     await bootstrap(process.cwd(), async () => {
-      process.stdout.write(`Searching pack registry...` + EOL)
+      const registryUrl = await resolveRegistryUrl()
+      const useCache = !(args.refresh as boolean)
 
-      // altimate_change start — pack: graceful 404 + timeout for registry fetch
       let registry: any
-      const controller = new AbortController()
-      const timeout = setTimeout(() => controller.abort(), 5000)
-      try {
-        const response = await fetch(REGISTRY_URL, { signal: controller.signal })
-        clearTimeout(timeout)
-        if (!response.ok) {
-          if (response.status === 404) {
-            process.stdout.write(`Pack registry not available yet.` + EOL)
-            process.stdout.write(EOL + `Browse local packs: altimate-code pack list` + EOL)
-            process.stdout.write(`Create your own: altimate-code pack create <name>` + EOL)
-            return
-          }
-          process.stderr.write(`Error: Failed to fetch registry (${response.status})` + EOL)
-          process.exit(1)
+      let sourceLabel = ""
+
+      // 1. Try fresh cache first (skipped if --refresh)
+      if (useCache) {
+        const cached = await readRegistryCache(registryUrl)
+        if (cached && !cached.stale) {
+          registry = cached.data
+          sourceLabel = `(cached ${formatAge(Date.now() - cached.fetchedAtMs)})`
         }
-        registry = await response.json()
-      } catch (err) {
-        clearTimeout(timeout)
-        if ((err as Error).name === "AbortError") {
-          process.stdout.write(`Pack registry unavailable (timeout).` + EOL)
+      }
+
+      // 2. Fetch if no fresh cache
+      if (!registry) {
+        process.stdout.write(`Searching pack registry...` + EOL)
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), REGISTRY_FETCH_TIMEOUT_MS)
+        const result = await fetchRegistry(registryUrl, controller.signal)
+        clearTimeout(timer)
+
+        if (result.ok) {
+          registry = result.data
+          sourceLabel = ""
+          await writeRegistryCache(registryUrl, registry)
         } else {
-          process.stderr.write(`Error: Failed to fetch registry: ${(err as Error).message}` + EOL)
+          // 3. Offline fallback: stale cache
+          const stale = await readRegistryCache(registryUrl)
+          if (stale) {
+            registry = stale.data
+            sourceLabel = `(stale ${formatAge(Date.now() - stale.fetchedAtMs)} — offline)`
+            process.stdout.write(`  ⚠ Registry unreachable; showing cached results.` + EOL)
+          } else {
+            if (result.status === 404) {
+              process.stdout.write(`Pack registry not available yet.` + EOL)
+              process.stdout.write(EOL + `Browse local packs: altimate-code pack list` + EOL)
+              process.stdout.write(`Create your own: altimate-code pack create <name>` + EOL)
+              return
+            }
+            const reason = result.status
+              ? `HTTP ${result.status}`
+              : result.error === "The operation was aborted." || result.error?.includes("abort")
+                ? "timeout"
+                : result.error || "unknown error"
+            process.stderr.write(`Error: Failed to fetch registry (${reason})` + EOL)
+            process.stdout.write(EOL + `Browse local packs: altimate-code pack list` + EOL)
+            process.exit(1)
+          }
         }
-        process.stdout.write(EOL + `Browse local packs: altimate-code pack list` + EOL)
-        process.exit(1)
       }
       // altimate_change end
 
@@ -1157,7 +1372,9 @@ const PackSearchCommand = cmd({
       }
 
       process.stdout.write(EOL)
-      process.stdout.write(`${results.length} pack(s) found in registry.` + EOL)
+      process.stdout.write(
+        `${results.length} pack(s) found in registry${sourceLabel ? ` ${sourceLabel}` : ""}.` + EOL,
+      )
       process.stdout.write(`Install with: altimate-code pack install <repo>` + EOL)
     })
   },

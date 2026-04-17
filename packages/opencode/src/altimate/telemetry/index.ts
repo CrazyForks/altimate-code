@@ -467,6 +467,13 @@ export namespace Telemetry {
         plugin_count: number
         has_instructions: boolean
         source: "cli" | "tui"
+        // altimate_change start — pack: tier + trust signals so we can monitor
+        // adoption distribution (built-in vs verified vs community) and catch
+        // spikes in integrity/tier-downgrade warnings from the installed base.
+        tier?: "built-in" | "verified" | "community" | "archived"
+        tamper_detected?: boolean
+        tier_downgraded?: boolean
+        // altimate_change end
       }
     | {
         type: "pack_removed"
@@ -475,6 +482,26 @@ export namespace Telemetry {
         pack_name: string
         source: "cli" | "tui"
       }
+    // altimate_change start — pack: deactivation + integrity lifecycle events
+    | {
+        type: "pack_deactivated"
+        timestamp: number
+        session_id: string
+        pack_name: string
+        mcp_cleaned: number
+        plugins_cleaned: number
+        instructions_cleaned: boolean
+        source: "cli" | "tui"
+      }
+    | {
+        type: "pack_integrity_warning"
+        timestamp: number
+        session_id: string
+        pack_name: string
+        warning: "tamper_detected" | "tier_downgraded"
+        claimed_tier?: string
+      }
+    // altimate_change end
     // altimate_change end
     // altimate_change start — plan refinement telemetry event
     | {

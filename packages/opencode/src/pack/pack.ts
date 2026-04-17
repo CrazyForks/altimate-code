@@ -2,6 +2,7 @@
 import z from "zod"
 import path from "path"
 import { mkdir, writeFile, unlink } from "fs/promises"
+import { createHash } from "crypto"
 import matter from "gray-matter"
 import { Config } from "../config/config"
 import { Instance } from "../project/instance"
@@ -154,8 +155,90 @@ export namespace Pack {
 
     // The full markdown content (instructions, docs, etc.)
     content: z.string().nullable().optional().transform((v) => v ?? "").default(""),
+
+    // altimate_change start — pack: runtime-computed trust metadata (set by loadPack)
+    // Present when this pack was verified against its manifest; absent for
+    // ad-hoc/scaffolded packs without an install manifest.
+    trust: z
+      .object({
+        tamper_detected: z.boolean().default(false),
+        tier_downgraded: z.boolean().default(false),
+        original_tier: Tier.optional(),
+        manifest_present: z.boolean().default(false),
+      })
+      .optional(),
+    // altimate_change end
   })
   export type Info = z.infer<typeof Info>
+
+  // altimate_change start — pack: manifest schema for install-time integrity verification
+  // Written alongside PACK.yaml when a pack is installed via `pack install`.
+  // Not cryptographically signed — defeats accidental corruption + naive
+  // tampering but is NOT a substitute for real code signing (see: trust tiers).
+  export const Manifest = z.object({
+    name: z.string(),
+    version: z.string(),
+    tier: Tier,
+    content_hash: z.string(),
+    source: z.string().optional(),
+    installed_at: z.string(),
+  })
+  export type Manifest = z.infer<typeof Manifest>
+
+  // Hardcoded allowlists — the root of trust for tier claims.
+  // Populated as verified partner packs are reviewed; empty for now.
+  const BUILTIN_ALLOWLIST: ReadonlySet<string> = new Set([])
+  const VERIFIED_ALLOWLIST: ReadonlySet<string> = new Set([])
+
+  function envAllowlist(envVar: string): Set<string> {
+    const raw = process.env[envVar] || ""
+    return new Set(
+      raw
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
+    )
+  }
+
+  /** Canonical SHA256 of a pack file's raw content (line endings normalized). */
+  export function computeContentHash(raw: string): string {
+    const normalized = raw.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
+    return createHash("sha256").update(normalized).digest("hex")
+  }
+
+  /** Write manifest.json next to a PACK.yaml so later loads can verify integrity. */
+  export async function writeManifest(
+    packDir: string,
+    packFilePath: string,
+    info: { name: string; version?: string; tier?: Tier | string | null },
+    source?: string,
+  ): Promise<void> {
+    const raw = await Filesystem.readText(packFilePath)
+    if (!raw) return
+    const tierResult = Tier.safeParse(info.tier ?? "community")
+    const manifest: Manifest = {
+      name: info.name,
+      version: info.version || "1.0.0",
+      tier: tierResult.success ? tierResult.data : "community",
+      content_hash: computeContentHash(raw),
+      source,
+      installed_at: new Date().toISOString(),
+    }
+    await writeFile(path.join(packDir, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n", "utf-8")
+  }
+
+  async function readManifest(packDir: string): Promise<Manifest | undefined> {
+    try {
+      const manifestPath = path.join(packDir, "manifest.json")
+      const raw = await Filesystem.readText(manifestPath)
+      if (!raw) return undefined
+      const parsed = Manifest.safeParse(JSON.parse(raw))
+      return parsed.success ? parsed.data : undefined
+    } catch {
+      return undefined
+    }
+  }
+  // altimate_change end
 
   // --- State management (mirrors Skill.state pattern) ---
 
@@ -289,6 +372,58 @@ export namespace Pack {
         log.warn("invalid pack name", { path: filePath, name: result.data.name })
         return undefined
       }
+
+      // altimate_change start — pack: manifest integrity check + tier allowlist enforcement
+      const packDir = path.dirname(filePath)
+      const manifest = await readManifest(packDir)
+      let tamperDetected = false
+      if (manifest) {
+        const actualHash = computeContentHash(raw)
+        if (actualHash !== manifest.content_hash) {
+          tamperDetected = true
+          log.warn("pack manifest hash mismatch — content modified after install", {
+            pack: result.data.name,
+            expected: manifest.content_hash,
+            actual: actualHash,
+          })
+        }
+      }
+
+      const claimedTier = result.data.tier || "community"
+      const envVerified = envAllowlist("ALTIMATE_CODE_VERIFIED_PACKS")
+      const envBuiltin = envAllowlist("ALTIMATE_CODE_BUILTIN_PACKS")
+      let downgraded = false
+
+      if (
+        claimedTier === "verified" &&
+        !VERIFIED_ALLOWLIST.has(result.data.name) &&
+        !envVerified.has(result.data.name)
+      ) {
+        log.warn("pack claims verified tier but is not in the allowlist — downgrading to community", {
+          pack: result.data.name,
+        })
+        result.data.tier = "community"
+        downgraded = true
+      }
+      if (
+        claimedTier === "built-in" &&
+        !BUILTIN_ALLOWLIST.has(result.data.name) &&
+        !envBuiltin.has(result.data.name)
+      ) {
+        log.warn("pack claims built-in tier but is not in the allowlist — downgrading to community", {
+          pack: result.data.name,
+        })
+        result.data.tier = "community"
+        downgraded = true
+      }
+
+      result.data.trust = {
+        tamper_detected: tamperDetected,
+        tier_downgraded: downgraded,
+        original_tier: downgraded ? claimedTier : undefined,
+        manifest_present: !!manifest,
+      }
+      // altimate_change end
 
       return result.data
     } catch (err) {

@@ -733,6 +733,20 @@ export namespace Config {
   })
   export type Skills = z.infer<typeof Skills>
 
+  // altimate_change start — pack: config shape for pack paths + optional remote registry
+  export const Packs = z.object({
+    paths: z.array(z.string()).optional().describe("Additional paths to pack folders"),
+    urls: z.array(z.string()).optional().describe("URLs to fetch packs from"),
+    registry: z
+      .string()
+      .optional()
+      .describe(
+        "Remote pack registry URL (JSON index of available packs). Overridable via ALTIMATE_CODE_PACK_REGISTRY env var.",
+      ),
+  })
+  export type Packs = z.infer<typeof Packs>
+  // altimate_change end
+
   export const Agent = z
     .object({
       model: ModelId.optional(),
@@ -1076,8 +1090,8 @@ export namespace Config {
         .optional()
         .describe("Command configuration, see https://altimate.ai/docs/commands"),
       skills: Skills.optional().describe("Additional skill folder paths"),
-      // altimate_change start — pack: config schema for pack paths and URLs
-      packs: Skills.optional().describe("Additional pack folder paths and URLs (same shape as skills config)"),
+      // altimate_change start — pack: config schema for pack paths, URLs, and registry
+      packs: Packs.optional().describe("Pack folder paths, remote URLs, and registry URL"),
       // altimate_change end
       watcher: z
         .object({

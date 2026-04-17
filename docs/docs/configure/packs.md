@@ -126,6 +126,38 @@ Packs are discovered from:
 3. **Config paths**: `packs.paths` in your config file
 4. **Installed**: `~/.local/share/altimate-code/packs/`
 
+## Remote Registry
+
+`pack search` hits a remote registry index (JSON) so you can browse packs beyond the ones installed locally. The default registry is [AltimateAI/data-engineering-skills](https://github.com/AltimateAI/data-engineering-skills) but you can point at your own — useful for internal pack catalogs.
+
+```jsonc
+// opencode.json
+{
+  "packs": {
+    "registry": "https://packs.internal.acme.com/registry.json"
+  }
+}
+```
+
+Or via env var for ad-hoc override: `ALTIMATE_CODE_PACK_REGISTRY=https://...`.
+
+**Caching:** results are cached for 24 hours at `~/.cache/altimate-code/pack-registry-cache.json`. Pass `--refresh` to bypass the cache. If the registry is unreachable, `pack search` falls back to the cache (if any) and flags results as stale.
+
+## Trust & Integrity
+
+When you `pack install`, altimate-code writes a `manifest.json` with a SHA256 hash of the pack content. On every load, the hash is re-verified — mismatches surface as an `INTEGRITY WARNING` at activate time.
+
+Tier claims (`built-in`, `verified`) in `PACK.yaml` are cross-checked against an allowlist. Claims that aren't approved are silently **downgraded to `community`** and the CLI shows a `TIER DOWNGRADE` notice. This means: **installing a pack that claims "verified" does not actually grant it verified status** — only the maintained allowlist does.
+
+For local development or internal distribution, set allowlist overrides:
+
+```bash
+export ALTIMATE_CODE_VERIFIED_PACKS=my-pack,other-pack
+export ALTIMATE_CODE_BUILTIN_PACKS=internal-pack
+```
+
+Full plumbing (signing, PKI) is out of scope for this release — the current mechanism catches accidental corruption and naive tampering, not a determined attacker with write access.
+
 ## CLI Reference
 
 | Command | Description |
@@ -141,7 +173,8 @@ Packs are discovered from:
 | `pack deactivate <name>` | Remove from active packs, clean up |
 | `pack remove <name>` | Delete an installed pack |
 | `pack detect` | Find packs matching current project |
-| `pack search [query]` | Search the pack registry |
+| `pack search [query]` | Search the pack registry (24h cached) |
+| `pack search --refresh` | Bypass the cache and re-fetch the registry |
 | `pack status` | Show active packs |
 | `pack validate [name]` | Validate pack format and references |
 
