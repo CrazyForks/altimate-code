@@ -270,9 +270,46 @@ describe("parseAltimateKey", () => {
     expect(r?.altimateApiKey).toBe("key::extra")
   })
 
-  test("returns null for too few parts", () => {
+  test("returns null for too few parts when leading segment is a URL", () => {
     expect(AltimateApi.parseAltimateKey("https://api.getaltimate.com::mycompany")).toBeNull()
   })
+
+  test("returns null for a single part (no separator)", () => {
+    expect(AltimateApi.parseAltimateKey("justonevalue")).toBeNull()
+  })
+
+  // altimate_change start — default URL for 2-part input
+  test("parses 2-part input with default URL (https://api.myaltimate.com)", () => {
+    const r = AltimateApi.parseAltimateKey("mycompany::abc123")
+    expect(r).toEqual({
+      altimateUrl: "https://api.myaltimate.com",
+      altimateInstanceName: "mycompany",
+      altimateApiKey: "abc123",
+    })
+  })
+
+  test("preserves :: in api key for 2-part input", () => {
+    const r = AltimateApi.parseAltimateKey("mycompany::key::extra")
+    expect(r?.altimateUrl).toBe("https://api.myaltimate.com")
+    expect(r?.altimateInstanceName).toBe("mycompany")
+    expect(r?.altimateApiKey).toBe("key::extra")
+  })
+
+  test("trims whitespace for 2-part input", () => {
+    const r = AltimateApi.parseAltimateKey("  mycompany :: abc123  ")
+    expect(r?.altimateUrl).toBe("https://api.myaltimate.com")
+    expect(r?.altimateInstanceName).toBe("mycompany")
+    expect(r?.altimateApiKey).toBe("abc123")
+  })
+
+  test("returns null for empty instance name in 2-part input", () => {
+    expect(AltimateApi.parseAltimateKey("::abc123")).toBeNull()
+  })
+
+  test("returns null for empty api key in 2-part input", () => {
+    expect(AltimateApi.parseAltimateKey("mycompany::")).toBeNull()
+  })
+  // altimate_change end
 
   test("returns null for empty url", () => {
     expect(AltimateApi.parseAltimateKey("::mycompany::key")).toBeNull()

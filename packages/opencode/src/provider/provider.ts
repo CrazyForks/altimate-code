@@ -1025,7 +1025,7 @@ export namespace Provider {
         "altimate-default": {
           id: ModelID.make("altimate-default"),
           providerID: ProviderID.make("altimate-backend"),
-          name: "Altimate AI",
+          name: "Altimate LLM Gateway",
           family: "openai",
           api: { id: "altimate-default", url: "", npm: "@ai-sdk/openai-compatible" },
           status: "active",
@@ -1048,7 +1048,7 @@ export namespace Provider {
       }
       database["altimate-backend"] = {
         id: ProviderID.make("altimate-backend"),
-        name: "Altimate",
+        name: "Altimate AI",
         source: "custom",
         env: [],
         options: {},

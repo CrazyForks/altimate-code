@@ -4,6 +4,9 @@ import { Global } from "../../global"
 import { Filesystem } from "../../util/filesystem"
 
 const DEFAULT_MCP_URL = "https://mcpserver.getaltimate.com/sse"
+// altimate_change start — default Altimate API URL when user omits it from the TUI credential entry
+const DEFAULT_ALTIMATE_URL = "https://api.myaltimate.com"
+// altimate_change end
 
 const AltimateCredentials = z.object({
   altimateUrl: z.string(),
@@ -87,12 +90,28 @@ export namespace AltimateApi {
     altimateApiKey: string
   } | null {
     const parts = value.trim().split("::")
-    if (parts.length < 3) return null
-    const url = parts[0].trim()
-    const instance = parts[1].trim()
-    const key = parts.slice(2).join("::").trim()
+    if (parts.length < 2) return null
+    // altimate_change start — support 2-part `instance-name::api-key` with default URL, keep 3-part `url::instance::key` for custom instances
+    const first = parts[0].trim()
+    const looksLikeUrl = (s: string) => s.startsWith("http://") || s.startsWith("https://")
+    let url: string
+    let instance: string
+    let key: string
+    if (first.includes("://")) {
+      // Leading segment looks like a URL — must be http(s) and the 3-part form
+      if (!looksLikeUrl(first)) return null
+      if (parts.length < 3) return null
+      url = first
+      instance = parts[1].trim()
+      key = parts.slice(2).join("::").trim()
+    } else {
+      url = DEFAULT_ALTIMATE_URL
+      instance = first
+      key = parts.slice(1).join("::").trim()
+    }
     if (!url || !instance || !key) return null
-    if (!url.startsWith("http://") && !url.startsWith("https://")) return null
+    if (!looksLikeUrl(url)) return null
+    // altimate_change end
     return { altimateUrl: url, altimateInstanceName: instance, altimateApiKey: key }
   }
 
