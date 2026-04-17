@@ -53,21 +53,41 @@ function isQuery(input: string): boolean {
  * If either source or target is an arbitrary query, wrap them in CTEs so the
  * DataParity engine can treat them as tables named `__diff_source` / `__diff_target`.
  *
- * Returns `{ table1Name, table2Name, ctePrefix | null }`.
+ * Returns both a combined prefix (used for same-warehouse tasks where a JOIN
+ * might reference both CTEs) and side-specific prefixes (used for cross-warehouse
+ * tasks where each warehouse only has access to its own base tables).
  *
- * When a CTE prefix is returned, it must be prepended to every SQL task emitted
- * by the engine before execution.
+ * **Why side-specific prefixes matter:** T-SQL / Fabric parse-bind every CTE body
+ * at parse time, even unreferenced ones. Sending a combined `WITH __diff_source
+ * AS (... FROM mssql_only_table), __diff_target AS (... FROM fabric_only_table)`
+ * to MSSQL fails because MSSQL can't resolve the Fabric-only table referenced in
+ * the unused `__diff_target` CTE.
+ *
+ * Callers must prepend the appropriate prefix to every SQL task emitted by the
+ * engine before execution.
  */
 export function resolveTableSources(
   source: string,
   target: string,
-): { table1Name: string; table2Name: string; ctePrefix: string | null } {
+): {
+  table1Name: string
+  table2Name: string
+  ctePrefix: string | null
+  sourceCtePrefix: string | null
+  targetCtePrefix: string | null
+} {
   const source_is_query = isQuery(source)
   const target_is_query = isQuery(target)
 
   if (!source_is_query && !target_is_query) {
     // Both are plain table names — pass through unchanged
-    return { table1Name: source, table2Name: target, ctePrefix: null }
+    return {
+      table1Name: source,
+      table2Name: target,
+      ctePrefix: null,
+      sourceCtePrefix: null,
+      targetCtePrefix: null,
+    }
   }
 
   // At least one is a query — wrap both in CTEs
@@ -81,11 +101,15 @@ export function resolveTableSources(
   const srcExpr = source_is_query ? source : `SELECT * FROM ${quoteIdent(source)}`
   const tgtExpr = target_is_query ? target : `SELECT * FROM ${quoteIdent(target)}`
 
+  const sourceCtePrefix = `WITH __diff_source AS (\n${srcExpr}\n)`
+  const targetCtePrefix = `WITH __diff_target AS (\n${tgtExpr}\n)`
   const ctePrefix = `WITH __diff_source AS (\n${srcExpr}\n), __diff_target AS (\n${tgtExpr}\n)`
   return {
     table1Name: "__diff_source",
     table2Name: "__diff_target",
     ctePrefix,
+    sourceCtePrefix,
+    targetCtePrefix,
   }
 }
 
@@ -784,10 +808,15 @@ export async function runDataDiff(params: DataDiffParams): Promise<DataDiffResul
   }
 
   // Resolve sources (plain table names vs arbitrary queries)
-  const { table1Name, table2Name, ctePrefix } = resolveTableSources(
-    params.source,
-    params.target,
-  )
+  const { table1Name, table2Name, ctePrefix, sourceCtePrefix, targetCtePrefix } =
+    resolveTableSources(params.source, params.target)
+
+  // Cross-warehouse mode requires side-specific CTE injection: T-SQL / Fabric
+  // parse-bind every CTE body even when unreferenced, so sending the combined
+  // prefix to a warehouse that lacks the other side's base table fails at parse.
+  const sourceWarehouse = params.source_warehouse
+  const targetWarehouse = params.target_warehouse ?? params.source_warehouse
+  const crossWarehouse = sourceWarehouse !== targetWarehouse
 
   // Parse optional qualified names: "db.schema.table" → { database, schema, table }
   const parseQualified = (name: string) => {
@@ -911,8 +940,18 @@ export async function runDataDiff(params: DataDiffParams): Promise<DataDiffResul
     const taskResults = await Promise.all(
       tasks.map(async (task) => {
         const warehouse = warehouseFor(task.table_side)
-        // Inject CTE definitions if we're in query-comparison mode
-        const sql = ctePrefix ? injectCte(task.sql, ctePrefix) : task.sql
+        // Inject CTE definitions if we're in query-comparison mode. In
+        // cross-warehouse mode each task only gets the CTE for its own side —
+        // the other side's base tables aren't bindable on this warehouse.
+        let prefix: string | null = null
+        if (ctePrefix) {
+          if (crossWarehouse) {
+            prefix = task.table_side === "Table2" ? targetCtePrefix : sourceCtePrefix
+          } else {
+            prefix = ctePrefix
+          }
+        }
+        const sql = prefix ? injectCte(task.sql, prefix) : task.sql
         try {
           const rows = await executeQuery(sql, warehouse)
           return { id: task.id, rows, error: null }
