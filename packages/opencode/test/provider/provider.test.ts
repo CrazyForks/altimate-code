@@ -2362,7 +2362,7 @@ test("defaultModel returns altimate-backend when altimate credentials exist and 
       fn: async () => {
         const model = await Provider.defaultModel()
         expect(String(model.providerID)).toBe("altimate-backend")
-        expect(String(model.modelID)).toBe("altimate-default")
+        expect(String(model.modelID)).toBe("altimate-llm-gateway")
       },
     })
   } finally {
@@ -2408,7 +2408,7 @@ test("defaultModel prefers altimate-backend over other providers when altimate i
         // But defaultModel should prefer altimate-backend
         const model = await Provider.defaultModel()
         expect(String(model.providerID)).toBe("altimate-backend")
-        expect(String(model.modelID)).toBe("altimate-default")
+        expect(String(model.modelID)).toBe("altimate-llm-gateway")
       },
     })
   } finally {

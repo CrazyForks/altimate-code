@@ -1022,12 +1022,12 @@ export namespace Provider {
     // altimate_change start — register altimate-backend as an OpenAI-compatible provider
     if (!database["altimate-backend"]) {
       const backendModels: Record<string, Model> = {
-        "altimate-default": {
-          id: ModelID.make("altimate-default"),
+        "altimate-llm-gateway": {
+          id: ModelID.make("altimate-llm-gateway"),
           providerID: ProviderID.make("altimate-backend"),
           name: "Altimate LLM Gateway",
           family: "openai",
-          api: { id: "altimate-default", url: "", npm: "@ai-sdk/openai-compatible" },
+          api: { id: "altimate-llm-gateway", url: "", npm: "@ai-sdk/openai-compatible" },
           status: "active",
           headers: {},
           options: {},
@@ -1642,15 +1642,15 @@ export namespace Provider {
     const altimateProvider = providers[altimateProviderID]
     if (
       altimateProvider &&
-      altimateProvider.models[ModelID.make("altimate-default")] &&
+      altimateProvider.models[ModelID.make("altimate-llm-gateway")] &&
       (!cfg.provider || Object.keys(cfg.provider).includes(String(altimateProviderID)))
     ) {
       // altimate_change start — log when altimate-backend auto-selected
-      log.info("defaulting to altimate-backend/altimate-default (no model configured)")
+      log.info("defaulting to altimate-backend/altimate-llm-gateway (no model configured)")
       // altimate_change end
       return {
         providerID: altimateProviderID,
-        modelID: ModelID.make("altimate-default"),
+        modelID: ModelID.make("altimate-llm-gateway"),
       }
     }
     // altimate_change end
