@@ -450,7 +450,7 @@ Even when tables match perfectly, state what was checked:
 
 Fabric uses the same TDS protocol as SQL Server — no separate driver needed. Configuration:
 
-```
+```yaml
 type: "fabric"
 host: "<workspace-id>-<item-id>.datawarehouse.fabric.microsoft.com"
 database: "<warehouse-name>"

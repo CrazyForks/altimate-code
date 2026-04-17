@@ -91,6 +91,31 @@ const cliState = {
   throwError: null as null | { stderr?: string; message?: string },
 }
 const realChildProcess = await import("node:child_process")
+const realUtil = await import("node:util")
+// Stub `exec` with a custom `util.promisify.custom` so `promisify(exec)`
+// yields { stdout, stderr } exactly as the real implementation does. Also
+// keep the legacy callback form of `execSync` for tests that still use it.
+const execStub: any = (cmd: string, optsOrCb: any, maybeCb?: any) => {
+  cliState.lastCmd = cmd
+  const cb = typeof optsOrCb === "function" ? optsOrCb : maybeCb
+  if (cliState.throwError) {
+    const e: any = new Error(cliState.throwError.message ?? "az failed")
+    e.stderr = cliState.throwError.stderr
+    if (cb) cb(e, "", cliState.throwError.stderr ?? "")
+    return { on() {}, stdout: null, stderr: null }
+  }
+  if (cb) cb(null, cliState.output, "")
+  return { on() {}, stdout: null, stderr: null }
+}
+execStub[realUtil.promisify.custom] = (cmd: string, _opts?: any) => {
+  cliState.lastCmd = cmd
+  if (cliState.throwError) {
+    const e: any = new Error(cliState.throwError.message ?? "az failed")
+    e.stderr = cliState.throwError.stderr
+    return Promise.reject(e)
+  }
+  return Promise.resolve({ stdout: cliState.output, stderr: "" })
+}
 mock.module("node:child_process", () => ({
   ...realChildProcess,
   execSync: (cmd: string) => {
@@ -102,6 +127,7 @@ mock.module("node:child_process", () => ({
     }
     return cliState.output
   },
+  exec: execStub,
 }))
 
 // Import after mocking
@@ -174,7 +200,11 @@ describe("SQL Server driver unit tests", () => {
     })
 
     test("empty result returns correctly", async () => {
-      mockQueryResult = { recordset: [], recordset_columns: {} }
+      // mssql exposes column metadata as `recordset.columns` (a property ON
+      // the recordset array), not as a sibling key — mirror the real shape.
+      const recordset: any[] = []
+      ;(recordset as any).columns = {}
+      mockQueryResult = { recordset }
       const result = await connector.execute("SELECT * FROM t")
       expect(result.rows).toEqual([])
       expect(result.truncated).toBe(false)
@@ -507,7 +537,32 @@ describe("SQL Server driver unit tests", () => {
         recordset: [{ name: "alice", "": [42] }],
       }
       const result = await connector.execute("SELECT * FROM t")
+      // Named header preserved; single unnamed aggregate synthesized.
+      expect(result.columns).toEqual(["name", "col_0"])
       expect(result.rows).toEqual([["alice", 42]])
+    })
+
+    test("mixed named + MULTIPLE unnamed aggregates keep named header", async () => {
+      // SELECT name, COUNT(*), SUM(x) FROM t → { name: "alice", "": [42, 100] }.
+      // Regression: previous implementation fell back to col_0..col_N for all
+      // columns, erasing the known `name` header.
+      mockQueryResult = {
+        recordset: [{ name: "alice", "": [42, 100] }],
+      }
+      const result = await connector.execute("SELECT name, COUNT(*), SUM(x) FROM t")
+      expect(result.columns).toEqual(["name", "col_0", "col_1"])
+      expect(result.rows).toEqual([["alice", 42, 100]])
+    })
+
+    test("single unnamed column gets synthetic name (no blank header)", async () => {
+      // SELECT COUNT(*) FROM t → { "": [5] }
+      mockQueryResult = {
+        recordset: [{ "": [5] }],
+      }
+      const result = await connector.execute("SELECT COUNT(*) FROM t")
+      expect(result.columns).toEqual(["col_0"])
+      expect(result.columns).not.toContain("")
+      expect(result.rows).toEqual([[5]])
     })
   })
 
@@ -574,25 +629,48 @@ describe("SQL Server driver unit tests", () => {
     })
 
     test("different clientIds cache separately", async () => {
+      // Prove cache keying by counting distinct getToken invocations: with
+      // separate clientIds we expect 2 calls (one per key); with a shared
+      // clientId we expect 1 on the second connect.
+      let getTokenCalls = 0
       azureIdentityState.tokenOverride = { token: "shared-token", expiresOnTimestamp: Date.now() + 3600_000 }
-      resetMocks()
-      const a = await connect({
-        host: "h.database.windows.net", database: "d",
-        authentication: "azure-active-directory-default",
-        azure_client_id: "client-1",
-      })
-      await a.connect()
-      const b = await connect({
-        host: "h.database.windows.net", database: "d",
-        authentication: "azure-active-directory-default",
-        azure_client_id: "client-2",
-      })
-      await b.connect()
-      // Both embed the mock token but the cache is keyed separately; both calls
-      // hit getToken (not 1) — easiest way to assert is that both configs got
-      // a token with no thrown "expired" behavior.
-      expect(mockConnectCalls[0].authentication.options.token).toBe("shared-token")
-      expect(mockConnectCalls[1].authentication.options.token).toBe("shared-token")
+      const origCredential = (await import("@azure/identity")).DefaultAzureCredential
+      const origGetToken = origCredential.prototype.getToken
+      origCredential.prototype.getToken = async function (scope: string) {
+        getTokenCalls++
+        return origGetToken.call(this, scope)
+      }
+      try {
+        resetMocks()
+        const a = await connect({
+          host: "h.database.windows.net", database: "d",
+          authentication: "azure-active-directory-default",
+          azure_client_id: "client-1",
+        })
+        await a.connect()
+        const b = await connect({
+          host: "h.database.windows.net", database: "d",
+          authentication: "azure-active-directory-default",
+          azure_client_id: "client-2",
+        })
+        await b.connect()
+        // Two distinct client IDs → two distinct cache entries → two getToken
+        // calls. If the cache were keyed only on resource URL this would be 1.
+        expect(getTokenCalls).toBe(2)
+        expect(mockConnectCalls[0].authentication.options.token).toBe("shared-token")
+        expect(mockConnectCalls[1].authentication.options.token).toBe("shared-token")
+
+        // Reconnect with client-1 again — should hit the cache, no new getToken
+        const c = await connect({
+          host: "h.database.windows.net", database: "d",
+          authentication: "azure-active-directory-default",
+          azure_client_id: "client-1",
+        })
+        await c.connect()
+        expect(getTokenCalls).toBe(2)
+      } finally {
+        origCredential.prototype.getToken = origGetToken
+      }
     })
   })
 

@@ -109,8 +109,15 @@ export async function connect(config: ConnectionConfig): Promise<Connector> {
         "managed-identity": "azure-active-directory-msi-vm",
         msi: "azure-active-directory-msi-vm",
       }
-      const rawAuth = config.authentication as string | undefined
-      const authType = rawAuth ? (AUTH_SHORTHANDS[rawAuth.toLowerCase()] ?? rawAuth) : undefined
+      // `config.authentication` is typed as unknown upstream — accept only
+      // strings here. A caller passing a non-string (object, null, pre-built
+      // auth block) shouldn't crash with "toLowerCase is not a function";
+      // treat as "no shorthand requested" and leave authType undefined.
+      const rawAuth = config.authentication
+      const authType =
+        typeof rawAuth === "string"
+          ? (AUTH_SHORTHANDS[rawAuth.toLowerCase()] ?? rawAuth)
+          : undefined
 
       if (authType?.startsWith("azure-active-directory")) {
         ;(mssqlConfig.options as any).encrypt = true
@@ -169,11 +176,18 @@ export async function connect(config: ConnectionConfig): Promise<Connector> {
 
           if (!token) {
             try {
-              const { execSync } = await import("node:child_process")
-              const out = execSync(
+              // Use async `exec` (not `execSync`) so the connection path stays
+              // non-blocking — `az account get-access-token` can take several
+              // seconds to round-trip and execSync would block the entire
+              // event loop for that duration.
+              const childProcess = await import("node:child_process")
+              const { promisify } = await import("node:util")
+              const execAsync = promisify(childProcess.exec)
+              const { stdout } = await execAsync(
                 `az account get-access-token --resource ${resourceUrl} --query accessToken -o tsv`,
-                { encoding: "utf-8", timeout: 15000, stdio: ["pipe", "pipe", "pipe"] },
-              ).trim()
+                { encoding: "utf-8", timeout: 15000 },
+              )
+              const out = stdout.trim()
               if (out) {
                 token = out
                 expiresAt = parseTokenExpiry(out)
@@ -245,6 +259,18 @@ export async function connect(config: ConnectionConfig): Promise<Connector> {
               tenantId: config.azure_tenant_id,
             },
           }
+        } else {
+          // Any other `azure-active-directory-*` subtype (typo or future
+          // tedious addition). Fail fast — otherwise we'd silently connect
+          // with no `authentication` block and tedious would surface an
+          // opaque error far from the root cause.
+          throw new Error(
+            `Unsupported Azure AD authentication subtype: "${authType}". ` +
+            "Supported subtypes: azure-active-directory-default, " +
+            "azure-active-directory-password, azure-active-directory-access-token, " +
+            "azure-active-directory-msi-vm, azure-active-directory-msi-app-service, " +
+            "azure-active-directory-service-principal-secret.",
+          )
         }
       } else {
         // Standard SQL Server user/password
@@ -254,12 +280,17 @@ export async function connect(config: ConnectionConfig): Promise<Connector> {
 
       // Use an explicit ConnectionPool (not the global mssql.connect()) so
       // multiple simultaneous connections to different servers are isolated.
-      if (MssqlConnectionPool) {
-        pool = new MssqlConnectionPool(mssqlConfig)
-        await pool.connect()
-      } else {
-        pool = await mssql.connect(mssqlConfig)
+      // `mssql@^12` guarantees ConnectionPool as a named export — if it's
+      // missing, the installed driver version is too old. Fail fast rather
+      // than silently use the global shared pool (which reintroduces the
+      // cross-database interference bug this branch was added to fix).
+      if (!MssqlConnectionPool) {
+        throw new Error(
+          "mssql.ConnectionPool is not available — the installed `mssql` package is too old. Upgrade to mssql@^12.",
+        )
       }
+      pool = new MssqlConnectionPool(mssqlConfig)
+      await pool.connect()
     },
 
     async execute(sql: string, limit?: number, _binds?: any[], options?: ExecuteOptions): Promise<ConnectorResult> {
@@ -288,28 +319,45 @@ export async function connect(config: ConnectionConfig): Promise<Connector> {
 
       // mssql merges unnamed columns (e.g. SELECT COUNT(*), SUM(...)) into a
       // single array under the empty-string key: row[""] = [val1, val2, ...].
-      // Flatten only the empty-string key to restore positional column values;
-      // legitimate array values from other keys are preserved as-is.
-      const flattenRow = (row: any): any[] => {
+      // When a query mixes named and unnamed columns (e.g.
+      // SELECT name, COUNT(*), SUM(x) → { name: "alice", "": [42, 100] }),
+      // we must preserve the known header for `name` and synthesize col_N only
+      // for the unnamed positions. Build columns and rows in a single pass so
+      // they stay aligned regardless of how many unnamed values the row
+      // contains.
+      let columns: string[] = []
+      let columnsBuilt = false
+      const flatten = (row: any): any[] => {
         const vals: any[] = []
-        for (const [k, v] of Object.entries(row)) {
-          if (k === "" && Array.isArray(v)) vals.push(...v)
-          else vals.push(v)
+        let unnamedCounter = 0
+        const entries = Object.entries(row)
+        for (const [k, v] of entries) {
+          if (k === "" && Array.isArray(v)) {
+            for (const inner of v) {
+              if (!columnsBuilt) columns.push(`col_${unnamedCounter}`)
+              unnamedCounter++
+              vals.push(inner)
+            }
+          } else if (k === "") {
+            // Empty-string key with non-array value — rare edge case, give it
+            // a synthetic name rather than producing a column named "".
+            if (!columnsBuilt) columns.push(`col_${unnamedCounter}`)
+            unnamedCounter++
+            vals.push(v)
+          } else {
+            if (!columnsBuilt) columns.push(k)
+            vals.push(v)
+          }
         }
+        columnsBuilt = true
         return vals
       }
 
-      const rows = limitedRecordset.map(flattenRow)
-      const sampleFlat = rows.length > 0 ? rows[0] : []
-      const namedKeys = recordset.length > 0 ? Object.keys(recordset[0]) : []
-      const columns =
-        namedKeys.length === sampleFlat.length
-          ? namedKeys
-          : sampleFlat.length > 0
-            ? sampleFlat.map((_: any, i: number) => `col_${i}`)
-            : (result.recordset?.columns
-                ? Object.keys(result.recordset.columns)
-                : [])
+      const rows = limitedRecordset.map(flatten)
+      if (!columnsBuilt) {
+        // No rows — fall back to driver-reported column metadata.
+        columns = result.recordset?.columns ? Object.keys(result.recordset.columns) : []
+      }
 
       return {
         columns,

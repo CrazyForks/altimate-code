@@ -591,7 +591,21 @@ function buildPartitionWhereClause(
 
   // date mode
   const expr = dateTruncExpr(granularity!, quotedCol, dialect)
-  const escaped = partitionValue.replace(/'/g, "''")
+  // Normalize the partition value to ISO yyyy-mm-dd. The mssql driver returns
+  // date columns as JS Date objects which get `String()`-coerced upstream,
+  // producing output like "Mon Jan 01 2024 00:00:00 GMT+0000 (UTC)" —
+  // T-SQL `CONVERT(DATE, …, 23)` and Postgres date literals both reject that
+  // format. Parsing once here keeps the downstream SQL dialect-safe.
+  const isoDate = (() => {
+    const trimmed = partitionValue.trim()
+    // Already looks like yyyy-mm-dd — preserve as-is so pre-formatted values
+    // (e.g. from Postgres, BigQuery, DATE_FORMAT MySQL output) flow through
+    // without surprising timezone shifts.
+    if (/^\d{4}-\d{2}-\d{2}(\s|T|$)/.test(trimmed)) return trimmed.slice(0, 10)
+    const d = new Date(trimmed)
+    return Number.isNaN(d.getTime()) ? trimmed : d.toISOString().slice(0, 10)
+  })()
+  const escaped = isoDate.replace(/'/g, "''")
 
   // Cast the literal appropriately per dialect
   switch (dialect) {
@@ -849,6 +863,16 @@ export async function runDataDiff(params: DataDiffParams): Promise<DataDiffResul
     }
   }
 
+  // Resolve warehouse identity (fall back to the default warehouse when the
+  // caller omits a side). Returns the canonical warehouse name so we can detect
+  // cross-warehouse mode even when both sides share a dialect (e.g. two
+  // independent MSSQL instances).
+  const resolveWarehouseName = (warehouse: string | undefined): string | undefined => {
+    if (warehouse) return warehouse
+    const warehouses = Registry.list().warehouses
+    return warehouses[0]?.name
+  }
+
   // Resolve dialect from warehouse config
   const resolveDialect = (warehouse: string | undefined): string => {
     if (warehouse) {
@@ -859,15 +883,21 @@ export async function runDataDiff(params: DataDiffParams): Promise<DataDiffResul
     return warehouseTypeToDialect(warehouses[0]?.type ?? "generic")
   }
 
+  const resolvedSource = resolveWarehouseName(params.source_warehouse)
+  const resolvedTarget = resolveWarehouseName(params.target_warehouse ?? params.source_warehouse)
+
   const dialect1 = resolveDialect(params.source_warehouse)
   const dialect2 = resolveDialect(params.target_warehouse ?? params.source_warehouse)
 
   // Cross-warehouse mode requires side-specific CTE injection: T-SQL / Fabric
   // parse-bind every CTE body even when unreferenced, so sending the combined
   // prefix to a warehouse that lacks the other side's base table fails at parse.
-  // Detect by dialect compare — more robust than warehouse-name compare, and
-  // matches the underlying invariant that we care about (SQL-text divergence).
-  const crossWarehouse = dialect1 !== dialect2
+  // Gate on resolved warehouse identity, not dialect — two independent
+  // same-dialect warehouses (e.g. two MSSQL instances) still can't resolve each
+  // other's base tables. Identity comparison after resolving the default
+  // warehouse avoids misclassifying `source_warehouse=undefined` vs the
+  // explicit default-warehouse name as different.
+  const crossWarehouse = resolvedSource !== resolvedTarget
 
   // Explicit JoinDiff cannot work across warehouses: it emits one FULL OUTER
   // JOIN task referencing both CTE aliases, but side-aware injection only
