@@ -71,6 +71,38 @@ describe("resolveTableSources", () => {
     expect(r.targetCtePrefix).toContain("other.orders")
   })
 
+  test("dialect-aware quoting: tsql uses square brackets", () => {
+    // Fix #4: plain table names wrapped inside CTEs must use the side's
+    // native quoting. `"schema"."table"` fails on MSSQL with QUOTED_IDENTIFIER OFF.
+    const r = resolveTableSources(
+      "dbo.orders",
+      "SELECT * FROM base",
+      "tsql",
+      "postgres",
+    )
+    expect(r.sourceCtePrefix).toContain("[dbo].[orders]")
+    expect(r.sourceCtePrefix).not.toContain('"dbo"."orders"')
+  })
+
+  test("dialect-aware quoting: fabric uses square brackets; mysql uses backticks", () => {
+    // Pair the plain-table side with a SQL-query counterpart to force CTE wrapping.
+    const fabric = resolveTableSources(
+      "gold.dim_customer",
+      "SELECT * FROM other",
+      "fabric",
+      "fabric",
+    )
+    expect(fabric.sourceCtePrefix).toContain("[gold].[dim_customer]")
+
+    const mysql = resolveTableSources(
+      "SELECT 1 AS id",
+      "db.orders",
+      "mysql",
+      "mysql",
+    )
+    expect(mysql.targetCtePrefix).toContain("`db`.`orders`")
+  })
+
   test("query detection requires both keyword AND whitespace", () => {
     // A table literally named "select" should NOT be treated as a query
     const r = resolveTableSources("select", "with")

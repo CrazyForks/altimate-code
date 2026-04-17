@@ -29,6 +29,32 @@ export function warehouseTypeToDialect(warehouseType: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Dialect-aware identifier quoting
+// ---------------------------------------------------------------------------
+
+/**
+ * Quote a SQL identifier using the correct delimiter for the dialect.
+ * Used both for partition column/value quoting and for plain-table-name
+ * wrapping inside CTEs (via `resolveTableSources`).
+ */
+function quoteIdentForDialect(identifier: string, dialect: string): string {
+  switch (dialect) {
+    case "mysql":
+    case "mariadb":
+    case "clickhouse":
+      return `\`${identifier.replace(/`/g, "``")}\``
+    case "tsql":
+    case "fabric":
+    case "sqlserver":
+    case "mssql":
+      return `[${identifier.replace(/\]/g, "]]")}]`
+    default:
+      // ANSI SQL: Postgres, Snowflake, BigQuery, DuckDB, Oracle, Redshift, etc.
+      return `"${identifier.replace(/"/g, '""')}"`
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Query-source detection
 // ---------------------------------------------------------------------------
 
@@ -69,6 +95,8 @@ function isQuery(input: string): boolean {
 export function resolveTableSources(
   source: string,
   target: string,
+  sourceDialect?: string,
+  targetDialect?: string,
 ): {
   table1Name: string
   table2Name: string
@@ -90,16 +118,16 @@ export function resolveTableSources(
     }
   }
 
-  // At least one is a query — wrap both in CTEs
-  // Quote identifier parts so table names with special chars don't inject SQL.
-  // Use double-quote escaping (ANSI SQL standard, works in Postgres/Snowflake/DuckDB/etc.)
-  const quoteIdent = (name: string) =>
-    name
-      .split(".")
-      .map((p) => `"${p.replace(/"/g, '""')}"`)
-      .join(".")
-  const srcExpr = source_is_query ? source : `SELECT * FROM ${quoteIdent(source)}`
-  const tgtExpr = target_is_query ? target : `SELECT * FROM ${quoteIdent(target)}`
+  // At least one is a query — wrap both in CTEs. Quote plain-table names with
+  // the *side's own* dialect so T-SQL / Fabric get `[schema].[table]` and
+  // ANSI dialects get `"schema"."table"` — avoids `QUOTED_IDENTIFIER OFF`
+  // surprises on MSSQL/Fabric. Fallback to ANSI when dialect is unspecified.
+  const quoteTableRef = (name: string, dialect: string | undefined): string => {
+    const d = dialect ?? "generic"
+    return name.split(".").map((p) => quoteIdentForDialect(p, d)).join(".")
+  }
+  const srcExpr = source_is_query ? source : `SELECT * FROM ${quoteTableRef(source, sourceDialect)}`
+  const tgtExpr = target_is_query ? target : `SELECT * FROM ${quoteTableRef(target, targetDialect)}`
 
   const sourceCtePrefix = `WITH __diff_source AS (\n${srcExpr}\n)`
   const targetCtePrefix = `WITH __diff_target AS (\n${tgtExpr}\n)`
@@ -453,24 +481,6 @@ const MAX_STEPS = 200
 // ---------------------------------------------------------------------------
 
 /**
- * Quote a SQL identifier using the correct delimiter for the dialect.
- */
-function quoteIdentForDialect(identifier: string, dialect: string): string {
-  switch (dialect) {
-    case "mysql":
-    case "mariadb":
-    case "clickhouse":
-      return `\`${identifier.replace(/`/g, "``")}\``
-    case "tsql":
-    case "fabric":
-      return `[${identifier.replace(/\]/g, "]]")}]`
-    default:
-      // ANSI SQL: Postgres, Snowflake, BigQuery, DuckDB, Oracle, Redshift, etc.
-      return `"${identifier.replace(/"/g, '""')}"`
-  }
-}
-
-/**
  * Build a DATE_TRUNC expression appropriate for the warehouse dialect.
  */
 function dateTruncExpr(granularity: string, column: string, dialect: string): string {
@@ -693,7 +703,12 @@ async function runPartitionedDiff(params: DataDiffParams): Promise<DataDiffResul
 
   const sourceDialect = resolveDialect(params.source_warehouse)
   const targetDialect = resolveDialect(params.target_warehouse ?? params.source_warehouse)
-  const { table1Name, table2Name } = resolveTableSources(params.source, params.target)
+  const { table1Name, table2Name } = resolveTableSources(
+    params.source,
+    params.target,
+    sourceDialect,
+    targetDialect,
+  )
 
   // Discover partition values from BOTH source and target to catch target-only partitions.
   // Without this, rows that exist only in target partitions are silently missed.
@@ -747,19 +762,46 @@ async function runPartitionedDiff(params: DataDiffParams): Promise<DataDiffResul
   let aggregatedOutcome: unknown = null
   let totalSteps = 1
 
+  // Build dialect-appropriate table expressions once — used for subquery
+  // wrapping below. Splitting on "." preserves schema.table / db.schema.table
+  // while ensuring each component is quoted in the side's native dialect.
+  const quoteTableRefForDialect = (name: string, dialect: string): string =>
+    name.split(".").map((p) => quoteIdentForDialect(p, dialect)).join(".")
+  const sourceTableRef = quoteTableRefForDialect(params.source, sourceDialect)
+  const targetTableRef = quoteTableRefForDialect(params.target, targetDialect)
+
   for (const pVal of partitionValues) {
-    const partWhere = buildPartitionWhereClause(
+    // Build per-side partition WHERE clauses. The dialects can differ
+    // (cross-warehouse diff) — the engine applies `where_clause` to both
+    // sides identically, so we can't use it to carry dialect-specific syntax.
+    // Bake each side's WHERE into its own subquery-wrapped SQL source instead.
+    const sourcePartWhere = buildPartitionWhereClause(
       params.partition_column!,
       pVal,
       params.partition_granularity,
       params.partition_bucket_size,
       sourceDialect,
     )
-    const fullWhere = params.where_clause ? `(${params.where_clause}) AND (${partWhere})` : partWhere
+    const targetPartWhere = buildPartitionWhereClause(
+      params.partition_column!,
+      pVal,
+      params.partition_granularity,
+      params.partition_bucket_size,
+      targetDialect,
+    )
+
+    // Wrap each side's table as a SELECT subquery filtered to this partition.
+    // The recursive runDataDiff below will detect these as SQL queries and
+    // route them through the CTE-injection path, which is already side-aware.
+    const sourceSql = `SELECT * FROM ${sourceTableRef} WHERE ${sourcePartWhere}`
+    const targetSql = `SELECT * FROM ${targetTableRef} WHERE ${targetPartWhere}`
 
     const result = await runDataDiff({
       ...params,
-      where_clause: fullWhere,
+      source: sourceSql,
+      target: targetSql,
+      // Preserve the user's shared where_clause — it's dialect-neutral.
+      where_clause: params.where_clause,
       partition_column: undefined, // prevent recursion
     })
 
@@ -807,28 +849,6 @@ export async function runDataDiff(params: DataDiffParams): Promise<DataDiffResul
     }
   }
 
-  // Resolve sources (plain table names vs arbitrary queries)
-  const { table1Name, table2Name, ctePrefix, sourceCtePrefix, targetCtePrefix } =
-    resolveTableSources(params.source, params.target)
-
-  // Cross-warehouse mode requires side-specific CTE injection: T-SQL / Fabric
-  // parse-bind every CTE body even when unreferenced, so sending the combined
-  // prefix to a warehouse that lacks the other side's base table fails at parse.
-  const sourceWarehouse = params.source_warehouse
-  const targetWarehouse = params.target_warehouse ?? params.source_warehouse
-  const crossWarehouse = sourceWarehouse !== targetWarehouse
-
-  // Parse optional qualified names: "db.schema.table" → { database, schema, table }
-  const parseQualified = (name: string) => {
-    const parts = name.split(".")
-    if (parts.length === 3) return { database: parts[0], schema: parts[1], table: parts[2] }
-    if (parts.length === 2) return { schema: parts[0], table: parts[1] }
-    return { table: name }
-  }
-
-  const table1Ref = parseQualified(table1Name)
-  const table2Ref = parseQualified(table2Name)
-
   // Resolve dialect from warehouse config
   const resolveDialect = (warehouse: string | undefined): string => {
     if (warehouse) {
@@ -841,6 +861,42 @@ export async function runDataDiff(params: DataDiffParams): Promise<DataDiffResul
 
   const dialect1 = resolveDialect(params.source_warehouse)
   const dialect2 = resolveDialect(params.target_warehouse ?? params.source_warehouse)
+
+  // Cross-warehouse mode requires side-specific CTE injection: T-SQL / Fabric
+  // parse-bind every CTE body even when unreferenced, so sending the combined
+  // prefix to a warehouse that lacks the other side's base table fails at parse.
+  // Detect by dialect compare — more robust than warehouse-name compare, and
+  // matches the underlying invariant that we care about (SQL-text divergence).
+  const crossWarehouse = dialect1 !== dialect2
+
+  // Explicit JoinDiff cannot work across warehouses: it emits one FULL OUTER
+  // JOIN task referencing both CTE aliases, but side-aware injection only
+  // defines one side per task — the other alias would be unresolved. Guard
+  // early so users get a clear error instead of an obscure SQL parse failure.
+  if (params.algorithm === "joindiff" && crossWarehouse) {
+    return {
+      success: false,
+      steps: 0,
+      error:
+        "joindiff requires both tables in the same warehouse; use hashdiff or auto for cross-warehouse comparisons.",
+    }
+  }
+
+  // Resolve sources (plain table names vs arbitrary queries). Pass dialects so
+  // plain-table names inside wrapped CTEs get side-native bracket/quote style.
+  const { table1Name, table2Name, ctePrefix, sourceCtePrefix, targetCtePrefix } =
+    resolveTableSources(params.source, params.target, dialect1, dialect2)
+
+  // Parse optional qualified names: "db.schema.table" → { database, schema, table }
+  const parseQualified = (name: string) => {
+    const parts = name.split(".")
+    if (parts.length === 3) return { database: parts[0], schema: parts[1], table: parts[2] }
+    if (parts.length === 2) return { schema: parts[0], table: parts[1] }
+    return { table: name }
+  }
+
+  const table1Ref = parseQualified(table1Name)
+  const table2Ref = parseQualified(table2Name)
 
   // Auto-discover extra_columns when not explicitly provided.
   // The Rust engine only compares columns listed in extra_columns — if the list is
@@ -948,7 +1004,13 @@ export async function runDataDiff(params: DataDiffParams): Promise<DataDiffResul
           if (crossWarehouse) {
             prefix = task.table_side === "Table2" ? targetCtePrefix : sourceCtePrefix
           } else {
-            prefix = ctePrefix
+            if (task.table_side === "Table1") {
+              prefix = sourceCtePrefix
+            } else if (task.table_side === "Table2") {
+              prefix = targetCtePrefix
+            } else {
+              prefix = ctePrefix
+            }
           }
         }
         const sql = prefix ? injectCte(task.sql, prefix) : task.sql

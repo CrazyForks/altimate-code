@@ -70,6 +70,7 @@ const SQLSERVER_ALIASES: AliasMap = {
   azure_client_id: ["clientId", "client_id", "azureClientId"],
   azure_client_secret: ["clientSecret", "client_secret", "azureClientSecret"],
   access_token: ["token", "accessToken"],
+  azure_resource_url: ["azureResourceUrl", "resourceUrl", "resource_url"],
 }
 
 const ORACLE_ALIASES: AliasMap = {

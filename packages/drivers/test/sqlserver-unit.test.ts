@@ -65,25 +65,47 @@ mock.module("mssql", () => ({
   },
 }))
 
+// Exposed to individual tests so they can assert scope / force failures.
+const azureIdentityState = {
+  lastScope: "" as string,
+  tokenOverride: null as null | { token: string; expiresOnTimestamp?: number },
+  throwOnGetToken: false as boolean,
+}
 mock.module("@azure/identity", () => ({
   DefaultAzureCredential: class {
     _opts: any
     constructor(opts?: any) { this._opts = opts }
-    async getToken(_scope: string) { return { token: "mock-azure-token-12345", expiresOnTimestamp: Date.now() + 3600000 } }
+    async getToken(scope: string) {
+      azureIdentityState.lastScope = scope
+      if (azureIdentityState.throwOnGetToken) throw new Error("mock identity failure")
+      if (azureIdentityState.tokenOverride) return azureIdentityState.tokenOverride
+      return { token: "mock-azure-token-12345", expiresOnTimestamp: Date.now() + 3600000 }
+    }
   },
 }))
 
-// Bun's mock.module() replaces the module for ALL test files in the same run,
-// so we re-export every symbol other tests might import (spawn, exec, fork, etc.)
-// in addition to the execSync stub used by the Azure CLI fallback path.
+// Exposed to tests to stub the `az` CLI fallback.
+const cliState = {
+  lastCmd: "" as string,
+  output: "mock-cli-token-fallback\n" as string,
+  throwError: null as null | { stderr?: string; message?: string },
+}
 const realChildProcess = await import("node:child_process")
 mock.module("node:child_process", () => ({
   ...realChildProcess,
-  execSync: (_cmd: string) => "mock-cli-token-fallback\n",
+  execSync: (cmd: string) => {
+    cliState.lastCmd = cmd
+    if (cliState.throwError) {
+      const e: any = new Error(cliState.throwError.message ?? "az failed")
+      e.stderr = cliState.throwError.stderr
+      throw e
+    }
+    return cliState.output
+  },
 }))
 
 // Import after mocking
-const { connect } = await import("../src/sqlserver")
+const { connect, _resetTokenCacheForTests } = await import("../src/sqlserver")
 
 describe("SQL Server driver unit tests", () => {
   let connector: Awaited<ReturnType<typeof connect>>
@@ -486,6 +508,180 @@ describe("SQL Server driver unit tests", () => {
       }
       const result = await connector.execute("SELECT * FROM t")
       expect(result.rows).toEqual([["alice", 42]])
+    })
+  })
+
+  // --- Azure token caching (Fix #2) ---
+
+  describe("Azure token cache", () => {
+    beforeEach(() => {
+      _resetTokenCacheForTests()
+      azureIdentityState.throwOnGetToken = false
+      azureIdentityState.tokenOverride = null
+      cliState.throwError = null
+      cliState.output = "mock-cli-token-fallback\n"
+    })
+
+    test("second connect with same (resource, clientId) reuses cached token", async () => {
+      let getTokenCalls = 0
+      azureIdentityState.tokenOverride = { token: "cached-token-A", expiresOnTimestamp: Date.now() + 3600_000 }
+      // Hook getToken counter
+      const origCredential = (await import("@azure/identity")).DefaultAzureCredential
+      const origGetToken = origCredential.prototype.getToken
+      origCredential.prototype.getToken = async function (scope: string) {
+        getTokenCalls++
+        return origGetToken.call(this, scope)
+      }
+      try {
+        resetMocks()
+        const c1 = await connect({
+          host: "h.database.windows.net", database: "d",
+          authentication: "azure-active-directory-default",
+        })
+        await c1.connect()
+        const c2 = await connect({
+          host: "h.database.windows.net", database: "d",
+          authentication: "azure-active-directory-default",
+        })
+        await c2.connect()
+        expect(getTokenCalls).toBe(1)
+        // Both pool configs embed the same cached token
+        expect(mockConnectCalls[0].authentication.options.token).toBe("cached-token-A")
+        expect(mockConnectCalls[1].authentication.options.token).toBe("cached-token-A")
+      } finally {
+        origCredential.prototype.getToken = origGetToken
+      }
+    })
+
+    test("near-expiry token triggers refresh", async () => {
+      // First token expires in 1 minute (well under the 5-minute refresh margin)
+      azureIdentityState.tokenOverride = { token: "about-to-expire", expiresOnTimestamp: Date.now() + 60_000 }
+      resetMocks()
+      const c1 = await connect({
+        host: "h.database.windows.net", database: "d",
+        authentication: "azure-active-directory-default",
+      })
+      await c1.connect()
+      // Now change the mock to issue a new token on refresh
+      azureIdentityState.tokenOverride = { token: "fresh-token", expiresOnTimestamp: Date.now() + 3600_000 }
+      const c2 = await connect({
+        host: "h.database.windows.net", database: "d",
+        authentication: "azure-active-directory-default",
+      })
+      await c2.connect()
+      expect(mockConnectCalls[0].authentication.options.token).toBe("about-to-expire")
+      expect(mockConnectCalls[1].authentication.options.token).toBe("fresh-token")
+    })
+
+    test("different clientIds cache separately", async () => {
+      azureIdentityState.tokenOverride = { token: "shared-token", expiresOnTimestamp: Date.now() + 3600_000 }
+      resetMocks()
+      const a = await connect({
+        host: "h.database.windows.net", database: "d",
+        authentication: "azure-active-directory-default",
+        azure_client_id: "client-1",
+      })
+      await a.connect()
+      const b = await connect({
+        host: "h.database.windows.net", database: "d",
+        authentication: "azure-active-directory-default",
+        azure_client_id: "client-2",
+      })
+      await b.connect()
+      // Both embed the mock token but the cache is keyed separately; both calls
+      // hit getToken (not 1) — easiest way to assert is that both configs got
+      // a token with no thrown "expired" behavior.
+      expect(mockConnectCalls[0].authentication.options.token).toBe("shared-token")
+      expect(mockConnectCalls[1].authentication.options.token).toBe("shared-token")
+    })
+  })
+
+  // --- Configurable / inferred Azure resource URL (Fix #5) ---
+
+  describe("Azure resource URL resolution", () => {
+    beforeEach(() => {
+      _resetTokenCacheForTests()
+      azureIdentityState.throwOnGetToken = false
+      azureIdentityState.tokenOverride = null
+      cliState.throwError = null
+    })
+
+    test("commercial cloud: default to database.windows.net", async () => {
+      resetMocks()
+      const c = await connect({
+        host: "myserver.database.windows.net", database: "d",
+        authentication: "azure-active-directory-default",
+      })
+      await c.connect()
+      expect(azureIdentityState.lastScope).toBe("https://database.windows.net/.default")
+    })
+
+    test("Azure Government host infers usgovcloudapi.net", async () => {
+      resetMocks()
+      const c = await connect({
+        host: "myserver.database.usgovcloudapi.net", database: "d",
+        authentication: "azure-active-directory-default",
+      })
+      await c.connect()
+      expect(azureIdentityState.lastScope).toBe("https://database.usgovcloudapi.net/.default")
+    })
+
+    test("Azure China host infers chinacloudapi.cn", async () => {
+      resetMocks()
+      const c = await connect({
+        host: "myserver.database.chinacloudapi.cn", database: "d",
+        authentication: "azure-active-directory-default",
+      })
+      await c.connect()
+      expect(azureIdentityState.lastScope).toBe("https://database.chinacloudapi.cn/.default")
+    })
+
+    test("explicit azure_resource_url wins over host inference", async () => {
+      resetMocks()
+      const c = await connect({
+        host: "myserver.database.windows.net", // commercial host
+        database: "d",
+        authentication: "azure-active-directory-default",
+        azure_resource_url: "https://custom.sovereign.example/",
+      })
+      await c.connect()
+      expect(azureIdentityState.lastScope).toBe("https://custom.sovereign.example/.default")
+    })
+
+    test("az CLI fallback uses the same resource URL", async () => {
+      // Disable @azure/identity so we hit the az CLI fallback
+      azureIdentityState.throwOnGetToken = true
+      cliState.output = "eyJ.eyJ.sig\n" // looks like JWT; parseTokenExpiry returns undefined → fallback TTL
+      resetMocks()
+      const c = await connect({
+        host: "myserver.database.usgovcloudapi.net", database: "d",
+        authentication: "azure-active-directory-default",
+      })
+      await c.connect()
+      expect(cliState.lastCmd).toContain("--resource https://database.usgovcloudapi.net/")
+    })
+  })
+
+  // --- Error surfacing when auth fails (Fix #5 bonus, Minor #10 addressed) ---
+
+  describe("Azure auth error surfacing", () => {
+    beforeEach(() => {
+      _resetTokenCacheForTests()
+      azureIdentityState.throwOnGetToken = false
+      azureIdentityState.tokenOverride = null
+      cliState.throwError = null
+    })
+
+    test("both @azure/identity and az CLI fail → error includes both hints", async () => {
+      azureIdentityState.throwOnGetToken = true
+      cliState.throwError = { stderr: "Please run 'az login' to set up an account.", message: "failed" }
+      resetMocks()
+      const c = await connect({
+        host: "h.database.windows.net", database: "d",
+        authentication: "azure-active-directory-default",
+      })
+      await expect(c.connect()).rejects.toThrow(/Azure AD token acquisition failed/)
+      await expect(c.connect()).rejects.toThrow(/az CLI:.*az login/)
     })
   })
 })

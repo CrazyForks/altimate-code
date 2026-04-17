@@ -4,6 +4,65 @@
 
 import type { ConnectionConfig, Connector, ConnectorResult, ExecuteOptions, SchemaColumn } from "./types"
 
+// ---------------------------------------------------------------------------
+// Azure AD helpers — cache + resource URL resolution
+// ---------------------------------------------------------------------------
+
+// Module-scoped token cache, keyed by `${resource}|${clientId ?? ""}`.
+// Tokens are reused across `connect()` calls in the same process and refreshed
+// a few minutes before expiry. Fixes the issue where every new connection
+// fetched a fresh token (wasteful, risks throttling) and long-lived diffs
+// failed silently when the embedded token hit its ~1h TTL.
+const tokenCache = new Map<string, { token: string; expiresAt: number }>()
+const TOKEN_REFRESH_MARGIN_MS = 5 * 60 * 1000 // refresh 5 minutes before expiry
+const TOKEN_FALLBACK_TTL_MS = 50 * 60 * 1000 // used when JWT has no exp claim
+
+/**
+ * Parse the `exp` claim from a JWT access token (milliseconds since epoch).
+ * Returns undefined if the token isn't a JWT or has no exp claim.
+ */
+function parseTokenExpiry(token: string): number | undefined {
+  try {
+    const parts = token.split(".")
+    if (parts.length !== 3) return undefined
+    const payload = parts[1]
+    // base64url → base64 + padding
+    const padded = payload.replace(/-/g, "+").replace(/_/g, "/") +
+      "=".repeat((4 - (payload.length % 4)) % 4)
+    const decoded = Buffer.from(padded, "base64").toString("utf-8")
+    const claims = JSON.parse(decoded)
+    return typeof claims.exp === "number" ? claims.exp * 1000 : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Resolve the Azure resource URL for token acquisition.
+ *
+ * Preference order:
+ *   1. Explicit `config.azure_resource_url`.
+ *   2. Inferred from host suffix (Azure Gov / China).
+ *   3. Default Azure commercial cloud.
+ */
+function resolveAzureResourceUrl(config: ConnectionConfig): string {
+  const explicit = config.azure_resource_url as string | undefined
+  if (explicit) return explicit
+  const host = (config.host as string | undefined) ?? ""
+  if (host.includes(".usgovcloudapi.net") || host.includes(".datawarehouse.fabric.microsoft.us")) {
+    return "https://database.usgovcloudapi.net/"
+  }
+  if (host.includes(".chinacloudapi.cn")) {
+    return "https://database.chinacloudapi.cn/"
+  }
+  return "https://database.windows.net/"
+}
+
+/** Visible for testing: reset the module-scoped token cache. */
+export function _resetTokenCacheForTests(): void {
+  tokenCache.clear()
+}
+
 export async function connect(config: ConnectionConfig): Promise<Connector> {
   let mssql: any
   let MssqlConnectionPool: any
@@ -70,8 +129,24 @@ export async function connect(config: ConnectionConfig): Promise<Connector> {
         // Strategy: try @azure/identity first (works when module resolution
         // is correct), fall back to shelling out to `az account get-access-token`
         // (works everywhere Azure CLI is installed).
+        //
+        // Tokens are cached module-scope keyed by (resource, client_id) and
+        // refreshed 5 minutes before expiry — reuses tokens across connections
+        // and prevents silent failures when embedded tokens hit their TTL.
+        const resourceUrl = resolveAzureResourceUrl(config)
+        const clientId = (config.azure_client_id as string | undefined) ?? ""
+        const cacheKey = `${resourceUrl}|${clientId}`
+
         const acquireAzureToken = async (): Promise<string> => {
+          const cached = tokenCache.get(cacheKey)
+          if (cached && cached.expiresAt - Date.now() > TOKEN_REFRESH_MARGIN_MS) {
+            return cached.token
+          }
+
           let token: string | undefined
+          let expiresAt: number | undefined
+          let azureIdentityError: unknown = null
+          let azCliStderr = ""
 
           try {
             const azureIdentity = await import("@azure/identity")
@@ -80,31 +155,51 @@ export async function connect(config: ConnectionConfig): Promise<Connector> {
                 ? { managedIdentityClientId: config.azure_client_id as string }
                 : undefined,
             )
-            const tokenResponse = await credential.getToken("https://database.windows.net/.default")
-            token = tokenResponse?.token
-          } catch {
-            // @azure/identity unavailable or browser bundle — fall through
+            const tokenResponse = await credential.getToken(`${resourceUrl}.default`)
+            if (tokenResponse?.token) {
+              token = tokenResponse.token
+              // @azure/identity provides expiresOnTimestamp (ms). Prefer it; fall
+              // back to parsing the JWT exp claim so both paths share the cache.
+              expiresAt = tokenResponse.expiresOnTimestamp ?? parseTokenExpiry(token)
+            }
+          } catch (err) {
+            azureIdentityError = err
+            // @azure/identity unavailable or browser bundle — fall through to CLI
           }
 
           if (!token) {
             try {
               const { execSync } = await import("node:child_process")
               const out = execSync(
-                "az account get-access-token --resource https://database.windows.net/ --query accessToken -o tsv",
+                `az account get-access-token --resource ${resourceUrl} --query accessToken -o tsv`,
                 { encoding: "utf-8", timeout: 15000, stdio: ["pipe", "pipe", "pipe"] },
               ).trim()
-              if (out) token = out
-            } catch {
-              // az CLI not installed or not logged in
+              if (out) {
+                token = out
+                expiresAt = parseTokenExpiry(out)
+              }
+            } catch (err: any) {
+              // Capture stderr so the final error message can hint at the root cause
+              // (e.g. "Please run 'az login'", "subscription not found").
+              azCliStderr = String(err?.stderr ?? err?.message ?? "").slice(0, 200).trim()
             }
           }
 
           if (!token) {
+            const hints: string[] = []
+            if (azureIdentityError) hints.push(`@azure/identity: ${String(azureIdentityError).slice(0, 120)}`)
+            if (azCliStderr) hints.push(`az CLI: ${azCliStderr}`)
+            const detail = hints.length > 0 ? ` (${hints.join("; ")})` : ""
             throw new Error(
-              "Azure AD token acquisition failed. Either install @azure/identity (npm install @azure/identity) " +
+              `Azure AD token acquisition failed${detail}. Either install @azure/identity (npm install @azure/identity) ` +
               "or log in with Azure CLI (az login).",
             )
           }
+
+          tokenCache.set(cacheKey, {
+            token,
+            expiresAt: expiresAt ?? Date.now() + TOKEN_FALLBACK_TTL_MS,
+          })
           return token
         }
 
