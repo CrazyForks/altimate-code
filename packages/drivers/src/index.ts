@@ -2,7 +2,7 @@
 export type { Connector, ConnectorResult, SchemaColumn, ConnectionConfig } from "./types"
 
 // Re-export config normalization
-export { normalizeConfig } from "./normalize"
+export { normalizeConfig, sanitizeConnectionString } from "./normalize"
 
 // Re-export driver connect functions
 export { connect as connectPostgres } from "./postgres"
@@ -16,3 +16,4 @@ export { connect as connectOracle } from "./oracle"
 export { connect as connectDuckdb } from "./duckdb"
 export { connect as connectSqlite } from "./sqlite"
 export { connect as connectMongodb } from "./mongodb"
+export { connect as connectClickhouse } from "./clickhouse"

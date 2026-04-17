@@ -8,6 +8,9 @@
     "./*": "./src/*.ts"
   },
   "files": ["src"],
+  "devDependencies": {
+    "mongodb": "^6.0.0"
+  },
   "optionalDependencies": {
     "pg": "^8.0.0",
     "snowflake-sdk": "^2.0.3",
@@ -17,6 +20,7 @@
     "mssql": "^11.0.0",
     "oracledb": "^6.0.0",
     "duckdb": "^1.0.0",
-    "mongodb": "^6.0.0"
+    "mongodb": "^6.0.0",
+    "@clickhouse/client": "^1.0.0"
   }
 }

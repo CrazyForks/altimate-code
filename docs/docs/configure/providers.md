@@ -23,6 +23,24 @@ Each provider has a key in the `provider` object:
 !!! tip
     Use `{env:...}` substitution for API keys so you never commit secrets to version control.
 
+## Altimate LLM Gateway
+
+Managed LLM access with dynamic routing across Sonnet 4.6, Opus 4.6, GPT-5.4, GPT-5.3, and more. No API keys to manage — 10M tokens free to get started.
+
+```json
+{
+  "provider": {
+    "altimate": {}
+  },
+  "model": "altimate/auto"
+}
+```
+
+For pricing, security, and data handling details, see the [Altimate LLM Gateway guide](https://datamates-docs.myaltimate.com/user-guide/components/llm-gateway/).
+
+!!! tip "Automatic model selection"
+    When Altimate credentials are configured and no model is explicitly chosen, `altimate-backend/altimate-default` is selected automatically. You can override this by setting `model` in your config or by restricting the `provider` section to specific providers only.
+
 ## Anthropic
 
 ```json

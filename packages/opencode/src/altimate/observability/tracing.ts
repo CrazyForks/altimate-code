@@ -172,12 +172,17 @@ export class FileExporter implements TraceExporter {
   }
 
   async export(trace: TraceFile): Promise<string | undefined> {
+    let tmpPath: string | undefined
     try {
       await fs.mkdir(this.dir, { recursive: true })
       // Sanitize sessionId for safe file name (defense-in-depth — also sanitized in Trace)
       const safeId = (trace.sessionId ?? "unknown").replace(/[/\\.:]/g, "_") || "unknown"
       const filePath = path.join(this.dir, `${safeId}.json`)
-      await fs.writeFile(filePath, JSON.stringify(trace, null, 2))
+      // Atomic write: write to temp file, then rename — prevents partial reads
+      // when concurrent snapshots or exports target the same file
+      tmpPath = filePath + `.tmp.${Date.now()}.${Math.random().toString(36).slice(2, 8)}`
+      await fs.writeFile(tmpPath, JSON.stringify(trace, null, 2))
+      await fs.rename(tmpPath, filePath)
 
       if (this.maxFiles > 0) {
         this.pruneOldTraces().catch(() => {})
@@ -185,6 +190,7 @@ export class FileExporter implements TraceExporter {
 
       return filePath
     } catch {
+      if (tmpPath) fs.unlink(tmpPath).catch(() => {})
       return undefined
     }
   }
@@ -195,6 +201,18 @@ export class FileExporter implements TraceExporter {
 
   private async pruneOldTraces() {
     const entries = await fs.readdir(this.dir, { withFileTypes: true })
+    // Sweep stale temp files (crashes between writeFile and rename leave .tmp.*
+    // artifacts). Older than 1 hour = definitely abandoned.
+    const staleCutoff = Date.now() - 60 * 60 * 1000
+    const tmpFiles = entries.filter((e) => e.isFile() && /\.json\.tmp\.[0-9]+\./.test(e.name))
+    await Promise.allSettled(
+      tmpFiles.map(async (e) => {
+        const p = path.join(this.dir, e.name)
+        const stat = await fs.stat(p).catch(() => undefined)
+        if (stat && stat.mtimeMs < staleCutoff) await fs.unlink(p).catch(() => undefined)
+      }),
+    )
+
     const jsonFiles = entries
       .filter((e) => e.isFile() && e.name.endsWith(".json"))
       .map((e) => e.name)
@@ -979,6 +997,32 @@ export class Trace {
       return traces
     } catch {
       return []
+    }
+  }
+
+  /**
+   * List traces with pagination support.
+   * Returns a page of traces plus total count for building pagination UI.
+   */
+  static async listTracesPaginated(
+    dir?: string,
+    options?: { offset?: number; limit?: number },
+  ): Promise<{
+    traces: Array<{ sessionId: string; file: string; trace: TraceFile }>
+    total: number
+    offset: number
+    limit: number
+  }> {
+    const all = await Trace.listTraces(dir)
+    const rawOffset = options?.offset ?? 0
+    const rawLimit = options?.limit ?? 20
+    const offset = Number.isFinite(rawOffset) ? Math.max(0, Math.trunc(rawOffset)) : 0
+    const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.trunc(rawLimit)) : 20
+    return {
+      traces: all.slice(offset, offset + limit),
+      total: all.length,
+      offset,
+      limit,
     }
   }
 

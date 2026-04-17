@@ -5,6 +5,120 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.21] - 2026-04-13
+
+### Added
+
+- **Automated dbt unit test generation** — generate dbt unit tests (v1.8+) from your terminal with `/dbt-unit-tests` or the `dbt_unit_test_gen` tool. Detects testable SQL constructs (CASE/WHEN, JOINs, NULLs, window functions, division, incremental models) and assembles complete YAML with type-correct mock data across 7 dialects. Includes `input: this` mocks for incremental models, `format: sql` for ephemeral deps, and handles seeds/snapshots as first-class `ref()` deps. Five-phase skill workflow: Analyze → Generate → Refine → Validate → Write. Requires dbt-core 1.8+. (#673)
+- **Manifest parse cache** — `loadRawManifest()` caches by path+mtime so large manifests (100MB+) are parsed once per session, not once per tool call.
+- **Model/source descriptions in manifest** — `DbtModelInfo` and `DbtSourceInfo` now surface descriptions from `schema.yml`, giving downstream tools richer semantic context.
+- **`adapter_type` on `DbtManifestResult`** — exposes the dbt adapter type (snowflake, bigquery, etc.) from manifest metadata for dialect auto-detection.
+
+### Fixed
+
+- **MCP env-var `$${VAR}` escape and chain-injection vulnerability** — the two-layer env-var resolution design allowed `$${VAR}` escapes to be re-resolved (breaking literal `${VAR}` passthrough) and enabled variable-chain injection where `EVIL_VAR="${SECRET}"` could exfiltrate secrets the config never referenced. Collapsed to a single resolution pass scoped to `env` and `headers` fields only. (#697, relates to #656)
+- **MCP server environment variables passed as literals** — `${VAR}`, `${VAR:-default}`, and `{env:VAR}` patterns in MCP server `env` blocks were passed as literal strings to child processes, causing auth failures for tools like `gitlab-mcp-server`. (#666, closes #656)
+- **`sql_explain` and `altimate_core_validate` input hardening** — reject empty/placeholder SQL and warehouse names before hitting the warehouse. `sql_explain` now generates dialect-aware EXPLAIN statements for 12+ warehouse types. Driver errors are translated into actionable guidance (e.g., "No warehouses configured — run `warehouse_add`"). `altimate_core_validate` now runs even without a schema (previously hard-failed), with a `(no schema)` indicator and clear instructions for providing schema context. (#693, closes #691)
+- **`sql_explain` alternatives for unsupported warehouses** — BigQuery, Oracle, and SQL Server now return specific guidance (dry-run API, `DBMS_XPLAN`, `SET SHOWPLAN_TEXT ON`) instead of a generic "not supported" message.
+
+## [0.5.20] - 2026-04-09
+
+### Added
+
+- **Altimate model auto-selection** — when Altimate credentials are configured and no model is explicitly chosen, `altimate-backend/altimate-default` is selected automatically. Respects the `provider` filter in config if set. No manual `/model` selection needed for first-time Altimate users. (#665)
+
+### Fixed
+
+- **Connection string passwords with special characters** — passwords containing `@`, `#`, `:`, `/`, or other URI-reserved characters are now automatically percent-encoded in `connection_string` configs. Previously these caused cryptic authentication failures because the URI parser split on the wrong delimiter. Already-encoded passwords (`%XX`) are left untouched. Affects all URI-based drivers (PostgreSQL, MongoDB, ClickHouse). (#597, closes #589)
+- **`trace list` pagination** — `trace list` now supports `--offset` for navigating large trace histories, displays "Showing X-Y of N" with a next-page hint, and caps the TUI trace dialog at 500 items (up from 50) with an overflow message pointing to the CLI for the full set. (#596, closes #418)
+- **ClickHouse edge-case hardening** — added tests for `LowCardinality(Nullable(...))` nullability detection, `Map`/`Tuple` wrapper handling, undefined type fallback, and SQL comment/string-escape edge cases in the LIMIT injection guard. (#599, closes #592)
+
+### Testing
+
+- 31 new adversarial tests covering connection string sanitization (injection, encoding edge cases, ReDoS, Unicode, null bytes), pagination boundary math (Infinity, NaN, fractional, negative inputs), and `Provider.parseModel` edge cases.
+
+## [0.5.19] - 2026-04-04
+
+### Added
+
+- **`${VAR}` environment variable interpolation in configs** — use shell/dotenv-style `${DB_PASSWORD}`, `${MODE:-production}` (with defaults), or `$${VAR}` (literal escape) anywhere in `altimate.json` and MCP server configs. Values are JSON-escape-safe so passwords containing quotes or backslashes can't corrupt your config structure. The existing `{env:VAR}` syntax continues to work for raw text injection. (#655, closes #635)
+
+### Fixed
+
+- **Plan agent warns when the model refuses to tool-call** — if the plan agent's model returns text without invoking any tools, altimate-code now surfaces a one-shot TUI warning suggesting you switch models via `/model` instead of silently hanging. Telemetry event `plan_no_tool_generation` emitted for session-level diagnosis. (#653)
+- **GitLab MR review: large-diff guard & prompt-injection hardening** — MRs exceeding 50 files or 200 KB of diff text are truncated upfront with a user-visible warning, and the review prompt explicitly frames MR content as untrusted input. (#648)
+- **Atomic trace file writes** — `FileExporter` now writes to a temp file and renames, preventing partial/corrupt trace JSON on crash or SIGKILL. Stale `.tmp.*` artifacts older than 1 hour are swept during prune. (#646)
+- **15s timeout on credential validation** — `AltimateApi.validateCredentials()` no longer hangs indefinitely if the auth endpoint stalls. (#648)
+- **Shadow-mode SQL pre-validation telemetry** — measures catch-rate for structural errors (missing columns, tables) against cached schema before enabling user-visible blocking in a future release. Fire-and-forget, zero impact on the `sql_execute` hot path. No raw SQL, schema identifiers, or validator error text transmitted. (#643, #651)
+- **GitLab docs rewrite** — replaced "work in progress" warning with a complete guide: quick-start, authentication, self-hosted instances, model selection, CI example. (#648)
+
+### Testing
+
+- 25 new adversarial tests covering env-var interpolation (JSON-escape safety, single-pass substitution, ReDoS, escape hatch, defaults), atomic write hygiene (race conditions, tmp sweep, sessionId sanitization), and telemetry identifier-leak guards. New ClickHouse finops/profiles/registry coverage. (#624)
+
+## [0.5.18] - 2026-04-04
+
+### Added
+
+- **Native GitLab MR review** — review merge requests directly from your terminal with `altimate gitlab review <MR_URL>`. Supports self-hosted GitLab instances, nested group paths, and comment deduplication (updates existing review instead of posting duplicates). Requires `GITLAB_PERSONAL_ACCESS_TOKEN` or `GITLAB_TOKEN` env var. (#622)
+- **Altimate LLM Gateway provider** — connect to Altimate's managed model gateway via the TUI provider dialog (select a provider → "Altimate"). Credentials validated before save, stored at `~/.altimate/altimate.json` with `0600` permissions. (#606)
+
+### Fixed
+
+- **Glob tool: timeout, home/root blocking, default exclusions** — glob searches now timeout after 30s (returning partial results) instead of hanging indefinitely. Scanning `/` or `~` is blocked with a helpful message. Common directories (`node_modules`, `.git`, `dist`, `.venv`) are excluded by default. (#637)
+- **MCP config normalization** — configs using `mcpServers` (Claude Code, Cursor format) are auto-converted to `mcp` at load time. External server entries with `command` + `args` + `env` are transformed to altimate-code's native format. (#639)
+- **Light theme readability** — fixed white-on-white text in light terminal themes by adding explicit foreground colors to markdown and code blocks. (#640)
+
+## [0.5.17] - 2026-04-02
+
+### Added
+
+- **Custom dbt `profiles.yml` path resolution** — Altimate Code now resolves `profiles.yml` using dbt's standard priority: explicit path → `DBT_PROFILES_DIR` env var → project-local `profiles.yml` → `~/.dbt/profiles.yml`. Teams using `DBT_PROFILES_DIR` in CI get zero-friction auto-discovery. Jinja `{{ env_var('NAME') }}` patterns are resolved automatically. A warning is shown when `DBT_PROFILES_DIR` is set but the file is not found. (#605)
+
+### Fixed
+
+- **ClickHouse: SQL comment injection bypass** — Comments could previously mask write statements from the read-only LIMIT guard. String literals are now stripped before comment removal to prevent false matches. (#591)
+- **ClickHouse: `LowCardinality(Nullable(...))` nullability** — Schema inspection previously reported these columns as non-nullable; now correctly detected as nullable. (#591)
+- **ClickHouse: connection lifecycle guards** — All query methods now throw a clear error if called before `connect()`, preventing cryptic TypeErrors. (#591)
+- **ClickHouse: `binds` parameter handling** — Queries with parameterized binds no longer throw a driver error; the parameter is safely ignored (ClickHouse uses `query_params` natively). (#591)
+- **Stale file retry loops on WSL and network drives** — `FileTime.read()` now uses filesystem mtime instead of wall-clock, eliminating 782-iteration retry loops caused by clock skew on WSL (NTFS-over-9P), NFS, and CIFS mounts. Set `OPENCODE_DISABLE_FILETIME_CHECK=true` as escape hatch if needed. (#611)
+- **Error classification: `file_stale` split and keyword fix** — `file_stale` is now a distinct error class; HTTP 4xx errors no longer misclassify as validation failures; restored `"does not exist"` keyword for SQL errors like `"column foo does not exist"`. (#611, #614)
+
+## [0.5.16] - 2026-03-30
+
+### Added
+
+- **ClickHouse support** — Connect to ClickHouse Cloud, self-hosted clusters, or local Docker instances running ClickHouse 23.3+. Supports HTTP/HTTPS, TLS mutual auth, and dbt-clickhouse adapter auto-discovery. Includes MergeTree optimization guidance, materialized view design, partition pruning analysis, and query history via `system.query_log`. Requires `npm install @clickhouse/client` (#574)
+
+### Fixed
+
+- **Agent loop detection** — The agent now detects when a single tool is called 30+ times in a session (a pattern seen with runaway tool loops) and pauses for confirmation before continuing. Complements the existing same-input repetition detection (#587)
+- **Improved error diagnostics** — Tool failures now report more specific error categories (`not_configured`, `file_not_found`, `edit_mismatch`, `resource_exhausted`) instead of generic "unknown" classification, improving support triage (#587)
+- **Session environment metadata** — `session_start` telemetry now includes `os`, `arch`, and `node_version` for environment-based segmentation (#587)
+
+## [0.5.15] - 2026-03-29
+
+### Added
+
+- **Plan agent two-step approach** — outline first, confirm, then expand; plan refinement loop with edit-in-place (capped at 5 revisions); approval phrase detection ("looks good", "proceed", "lgtm") (#556)
+- **Feature discovery & progressive disclosure** — contextual suggestions after warehouse connection (schema, SQL, lineage, PII); dbt auto-detection recommending `/dbt-develop`, `/dbt-troubleshoot` (#556)
+
+### Fixed
+
+- **SQL classifier fallback security hardening** — invert fallback to whitelist reads (not blacklist writes), handle multi-statement SQL, strip line comments, fix `HARD_DENY_PATTERN` `\s` → `\b`; fix `computeSqlFingerprint` referencing undefined `core` after safe-import refactor (#582)
+- **Edit tool nearest-match error messages** — `buildNotFoundMessage` with Levenshtein similarity search shows closest file content when `oldString` not found, helping LLM self-correct (#582)
+- **Webfetch failure caching and actionable errors** — session-level URL failure cache (404/410/451) with 5-min TTL; status-specific error messages telling the model whether to retry; URL sanitization in errors to prevent token leakage (#582)
+- **Nested `node_modules` in `NODE_PATH`** — `@altimateai/altimate-core` NAPI resolution now works for npm's hoisted and nested layouts (#576)
+- **Null guards across 8 tool formatters** — prevent literal `undefined` in user-facing output for sql-analyze, schema-inspect, sql-translate, dbt-manifest, finops, and warehouse tools; DuckDB auto-retry on `database is locked` (#571)
+- **Telemetry error classification** — add `http_error` class, expand connection/validation/permission patterns, redact sensitive keys in input signatures (#566)
+- **Pre-release review findings** — remove dead code, fix `classifySkillTrigger()` unknown trigger handling, add null guards in lineage/translate tools (#580)
+- **Binary alias hard copy** — use `cp` instead of symlink for `altimate-code` binary alias to fix cross-platform compatibility (#578)
+
+### Testing
+
+- Verdaccio sanity suite: 50 new tests across 3 phases, added to CI and release workflows (#560, #562)
+- 12 new tests for `buildNotFoundMessage`, `computeSqlFingerprint`, and webfetch error messages (#582)
+
 ## [0.5.14] - 2026-03-28
 
 ### Added

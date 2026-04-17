@@ -47,6 +47,9 @@ import { WarehouseDiscoverTool } from "../altimate/tools/warehouse-discover"
 import { McpDiscoverTool } from "../altimate/tools/mcp-discover"
 
 import { DbtManifestTool } from "../altimate/tools/dbt-manifest"
+// altimate_change start - import dbt unit test generation tool
+import { DbtUnitTestGenTool } from "../altimate/tools/dbt-unit-test-gen"
+// altimate_change end
 import { DbtProfilesTool } from "../altimate/tools/dbt-profiles"
 import { DbtLineageTool } from "../altimate/tools/dbt-lineage"
 import { SchemaIndexTool } from "../altimate/tools/schema-index"
@@ -57,6 +60,7 @@ import { SqlFormatTool } from "../altimate/tools/sql-format"
 import { SqlFixTool } from "../altimate/tools/sql-fix"
 import { SqlAutocompleteTool } from "../altimate/tools/sql-autocomplete"
 import { SqlDiffTool } from "../altimate/tools/sql-diff"
+import { DataDiffTool } from "../altimate/tools/data-diff"
 import { FinopsQueryHistoryTool } from "../altimate/tools/finops-query-history"
 import { FinopsAnalyzeCreditsTool } from "../altimate/tools/finops-analyze-credits"
 import { FinopsExpensiveQueriesTool } from "../altimate/tools/finops-expensive-queries"
@@ -223,6 +227,9 @@ export namespace ToolRegistry {
       // altimate_change end
 
       DbtManifestTool,
+      // altimate_change start - register dbt unit test generation tool
+      DbtUnitTestGenTool,
+      // altimate_change end
       DbtProfilesTool,
       DbtLineageTool,
       SchemaIndexTool,
@@ -233,6 +240,7 @@ export namespace ToolRegistry {
       SqlFixTool,
       SqlAutocompleteTool,
       SqlDiffTool,
+      DataDiffTool,
       FinopsQueryHistoryTool,
       FinopsAnalyzeCreditsTool,
       FinopsExpensiveQueriesTool,

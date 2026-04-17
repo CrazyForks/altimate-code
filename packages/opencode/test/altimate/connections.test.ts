@@ -51,6 +51,36 @@ describe("ConnectionRegistry", () => {
     )
   })
 
+  test("cassandra gives helpful hint instead of generic unsupported error", async () => {
+    Registry.setConfigs({
+      mydb: { type: "cassandra", host: "localhost" },
+    })
+    await expect(Registry.get("mydb")).rejects.toThrow("not yet supported")
+    await expect(Registry.get("mydb")).rejects.toThrow("cqlsh")
+  })
+
+  test("cockroachdb suggests using postgres type", async () => {
+    Registry.setConfigs({
+      mydb: { type: "cockroachdb", host: "localhost" },
+    })
+    await expect(Registry.get("mydb")).rejects.toThrow("postgres")
+  })
+
+  test("timescaledb suggests using postgres type", async () => {
+    Registry.setConfigs({
+      mydb: { type: "timescaledb", host: "localhost" },
+    })
+    await expect(Registry.get("mydb")).rejects.toThrow("postgres")
+  })
+
+  test("truly unknown type gives generic unsupported error with supported list", async () => {
+    Registry.setConfigs({
+      mydb: { type: "neo4j", host: "localhost" },
+    })
+    await expect(Registry.get("mydb")).rejects.toThrow("Unsupported database type")
+    await expect(Registry.get("mydb")).rejects.toThrow("Supported:")
+  })
+
   test("getConfig returns config for known connection", () => {
     Registry.setConfigs({
       mydb: { type: "postgres", host: "localhost" },
@@ -172,7 +202,7 @@ describe("detectAuthMethod", () => {
   })
 
   test("returns 'password' for config with password", () => {
-    expect(detectAuthMethod({ type: "postgres", password: "secret" } as any)).toBe("password")
+    expect(detectAuthMethod({ type: "postgres", password: "test-fake-password" } as any)).toBe("password")
   })
 
   test("returns 'file' for duckdb", () => {
@@ -188,7 +218,7 @@ describe("detectAuthMethod", () => {
   })
 
   test("returns 'password' for mongo with password", () => {
-    expect(detectAuthMethod({ type: "mongo", password: "secret" } as any)).toBe("password")
+    expect(detectAuthMethod({ type: "mongo", password: "test-fake-password" } as any)).toBe("password")
   })
 
   test("returns 'unknown' for null/undefined", () => {
@@ -207,7 +237,7 @@ describe("detectAuthMethod", () => {
 
 describe("CredentialStore", () => {
   test("storeCredential returns false when keytar unavailable", async () => {
-    const result = await CredentialStore.storeCredential("mydb", "password", "secret")
+    const result = await CredentialStore.storeCredential("mydb", "password", "test-fake-password")
     expect(result).toBe(false)
   })
 
@@ -267,7 +297,7 @@ describe("CredentialStore", () => {
   })
 
   test("saveConnection strips OAuth credentials as sensitive", async () => {
-    const config = { type: "snowflake", authenticator: "oauth", token: "access-token-123", oauth_client_secret: "secret" } as any
+    const config = { type: "snowflake", authenticator: "oauth", token: "test-fake-token", oauth_client_secret: "test-fake-password" } as any
     const { sanitized } = await CredentialStore.saveConnection("sf_oauth", config)
     expect(sanitized.token).toBeUndefined()
     expect(sanitized.oauth_client_secret).toBeUndefined()
@@ -279,13 +309,13 @@ describe("CredentialStore", () => {
       type: "snowflake",
       account: "abc123",
       user: "svc_user",
-      password: "pw123",
+      password: "test-fake-pw",
       private_key: "-----BEGIN PRIVATE KEY-----",
-      private_key_passphrase: "passphrase",
-      token: "oauth-token",
-      oauth_client_secret: "client-secret",
-      ssh_password: "ssh-pw",
-      connection_string: "mongodb://...",
+      private_key_passphrase: "test-fake-passphrase",
+      token: "test-fake-oauth-token",
+      oauth_client_secret: "test-fake-client-secret",
+      ssh_password: "test-fake-ssh-pw",
+      connection_string: "test-fake-connstring",
     } as any
     const { sanitized, warnings } = await CredentialStore.saveConnection("complex", config)
 
@@ -319,7 +349,7 @@ describe("dbt profiles parser", () => {
   // Keeping it simple for now — the parser is mostly about YAML parsing + mapping.
   test("handles env_var resolution in profiles", async () => {
     // Set env var for test
-    process.env.TEST_DBT_PASSWORD = "my_secret"
+    process.env.TEST_DBT_PASSWORD = "test-fake-dbt-pw"
 
     const fs = await import("fs")
     const os = await import("os")
@@ -350,7 +380,7 @@ myproject:
       expect(connections).toHaveLength(1)
       expect(connections[0].name).toBe("myproject_dev")
       expect(connections[0].type).toBe("postgres")
-      expect(connections[0].config.password).toBe("my_secret")
+      expect(connections[0].config.password).toBe("test-fake-dbt-pw")
       expect(connections[0].config.database).toBe("mydb")
     } finally {
       fs.rmSync(tmpDir, { recursive: true })
@@ -376,7 +406,7 @@ snowflake_keypair:
       account: abc123
       user: svc_user
       private_key: "-----BEGIN PRIVATE KEY-----\\nMIIEvQ..."
-      private_key_passphrase: "my-passphrase"
+      private_key_passphrase: "test-fake-pp"
       database: ANALYTICS
       warehouse: COMPUTE_WH
       schema: PUBLIC
@@ -389,7 +419,7 @@ snowflake_keypair:
       expect(connections).toHaveLength(1)
       expect(connections[0].type).toBe("snowflake")
       expect(connections[0].config.private_key).toBe("-----BEGIN PRIVATE KEY-----\nMIIEvQ...")
-      expect(connections[0].config.private_key_passphrase).toBe("my-passphrase")
+      expect(connections[0].config.private_key_passphrase).toBe("test-fake-pp")
       expect(connections[0].config.password).toBeUndefined()
     } finally {
       fs.rmSync(tmpDir, { recursive: true })
@@ -563,7 +593,7 @@ spark_project:
       type: spark
       server_hostname: my-spark-cluster.databricks.com
       http_path: /sql/1.0/warehouses/abc123
-      token: dapi_secret
+      token: test_fake_dapi
 `,
     )
 
@@ -606,6 +636,189 @@ trino_project:
       expect(connections[0].config.type).toBe("postgres")
     } finally {
       fs.rmSync(tmpDir, { recursive: true })
+    }
+  })
+
+  test("clickhouse adapter maps correctly from dbt profiles", async () => {
+    const fs = await import("fs")
+    const os = await import("os")
+    const path = await import("path")
+
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dbt-test-"))
+    const profilesPath = path.join(tmpDir, "profiles.yml")
+
+    fs.writeFileSync(
+      profilesPath,
+      `
+ch_project:
+  outputs:
+    dev:
+      type: clickhouse
+      host: clickhouse.example.com
+      port: 8443
+      user: default
+      password: secret
+      database: analytics
+      schema: default
+`,
+    )
+
+    try {
+      const connections = await parseDbtProfiles(profilesPath)
+      expect(connections).toHaveLength(1)
+      expect(connections[0].type).toBe("clickhouse")
+      expect(connections[0].config.type).toBe("clickhouse")
+      expect(connections[0].config.host).toBe("clickhouse.example.com")
+      expect(connections[0].config.port).toBe(8443)
+      expect(connections[0].config.user).toBe("default")
+      expect(connections[0].config.database).toBe("analytics")
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true })
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// dbt profiles path resolution (DBT_PROFILES_DIR + project-local)
+// ---------------------------------------------------------------------------
+
+describe("dbt profiles path resolution", () => {
+  const PROFILE_CONTENT = `
+myproject:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: localhost
+      port: 5432
+      user: test
+      pass: secret
+      dbname: testdb
+      schema: public
+`
+
+  test("finds profiles.yml via DBT_PROFILES_DIR env var", async () => {
+    const fs = await import("fs")
+    const os = await import("os")
+    const path = await import("path")
+
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dbt-envdir-"))
+    fs.writeFileSync(path.join(tmpDir, "profiles.yml"), PROFILE_CONTENT)
+
+    const origEnv = process.env.DBT_PROFILES_DIR
+    process.env.DBT_PROFILES_DIR = tmpDir
+
+    try {
+      const connections = await parseDbtProfiles()
+      expect(connections).toHaveLength(1)
+      expect(connections[0].name).toBe("myproject_dev")
+    } finally {
+      if (origEnv === undefined) delete process.env.DBT_PROFILES_DIR
+      else process.env.DBT_PROFILES_DIR = origEnv
+      fs.rmSync(tmpDir, { recursive: true })
+    }
+  })
+
+  test("finds project-local profiles.yml via projectDir", async () => {
+    const fs = await import("fs")
+    const os = await import("os")
+    const path = await import("path")
+
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "dbt-projdir-"))
+    fs.writeFileSync(path.join(tmpDir, "profiles.yml"), PROFILE_CONTENT)
+
+    try {
+      const connections = await parseDbtProfiles(undefined, tmpDir)
+      expect(connections).toHaveLength(1)
+      expect(connections[0].name).toBe("myproject_dev")
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true })
+    }
+  })
+
+  test("DBT_PROFILES_DIR takes priority over projectDir", async () => {
+    const fs = await import("fs")
+    const os = await import("os")
+    const path = await import("path")
+
+    const envDir = fs.mkdtempSync(path.join(os.tmpdir(), "dbt-env-pri-"))
+    fs.writeFileSync(
+      path.join(envDir, "profiles.yml"),
+      `
+env_profile:
+  outputs:
+    dev:
+      type: postgres
+      host: env-host
+      dbname: envdb
+      schema: public
+`,
+    )
+
+    const projDir = fs.mkdtempSync(path.join(os.tmpdir(), "dbt-proj-pri-"))
+    fs.writeFileSync(
+      path.join(projDir, "profiles.yml"),
+      `
+proj_profile:
+  outputs:
+    dev:
+      type: postgres
+      host: proj-host
+      dbname: projdb
+      schema: public
+`,
+    )
+
+    const origEnv = process.env.DBT_PROFILES_DIR
+    process.env.DBT_PROFILES_DIR = envDir
+
+    try {
+      const connections = await parseDbtProfiles(undefined, projDir)
+      expect(connections).toHaveLength(1)
+      expect(connections[0].name).toBe("env_profile_dev")
+      expect(connections[0].config.host).toBe("env-host")
+    } finally {
+      if (origEnv === undefined) delete process.env.DBT_PROFILES_DIR
+      else process.env.DBT_PROFILES_DIR = origEnv
+      fs.rmSync(envDir, { recursive: true })
+      fs.rmSync(projDir, { recursive: true })
+    }
+  })
+
+  test("explicit path takes priority over DBT_PROFILES_DIR", async () => {
+    const fs = await import("fs")
+    const os = await import("os")
+    const path = await import("path")
+
+    const explicitDir = fs.mkdtempSync(path.join(os.tmpdir(), "dbt-explicit-"))
+    fs.writeFileSync(
+      path.join(explicitDir, "profiles.yml"),
+      `
+explicit_profile:
+  outputs:
+    dev:
+      type: postgres
+      host: explicit-host
+      dbname: explicitdb
+      schema: public
+`,
+    )
+
+    const envDir = fs.mkdtempSync(path.join(os.tmpdir(), "dbt-env-nouse-"))
+    fs.writeFileSync(path.join(envDir, "profiles.yml"), PROFILE_CONTENT)
+
+    const origEnv = process.env.DBT_PROFILES_DIR
+    process.env.DBT_PROFILES_DIR = envDir
+
+    try {
+      const connections = await parseDbtProfiles(path.join(explicitDir, "profiles.yml"), undefined)
+      expect(connections).toHaveLength(1)
+      expect(connections[0].name).toBe("explicit_profile_dev")
+    } finally {
+      if (origEnv === undefined) delete process.env.DBT_PROFILES_DIR
+      else process.env.DBT_PROFILES_DIR = origEnv
+      fs.rmSync(explicitDir, { recursive: true })
+      fs.rmSync(envDir, { recursive: true })
     }
   })
 })
@@ -651,7 +864,7 @@ describe("Docker discovery", () => {
       host: "127.0.0.1",
       port: 5432,
       user: "admin",
-      password: "secret",
+      password: "test-fake-password",
       database: "mydb",
       status: "running",
     }
@@ -660,7 +873,7 @@ describe("Docker discovery", () => {
     expect(config.host).toBe("127.0.0.1")
     expect(config.port).toBe(5432)
     expect(config.user).toBe("admin")
-    expect(config.password).toBe("secret")
+    expect(config.password).toBe("test-fake-password")
     expect(config.database).toBe("mydb")
   })
 

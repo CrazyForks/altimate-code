@@ -29,7 +29,14 @@ assert_file_exists "$HOME/.altimate/builtin/sql-review/SKILL.md" "sql-review ski
 assert_file_exists "$HOME/.altimate/builtin/dbt-analyze/SKILL.md" "dbt-analyze skill exists"
 
 # 7. altimate-core napi binding loads
-assert_exit_0 "altimate-core napi binding" node -e "require('@altimateai/altimate-core')"
+# After npm install -g, dependencies live under the global prefix's node_modules.
+# Node's require() doesn't search there by default — set NODE_PATH so the
+# NAPI module (and its platform-specific optional dep) can be found.
+# npm may hoist altimate-core to the global root OR nest it under
+# altimate-code/node_modules/ — include both paths.
+GLOBAL_NM=$(npm root -g 2>/dev/null || echo "")
+AC_NM="$GLOBAL_NM/altimate-code/node_modules"
+assert_exit_0 "altimate-core napi binding" env NODE_PATH="$GLOBAL_NM:$AC_NM" node -e "require('@altimateai/altimate-core')"
 
 # 8. dbt CLI available
 if command -v dbt >/dev/null 2>&1; then
@@ -100,10 +107,12 @@ DRIVERS=(
 
 DRIVER_PASS=0
 DRIVER_FAIL=0
+DRIVER_NODE_PATH=$(npm root -g 2>/dev/null || echo "")
+DRIVER_AC_NM="$DRIVER_NODE_PATH/altimate-code/node_modules"
 for entry in "${DRIVERS[@]}"; do
   pkg="${entry%%:*}"
   label="${entry##*:}"
-  if node -e "require.resolve('$pkg')" 2>/dev/null; then
+  if NODE_PATH="$DRIVER_NODE_PATH:$DRIVER_AC_NM" node -e "require.resolve('$pkg')" 2>/dev/null; then
     echo "  PASS: $label driver resolvable ($pkg)"
     DRIVER_PASS=$((DRIVER_PASS + 1))
   else

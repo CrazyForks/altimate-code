@@ -22,6 +22,11 @@ import { Telemetry } from "@/altimate/telemetry"
 
 export namespace SessionProcessor {
   const DOOM_LOOP_THRESHOLD = 3
+  // altimate_change start — per-tool repeat threshold to catch varied-input loops (e.g. todowrite 2,080x)
+  // Legitimate tool use rarely exceeds 20-25 calls per tool per session.
+  // 30 catches pathological patterns while avoiding false positives for power users.
+  const TOOL_REPEAT_THRESHOLD = 30
+  // altimate_change end
   const log = Log.create({ service: "session.processor" })
 
   export type Info = Awaited<ReturnType<typeof create>>
@@ -34,12 +39,23 @@ export namespace SessionProcessor {
     abort: AbortSignal
   }) {
     const toolcalls: Record<string, MessageV2.ToolPart> = {}
+    // altimate_change start — per-tool call counter for varied-input loop detection
+    const toolCallCounts: Record<string, number> = {}
+    // altimate_change end
     let snapshot: string | undefined
     let blocked = false
     let attempt = 0
     let needsCompaction = false
     // altimate_change start — per-step generation telemetry
     let stepStartTime = Date.now()
+    // altimate_change end
+    // altimate_change start — plan-agent tool-call-refusal detection
+    // Some models (observed: qwen3-coder-next, occasionally gpt-5.4) end plan-agent
+    // steps with finish_reason=stop and never emit tool calls. User abandons the
+    // session thinking it's stuck. Track whether the session has ever produced a
+    // tool call; if plan agent finishes its first step with stop-no-tools, warn.
+    let sessionToolCallsMade = 0
+    let planNoToolWarningEmitted = false
     // altimate_change end
 
     const result = {
@@ -154,6 +170,9 @@ export namespace SessionProcessor {
                       metadata: value.providerMetadata,
                     })
                     toolcalls[value.toolCallId] = part as MessageV2.ToolPart
+                    // altimate_change start — session has now tool-called; suppresses plan refusal warning
+                    sessionToolCallsMade++
+                    // altimate_change end
 
                     const parts = await MessageV2.parts(input.assistantMessage.id)
                     const lastThree = parts.slice(-DOOM_LOOP_THRESHOLD)
@@ -181,6 +200,37 @@ export namespace SessionProcessor {
                         ruleset: agent.permission,
                       })
                     }
+
+                    // altimate_change start — per-tool repeat counter (catches varied-input loops like todowrite 2,080x)
+                    // Counter is scoped to the processor lifetime (create() call), so it accumulates
+                    // across multiple process() invocations within a session. This is intentional:
+                    // cross-turn accumulation catches slow-burn loops that stay under the threshold
+                    // per-turn but add up over the session.
+                    toolCallCounts[value.toolName] = (toolCallCounts[value.toolName] ?? 0) + 1
+                    if (toolCallCounts[value.toolName] >= TOOL_REPEAT_THRESHOLD) {
+                      Telemetry.track({
+                        type: "doom_loop_detected",
+                        timestamp: Date.now(),
+                        session_id: input.sessionID,
+                        tool_name: value.toolName,
+                        repeat_count: toolCallCounts[value.toolName],
+                      })
+                      const agent = await Agent.get(input.assistantMessage.agent)
+                      await PermissionNext.ask({
+                        permission: "doom_loop",
+                        patterns: [value.toolName],
+                        sessionID: input.assistantMessage.sessionID,
+                        metadata: {
+                          tool: value.toolName,
+                          input: value.input,
+                          repeat_count: toolCallCounts[value.toolName],
+                        },
+                        always: [value.toolName],
+                        ruleset: agent.permission,
+                      })
+                      toolCallCounts[value.toolName] = 0
+                    }
+                    // altimate_change end
                   }
                   break
                 }
@@ -275,10 +325,59 @@ export namespace SessionProcessor {
                     duration_ms: Date.now() - stepStartTime,
                     tokens_input: usage.tokens.input,
                     tokens_output: usage.tokens.output,
+                    // altimate_change start — include total input tokens (with cache) when they differ from tokens_input
+                    ...(usage.tokens.inputTotal !== usage.tokens.input && { tokens_input_total: usage.tokens.inputTotal }),
+                    // altimate_change end
                     ...(value.usage.reasoningTokens !== undefined && { tokens_reasoning: usage.tokens.reasoning }),
                     ...(value.usage.cachedInputTokens !== undefined && { tokens_cache_read: usage.tokens.cache.read }),
                     ...(usage.tokens.cache.write > 0 && { tokens_cache_write: usage.tokens.cache.write }),
                   })
+                  // altimate_change end
+                  // altimate_change start — detect plan-agent tool-call refusal
+                  // A plan-agent step that ends with finish=stop and NO tool calls
+                  // (ever) in the session means the model wrote text and gave up.
+                  // Users read the text, see no progress, and abandon. Surface a
+                  // warning + telemetry so the pattern is measurable and the user
+                  // knows to try a different model.
+                  if (
+                    input.assistantMessage.agent === "plan" &&
+                    value.finishReason === "stop" &&
+                    sessionToolCallsMade === 0 &&
+                    !planNoToolWarningEmitted
+                  ) {
+                    planNoToolWarningEmitted = true
+                    Telemetry.track({
+                      type: "plan_no_tool_generation",
+                      timestamp: Date.now(),
+                      session_id: input.sessionID,
+                      message_id: input.assistantMessage.id,
+                      model_id: input.model.id,
+                      provider_id: input.model.providerID,
+                      finish_reason: value.finishReason,
+                      tokens_output: usage.tokens.output,
+                    })
+                    log.warn("plan agent stopped without tool calls — model may not be tool-calling properly", {
+                      sessionID: input.sessionID,
+                      modelID: input.model.id,
+                      providerID: input.model.providerID,
+                      tokensOutput: usage.tokens.output,
+                    })
+                    // synthetic: true so this warning is shown in the TUI but
+                    // excluded when the transcript is replayed to the LLM next turn
+                    // (prompt.ts filters synthetic text parts — see lines 648, 795).
+                    await Session.updatePart({
+                      id: PartID.ascending(),
+                      messageID: input.assistantMessage.id,
+                      sessionID: input.assistantMessage.sessionID,
+                      type: "text",
+                      synthetic: true,
+                      text:
+                        `⚠️ altimate-code: the \`plan\` agent is running on \`${input.model.providerID}/${input.model.id}\`, ` +
+                        `which returned text without calling any tools. If you expected the plan agent to explore the ` +
+                        `codebase, try switching to a model with stronger tool-use via \`/model\`.`,
+                      time: { start: Date.now(), end: Date.now() },
+                    })
+                  }
                   // altimate_change end
                   await Session.updatePart({
                     id: PartID.ascending(),

@@ -9,12 +9,48 @@ import os from "os"
 
 const log = Log.create({ service: "telemetry" })
 
+// altimate_change start — telemetry query reference for Azure App Insights (KQL)
+/**
+ * Telemetry Module — Azure App Insights Integration
+ *
+ * QUERYING TELEMETRY DATA (KQL / Log Analytics):
+ *
+ *   customDimensions  → string fields (tool_name, model_id, provider_id, error_class, os, etc.)
+ *   customMeasurements → numeric fields (tokens_input, cost, duration_ms, etc.)
+ *
+ * Serialization rules (see toAppInsightsEnvelopes):
+ *   - typeof number  → measurements map  (customMeasurements)
+ *   - typeof string  → properties map    (customDimensions)
+ *   - typeof boolean → properties map    (as "true"/"false")
+ *   - typeof object  → properties map    (JSON.stringify)
+ *   - session_id / project_id are lifted into envelope tags, not properties
+ *   - cli_version is injected into every event's properties automatically
+ *
+ * Example KQL:
+ *
+ *   // Token usage per model
+ *   customEvents
+ *   | where name == "generation"
+ *   | extend model = tostring(customDimensions.model_id),
+ *           tokens_in = todouble(customMeasurements.tokens_input),
+ *           tokens_out = todouble(customMeasurements.tokens_output)
+ *   | summarize avg(tokens_in), avg(tokens_out) by model
+ *
+ *   // Error class distribution
+ *   customEvents
+ *   | where name == "core_failure"
+ *   | extend err = tostring(customDimensions.error_class)
+ *   | summarize count() by err
+ */
+// altimate_change end
+
 export namespace Telemetry {
   const FLUSH_INTERVAL_MS = 5_000
   const MAX_BUFFER_SIZE = 200
   const REQUEST_TIMEOUT_MS = 10_000
 
   export type Event =
+    // altimate_change start — add os/arch/node_version for environment segmentation
     | {
         type: "session_start"
         timestamp: number
@@ -23,7 +59,11 @@ export namespace Telemetry {
         provider_id: string
         agent: string
         project_id: string
+        os: string
+        arch: string
+        node_version: string
       }
+    // altimate_change end
     | {
         type: "session_end"
         timestamp: number
@@ -48,6 +88,9 @@ export namespace Telemetry {
         // No nested objects: Azure App Insights custom measures must be top-level numbers.
         tokens_input: number
         tokens_output: number
+        // altimate_change start — total input tokens including cached (for providers like Anthropic that exclude cache from tokens_input)
+        tokens_input_total?: number
+        // altimate_change end
         tokens_reasoning?: number // only for reasoning models
         tokens_cache_read?: number // only when a cached prompt was reused
         tokens_cache_write?: number // only when a new cache entry was written
@@ -212,6 +255,13 @@ export namespace Telemetry {
         dbt_model_count_bucket: string
         dbt_source_count_bucket: string
         dbt_test_count_bucket: string
+        // altimate_change start — dbt project fingerprint expansion
+        dbt_snapshot_count_bucket?: string
+        dbt_seed_count_bucket?: string
+        /** JSON-encoded Record<string, number> — count per materialization type */
+        dbt_materialization_dist?: string
+        dbt_macro_count_bucket?: string
+        // altimate_change end
         connection_sources: string[]
         mcp_server_count: number
         skill_count: number
@@ -349,6 +399,9 @@ export namespace Telemetry {
         skill_name: string
         skill_source: "builtin" | "global" | "project"
         duration_ms: number
+        // altimate_change start — skill trigger classification for discovery analytics
+        trigger: "user_command" | "llm_selected" | "auto_suggested" | "unknown"
+        // altimate_change end
         has_followups: boolean
         followup_count: number
       }
@@ -423,6 +476,15 @@ export namespace Telemetry {
         source: "cli" | "tui"
       }
     // altimate_change end
+    // altimate_change start — plan refinement telemetry event
+    | {
+        type: "plan_revision"
+        timestamp: number
+        session_id: string
+        revision_number: number
+        action: "refine" | "approve" | "reject" | "cap_reached"
+      }
+    // altimate_change end
     | {
         type: "sql_execute_failure"
         timestamp: number
@@ -433,18 +495,56 @@ export namespace Telemetry {
         masked_sql: string
         duration_ms: number
       }
+    // altimate_change start — feature_suggestion event for post-connect and progressive disclosure tracking
+    | {
+        type: "feature_suggestion"
+        timestamp: number
+        session_id: string
+        suggestion_type: "post_warehouse_connect" | "dbt_detected" | "progressive_disclosure"
+        suggestions_shown: string[]
+        warehouse_type?: string
+      }
+    // altimate_change end
     | {
         type: "core_failure"
         timestamp: number
         session_id: string
         tool_name: string
         tool_category: string
-        error_class: "parse_error" | "connection" | "timeout" | "validation" | "internal" | "permission" | "http_error" | "unknown"
+        error_class: "parse_error" | "connection" | "timeout" | "validation" | "internal" | "permission" | "http_error" | "file_not_found" | "file_stale" | "edit_mismatch" | "not_configured" | "resource_exhausted" | "unknown"
         error_message: string
         input_signature: string
         masked_args?: string
         duration_ms: number
       }
+    // altimate_change start — FileTime observability: drift + assertion outcome tracking
+    // Tracks the gap between Node.js wall-clock and filesystem mtime at read time.
+    // Use to monitor whether the mtime clock-source change (PR #611) is preventing
+    // false stale-file errors, and detect environments with significant drift.
+    // KQL: customEvents | where name == "filetime_drift" | extend drift = todouble(customMeasurements.drift_ms)
+    | {
+        type: "filetime_drift"
+        timestamp: number
+        session_id: string
+        /** Absolute difference in ms between Date.now() and filesystem mtime */
+        drift_ms: number
+        /** True if filesystem mtime is ahead of wall-clock (the problematic direction) */
+        mtime_ahead: boolean
+      }
+    // Tracks FileTime.assert() outcomes: "stale" when a file fails the check.
+    // High volume of "stale" with low delta_ms suggests tolerance is too tight.
+    // KQL: customEvents | where name == "filetime_assert" | extend delta = todouble(customMeasurements.delta_ms)
+    | {
+        type: "filetime_assert"
+        timestamp: number
+        session_id: string
+        outcome: "stale"
+        /** mtime - readTime in ms (how far ahead the file's mtime is) */
+        delta_ms: number
+        /** Current tolerance threshold in ms */
+        tolerance_ms: number
+      }
+    // altimate_change end
     // altimate_change start — sql quality telemetry for issue prevention metrics
     | {
         type: "sql_quality"
@@ -459,7 +559,262 @@ export namespace Telemetry {
         dialect?: string
         duration_ms: number
       }
+    // implicit quality signal for task outcome intelligence
+    | {
+        type: "task_outcome_signal"
+        timestamp: number
+        session_id: string
+        /** Behavioral signal derived from session outcome patterns */
+        signal: "accepted" | "error" | "abandoned" | "cancelled"
+        /** Total tool calls in this loop() invocation */
+        tool_count: number
+        /** Number of LLM generation steps in this loop() invocation */
+        step_count: number
+        /** Total session wall-clock duration in milliseconds */
+        duration_ms: number
+        /** Last tool category the agent used (or "none") */
+        last_tool_category: string
+      }
+    // task intent classification for understanding DE problem distribution
+    | {
+        type: "task_classified"
+        timestamp: number
+        session_id: string
+        /** Classified intent category */
+        intent:
+          | "debug_dbt"
+          | "write_sql"
+          | "optimize_query"
+          | "build_model"
+          | "analyze_lineage"
+          | "explore_schema"
+          | "migrate_sql"
+          | "manage_warehouse"
+          | "finops"
+          | "general"
+        /** Keyword match confidence: 1.0 for strong match, 0.5 for weak */
+        confidence: number
+        /** Detected warehouse type from fingerprint (or "unknown") */
+        warehouse_type: string
+      }
+    // schema complexity signal — structural metrics from warehouse introspection
+    | {
+        type: "schema_complexity"
+        timestamp: number
+        session_id: string
+        warehouse_type: string
+        /** Bucketed table count */
+        table_count_bucket: string
+        /** Bucketed total column count across all tables */
+        column_count_bucket: string
+        /** Bucketed schema count */
+        schema_count_bucket: string
+        /** Average columns per table (rounded to integer) */
+        avg_columns_per_table: number
+      }
+    // sql structure fingerprint — AST shape without content
+    | {
+        type: "sql_fingerprint"
+        timestamp: number
+        session_id: string
+        /** JSON-encoded statement types, e.g. ["SELECT"] */
+        statement_types: string
+        /** Broad categories, e.g. ["query"] */
+        categories: string
+        /** Number of tables referenced */
+        table_count: number
+        /** Number of functions used */
+        function_count: number
+        /** Whether the query has subqueries */
+        has_subqueries: boolean
+        /** Whether the query uses aggregation */
+        has_aggregation: boolean
+        /** Whether the query uses window functions */
+        has_window_functions: boolean
+        /** AST node count — proxy for complexity */
+        node_count: number
+      }
+    // error pattern fingerprint — hashed error grouping with recovery data
+    | {
+        type: "error_fingerprint"
+        timestamp: number
+        session_id: string
+        /** SHA256 hash of normalized (masked) error message for grouping */
+        error_hash: string
+        /** Classification from classifyError() */
+        error_class: string
+        /** Tool that produced the error */
+        tool_name: string
+        /** Tool category */
+        tool_category: string
+        /** Whether a subsequent tool call succeeded (error was recovered) */
+        recovery_successful: boolean
+        /** Tool that succeeded after the error (if recovered) */
+        recovery_tool: string
+      }
+    // tool chain effectiveness — aggregated tool sequence + outcome at session end
+    | {
+        type: "tool_chain_outcome"
+        timestamp: number
+        session_id: string
+        /** JSON-encoded ordered tool names (capped at 50) */
+        chain: string
+        /** Number of tools in the chain */
+        chain_length: number
+        /** Whether any tool call errored */
+        had_errors: boolean
+        /** Number of errors followed by successful tool calls */
+        error_recovery_count: number
+        /** Final session outcome */
+        final_outcome: string
+        /** Total session duration in ms */
+        total_duration_ms: number
+        /** Total LLM cost */
+        total_cost: number
+      }
   // altimate_change end
+    // altimate_change start — pre-execution SQL validation telemetry
+    | {
+        type: "sql_pre_validation"
+        timestamp: number
+        session_id: string
+        /** skipped = no cache or stale, passed = valid SQL, blocked = invalid SQL caught, error = validation itself failed */
+        outcome: "skipped" | "passed" | "blocked" | "error"
+        /** why: no_cache, stale_cache, empty_cache, valid, non_structural, structural_error, dispatcher_failed, validation_exception */
+        reason: string
+        /** warehouse driver type (postgres, snowflake, bigquery, ...) — enables per-warehouse catch-rate analysis */
+        warehouse_type: string
+        /** read / write / unknown — enables per-query-type analysis */
+        query_type: string
+        /** SHA-256 prefix of masked SQL — join key to sql_execute_failure events for same query */
+        masked_sql_hash: string
+        schema_columns: number
+        /** true when schema scan hit the column-scan cap — flags samples biased by large-warehouse truncation */
+        schema_truncated: boolean
+        duration_ms: number
+      }
+    // altimate_change end
+    // altimate_change start — config env-var interpolation telemetry
+    | {
+        type: "config_env_interpolation"
+        timestamp: number
+        session_id: string
+        /** ${VAR} / ${VAR:-default} references encountered */
+        dollar_refs: number
+        /** ${VAR} with no value and no default → resolved to empty string (footgun signal) */
+        dollar_unresolved: number
+        /** ${VAR:-default} where default was used */
+        dollar_defaulted: number
+        /** $${VAR} literal escape sequences found */
+        dollar_escaped: number
+        /** legacy {env:VAR} references (raw injection syntax) */
+        legacy_brace_refs: number
+        /** {env:VAR} with no value → empty string */
+        legacy_brace_unresolved: number
+      }
+    // altimate_change end
+    // altimate_change start — plan-agent model tool-call refusal detection
+    | {
+        type: "plan_no_tool_generation"
+        timestamp: number
+        session_id: string
+        message_id: string
+        model_id: string
+        provider_id: string
+        /** "stop" finish_reason without any tool calls in the session — flags models that refuse to tool-call in plan mode */
+        finish_reason: string
+        /** output tokens on the stop-without-tools generation — helps distinguish "refused" (low) from "wrote a long text plan" (high) */
+        tokens_output: number
+      }
+    // altimate_change end
+
+  /** SHA256 hash a masked error message for anonymous grouping. */
+  export function hashError(maskedMessage: string): string {
+    return createHash("sha256").update(maskedMessage).digest("hex").slice(0, 16)
+  }
+
+  /** Classify user intent from the first message text.
+   *  Pure regex/keyword matcher — zero LLM cost, <1ms. */
+  export function classifyTaskIntent(
+    text: string,
+  ): { intent: string; confidence: number } {
+    const lower = text.slice(0, 2000).toLowerCase()
+
+    // Order matters: more specific patterns first
+    const patterns: Array<{ intent: string; strong: RegExp[]; weak: RegExp[] }> = [
+      {
+        intent: "debug_dbt",
+        strong: [/dbt\s+.*?(error|fail|bug|issue|broken|fix|debug|not\s+work)/],
+        weak: [/dbt\s+(run|build|test|compile|parse)/, /dbt_project/, /ref\s*\(/, /source\s*\(/],
+      },
+      {
+        intent: "build_model",
+        strong: [/(?:create|build|write|add|new)\s+.*?(?:dbt\s+)?model/, /(?:create|build)\s+.*?(?:staging|mart|dim|fact)/],
+        weak: [/\bmodel\b/, /materialization/, /incremental/],
+      },
+      {
+        intent: "optimize_query",
+        strong: [/optimiz|performance|slow\s+query|speed\s+up|make.*faster|too\s+slow|query\s+cost/],
+        weak: [/index|partition|cluster|explain\s+plan/],
+      },
+      {
+        intent: "write_sql",
+        strong: [/(?:write|create|build|generate)\s+(?:a\s+)?(?:sql|query)/, /(?:write|create)\s+(?:a\s+)?(?:select|insert|update|delete)/],
+        weak: [/\bsql\b/, /\bquery\b/, /\bjoin\b/, /\bwhere\b/],
+      },
+      {
+        intent: "analyze_lineage",
+        strong: [/lineage|upstream|downstream|dependency|depends\s+on|impact\s+analysis/],
+        weak: [/dag|graph|flow|trace/],
+      },
+      {
+        intent: "explore_schema",
+        strong: [/(?:show|list|describe|inspect|explore)\s+.*?(?:schema|tables?|columns?|database)/, /what\s+.*?(?:tables|columns|schemas)/],
+        weak: [/\bschema\b/, /\btable\b/, /\bcolumn\b/, /introspect/],
+      },
+      {
+        intent: "migrate_sql",
+        strong: [/migrat|convert.*(?:to|from)\s+.*?(?:snowflake|bigquery|postgres|redshift|databricks)/, /translate.*(?:sql|dialect)/],
+        weak: [/dialect|transpile|port\s+(?:to|from)/],
+      },
+      {
+        intent: "manage_warehouse",
+        strong: [/(?:connect|setup|configure|add|test)\s+.*?(?:warehouse|connection|database)/, /warehouse.*(?:config|setting)/],
+        weak: [/\bwarehouse\b/, /connection\s+string/, /\bcredentials\b/],
+      },
+      {
+        intent: "finops",
+        strong: [/cost|spend|bill|credits|usage|expensive\s+quer|warehouse\s+size/],
+        weak: [/resource|utilization|idle/],
+      },
+    ]
+
+    for (const { intent, strong, weak } of patterns) {
+      if (strong.some((r) => r.test(lower))) return { intent, confidence: 1.0 }
+    }
+    for (const { intent, weak } of patterns) {
+      if (weak.some((r) => r.test(lower))) return { intent, confidence: 0.5 }
+    }
+    return { intent: "general", confidence: 1.0 }
+  }
+
+  /** Derive a quality signal from the agent outcome.
+   *  Exported so tests can verify the derivation logic without
+   *  duplicating the implementation. */
+  export function deriveQualitySignal(
+    outcome: "completed" | "abandoned" | "aborted" | "error",
+  ): "accepted" | "error" | "abandoned" | "cancelled" {
+    switch (outcome) {
+      case "abandoned":
+        return "abandoned"
+      case "aborted":
+        return "cancelled"
+      case "error":
+        return "error"
+      case "completed":
+        return "accepted"
+    }
+  }
 
   // altimate_change start — expanded error classification patterns for better triage
   // Order matters: earlier patterns take priority. Use specific phrases, not
@@ -484,14 +839,61 @@ export namespace Telemetry {
         "sasl",
         "scram",
         "password must be",
-        "driver not installed",
-        "not found. available:",
-        "no warehouse configured",
-        "unsupported database type",
       ],
     },
+    // altimate_change start — split not_configured out of connection for clearer triage
+    {
+      class: "not_configured",
+      keywords: [
+        "no warehouse configured",
+        "driver not installed",
+        "not found. available:",
+        "unsupported database type",
+        "warehouse not configured",
+        "connection not configured",
+      ],
+    },
+    // altimate_change end
+    // altimate_change start — file_not_found class for file system errors
+    {
+      class: "file_not_found",
+      keywords: [
+        "file not found",
+        "no such file",
+        "enoent",
+        "directory not found",
+        "path not found",
+        "file does not exist",
+      ],
+    },
+    // altimate_change end
+    // altimate_change start — edit_mismatch class for edit tool failures
+    {
+      class: "edit_mismatch",
+      keywords: [
+        "could not find oldstring",
+        "no changes to apply",
+        "oldstring and newstring are identical",
+      ],
+    },
+    // altimate_change end
     { class: "timeout", keywords: ["timeout", "etimedout", "bridge timeout", "timed out"] },
     { class: "permission", keywords: ["permission", "access denied", "permission denied", "unauthorized", "forbidden", "authentication"] },
+    // altimate_change start — http_error before validation to prevent "HTTP 404" matching "invalid"/"missing"
+    {
+      class: "http_error",
+      keywords: ["status code: 4", "status code: 5", "request failed with status", "http 404", "http 410", "http 429", "http 451", "http 403"],
+    },
+    // altimate_change end
+    // altimate_change start — split file_stale out of validation for cleaner triage
+    {
+      class: "file_stale",
+      keywords: [
+        "must read file",
+        "has been modified since",
+        "before overwriting",
+      ],
+    },
     {
       class: "validation",
       keywords: [
@@ -499,17 +901,24 @@ export namespace Telemetry {
         "invalid",
         "missing",
         "required",
-        "must read file",
-        "has been modified since",
         "does not exist",
-        "before overwriting",
       ],
     },
+    // altimate_change end
     { class: "internal", keywords: ["internal", "assertion"] },
+    // altimate_change start — resource_exhausted class for OOM/quota errors
     {
-      class: "http_error",
-      keywords: ["status code: 4", "status code: 5", "request failed with status"],
+      class: "resource_exhausted",
+      keywords: [
+        "out of memory",
+        "resource limit",
+        "quota exceeded",
+        "disk i/o",
+        "enomem",
+        "heap out of memory",
+      ],
     },
+    // altimate_change end
   ]
   // altimate_change end
 
@@ -669,6 +1078,16 @@ export namespace Telemetry {
     }
     return "standard"
   }
+
+  // altimate_change start — classify how a skill was triggered for discovery analytics
+  export function classifySkillTrigger(extra?: { [key: string]: any }): "user_command" | "llm_selected" | "auto_suggested" | "unknown" {
+    if (!extra) return "llm_selected"
+    if (extra.trigger === "user_command") return "user_command"
+    if (extra.trigger === "auto_suggested") return "auto_suggested"
+    if (extra.trigger === "llm_selected") return "llm_selected"
+    return "unknown"
+  }
+  // altimate_change end
 
   export function bucketCount(n: number): string {
     if (n <= 0) return "0"

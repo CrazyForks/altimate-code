@@ -60,7 +60,7 @@ Set up warehouse connections so altimate can query your data platform. You have 
 4. **Offers to configure connections** and walks you through adding and testing each discovered warehouse
 5. **Indexes schemas** to populate the schema cache for autocomplete and context-aware analysis
 
-Once complete, altimate indexes your schemas and detects your tooling, enabling schema-aware autocomplete and context-rich analysis.
+Once complete, altimate indexes your schemas and detects your tooling, enabling schema-aware autocomplete and context-rich analysis. After connecting, you'll see feature suggestions tailored to your warehouse type — such as indexing schemas, running SQL analysis, or checking lineage. These appear progressively and each is shown once per session. See [Post-Connection Suggestions](configure/warehouses.md#post-connection-suggestions) for details.
 
 ### Option B: Manual configuration
 
@@ -80,6 +80,50 @@ Add a warehouse connection to `.altimate-code/connections.json`. Here's a quick 
 ```
 
 For all warehouse types (Snowflake, BigQuery, Databricks, PostgreSQL, Redshift, DuckDB, MySQL, SQL Server) and advanced options (key-pair auth, ADC, SSH tunneling), see the [Warehouses reference](configure/warehouses.md).
+
+### Connecting to Altimate
+
+If you have an Altimate platform account, run `/connect` in the TUI, select **Altimate**, and enter your credentials in this format:
+
+```text
+instance-url::instance-name::api-key
+```
+
+For example: `https://api.getaltimate.com::acme::your-api-key`
+
+- **Instance URL** — `https://api.myaltimate.com` or `https://api.getaltimate.com` depending on your dashboard domain
+- **Instance Name** — the subdomain from your Altimate dashboard URL (e.g. `acme` from `https://acme.app.myaltimate.com`)
+- **API Key** — go to **Settings > API Keys** in your Altimate dashboard and click **Copy**
+
+Credentials are validated against the Altimate API before being saved. If you prefer to configure credentials directly (e.g. for CI or environment variable substitution), you can also create `~/.altimate/altimate.json` manually — if that file exists it takes priority over the TUI-entered credentials.
+
+**`altimate.json` schema:**
+
+```json
+{
+  "altimateUrl": "https://api.myaltimate.com",
+  "altimateInstanceName": "acme",
+  "altimateApiKey": "your-api-key",
+  "mcpServerUrl": "https://mcpserver.getaltimate.com/sse"
+}
+```
+
+| Field | Required | Description |
+|---|---|---|
+| `altimateUrl` | Yes | Full base URL of the Altimate API |
+| `altimateInstanceName` | Yes | Your tenant/instance identifier |
+| `altimateApiKey` | Yes | API key from **Settings > API Keys** |
+| `mcpServerUrl` | No | Custom MCP server URL (defaults to the hosted endpoint) |
+
+You can use `${env:VAR_NAME}` syntax to reference environment variables instead of hardcoding secrets:
+
+```json
+{
+  "altimateUrl": "https://api.myaltimate.com",
+  "altimateInstanceName": "acme",
+  "altimateApiKey": "${env:ALTIMATE_API_KEY}"
+}
+```
 
 ## Step 4: Choose an Agent Mode
 

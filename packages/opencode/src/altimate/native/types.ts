@@ -104,6 +104,8 @@ export interface SqlOptimizeResult {
 export interface SchemaInspectParams {
   table: string
   schema_name?: string
+  /** Database/catalog name — needed for cross-database queries (Snowflake, BigQuery) */
+  database?: string
   warehouse?: string
 }
 
@@ -172,6 +174,7 @@ export interface ModelColumn {
 export interface DbtModelInfo {
   unique_id: string
   name: string
+  description?: string
   schema_name?: string
   database?: string
   materialized?: string
@@ -182,6 +185,7 @@ export interface DbtModelInfo {
 export interface DbtSourceInfo {
   unique_id: string
   name: string
+  description?: string
   source_name: string
   schema_name?: string
   database?: string
@@ -198,11 +202,102 @@ export interface DbtManifestResult {
   models: DbtModelInfo[]
   sources: DbtSourceInfo[]
   tests: DbtTestInfo[]
+  /** Seeds parsed from the manifest (extracted like models for ref() resolution) */
+  seeds: DbtModelInfo[]
+  /** Snapshots parsed from the manifest (extracted like models for ref() resolution) */
+  snapshots: DbtModelInfo[]
   source_count: number
   model_count: number
   test_count: number
   snapshot_count: number
   seed_count: number
+  /** Adapter type from manifest metadata (e.g. "snowflake", "bigquery") */
+  adapter_type?: string
+}
+
+// --- dbt Unit Test Generation ---
+
+export interface DbtUnitTestGenParams {
+  /** Path to dbt manifest.json (must be compiled first) */
+  manifest_path: string
+  /** Model name or unique_id to generate tests for */
+  model: string
+  /** SQL dialect override (auto-detected from manifest if omitted) */
+  dialect?: string
+  /** Number of test scenarios to generate (default: 3) */
+  max_scenarios?: number
+}
+
+/** A single mock input for a ref() or source() dependency */
+export interface UnitTestMockInput {
+  /** e.g. ref('stg_orders') or source('raw', 'orders') */
+  input: string
+  /** Mock rows in dict format */
+  rows: Record<string, unknown>[]
+  /** Use sql format instead of dict (required for ephemeral models) */
+  format?: "dict" | "sql"
+  /** Raw SQL when format is "sql" */
+  sql?: string
+}
+
+/** A single generated unit test case */
+export interface UnitTestCase {
+  /** Test name (snake_case, descriptive) */
+  name: string
+  /** Human-readable description of what this test verifies */
+  description: string
+  /** Category: happy_path, null_handling, edge_case, boundary, incremental */
+  category: string
+  /** Which logic branch or SQL construct this test targets */
+  target_logic: string
+  /** Mock inputs for upstream dependencies */
+  given: UnitTestMockInput[]
+  /** Expected output rows */
+  expect_rows: Record<string, unknown>[]
+  /** Macro overrides (e.g., is_incremental) */
+  overrides?: {
+    macros?: Record<string, unknown>
+    vars?: Record<string, unknown>
+  }
+}
+
+/** Semantic context about the model and its lineage for LLM-assisted refinement */
+export interface UnitTestContext {
+  /** Model-level description from schema.yml */
+  model_description?: string
+  /** Compiled SQL of the model under test */
+  compiled_sql: string
+  /** Column lineage: output_col → ["input_table.input_col", ...] */
+  column_lineage: Record<string, string[]>
+  /** Upstream dependency context: name, description, columns with descriptions */
+  upstream: Array<{
+    name: string
+    ref: string // e.g. "ref('stg_orders')" or "source('raw', 'orders')"
+    description?: string
+    columns: Array<{ name: string; data_type: string; description?: string }>
+  }>
+  /** Output column descriptions */
+  output_columns: Array<{ name: string; data_type: string; description?: string }>
+}
+
+export interface DbtUnitTestGenResult {
+  success: boolean
+  model_name: string
+  model_unique_id?: string
+  materialized?: string
+  /** Number of upstream dependencies */
+  dependency_count: number
+  /** Generated test cases */
+  tests: UnitTestCase[]
+  /** Complete YAML output ready to paste into schema.yml */
+  yaml: string
+  /** Semantic context for LLM-assisted test refinement */
+  context?: UnitTestContext
+  /** SQL anti-patterns that informed edge case generation */
+  anti_patterns: string[]
+  /** Warnings (e.g., missing compiled SQL, ephemeral deps) */
+  warnings: string[]
+  error?: string
 }
 
 // --- Warehouse ---
@@ -908,6 +1003,8 @@ export interface DbtLineageResult {
 
 export interface DbtProfilesParams {
   path?: string
+  /** dbt project root directory — used to find project-local profiles.yml */
+  projectDir?: string
 }
 
 export interface DbtProfileConnection {
@@ -962,6 +1059,75 @@ export interface LocalTestResult {
   error?: string
 }
 
+// --- Data Diff ---
+
+export interface DataDiffParams {
+  /** Source table name (e.g. "orders", "db.schema.orders") or full SQL query */
+  source: string
+  /** Target table name or SQL query */
+  target: string
+  /** Primary key columns that uniquely identify each row */
+  key_columns: string[]
+  /** Source warehouse connection name */
+  source_warehouse?: string
+  /** Target warehouse connection name (defaults to source_warehouse) */
+  target_warehouse?: string
+  /** Extra columns to compare beyond the key */
+  extra_columns?: string[]
+  /** Algorithm: "auto" | "joindiff" | "hashdiff" | "profile" | "cascade" */
+  algorithm?: string
+  /** Optional WHERE filter applied to both tables */
+  where_clause?: string
+  /** Absolute numeric tolerance */
+  numeric_tolerance?: number
+  /** Timestamp tolerance in milliseconds */
+  timestamp_tolerance_ms?: number
+  /**
+   * Column to partition on before diffing. The table is split into groups by
+   * this column and each group is diffed independently. Results are aggregated.
+   * Use for large tables where bisection alone is too slow or imprecise.
+   *
+   * Examples: "l_shipdate" (date column), "l_orderkey" (numeric column)
+   */
+  partition_column?: string
+  /**
+   * Granularity for date partition columns: "day" | "week" | "month" | "year".
+   * For numeric columns, ignored — use partition_bucket_size instead.
+   * Defaults to "month".
+   */
+  partition_granularity?: "day" | "week" | "month" | "year"
+  /**
+   * For numeric partition columns: size of each bucket.
+   * E.g. 100000 splits l_orderkey into [0, 100000), [100000, 200000), …
+   */
+  partition_bucket_size?: number
+}
+
+export interface PartitionDiffResult {
+  /** The partition value (date string or numeric bucket start) */
+  partition: string
+  /** Source row count in this partition */
+  rows_source: number
+  /** Target row count in this partition */
+  rows_target: number
+  /** Total differences found (exclusive + updated) */
+  differences: number
+  /** "identical" | "differ" | "error" */
+  status: "identical" | "differ" | "error"
+  error?: string
+}
+
+export interface DataDiffResult {
+  success: boolean
+  steps: number
+  outcome?: unknown
+  error?: string
+  /** Per-partition breakdown when partition_column is used */
+  partition_results?: PartitionDiffResult[]
+  /** Columns auto-excluded from comparison (audit/timestamp columns like updated_at, created_at) */
+  excluded_audit_columns?: string[]
+}
+
 // --- Method registry ---
 
 export const BridgeMethods = {
@@ -981,6 +1147,7 @@ export const BridgeMethods = {
   "dbt.run": {} as { params: DbtRunParams; result: DbtRunResult },
   "dbt.manifest": {} as { params: DbtManifestParams; result: DbtManifestResult },
   "dbt.lineage": {} as { params: DbtLineageParams; result: DbtLineageResult },
+  "dbt.unit_test_gen": {} as { params: DbtUnitTestGenParams; result: DbtUnitTestGenResult },
   "warehouse.list": {} as { params: WarehouseListParams; result: WarehouseListResult },
   "warehouse.test": {} as { params: WarehouseTestParams; result: WarehouseTestResult },
   "warehouse.add": {} as { params: WarehouseAddParams; result: WarehouseAddResult },
@@ -1005,6 +1172,8 @@ export const BridgeMethods = {
   // --- local testing ---
   "local.schema_sync": {} as { params: LocalSchemaSyncParams; result: LocalSchemaSyncResult },
   "local.test": {} as { params: LocalTestParams; result: LocalTestResult },
+  // --- data diff ---
+  "data.diff": {} as { params: DataDiffParams; result: DataDiffResult },
   // --- altimate-core (existing) ---
   "altimate_core.validate": {} as { params: AltimateCoreValidateParams; result: AltimateCoreResult },
   "altimate_core.lint": {} as { params: AltimateCoreLintParams; result: AltimateCoreResult },

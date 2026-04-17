@@ -83,6 +83,15 @@ const MONGODB_ALIASES: AliasMap = {
   server_selection_timeout: ["serverSelectionTimeoutMS"],
 }
 
+const CLICKHOUSE_ALIASES: AliasMap = {
+  ...COMMON_ALIASES,
+  connection_string: ["connectionString", "uri", "url"],
+  request_timeout: ["requestTimeout", "timeout"],
+  tls_ca_cert: ["tlsCaCert", "ssl_ca", "ca_cert"],
+  tls_cert: ["tlsCert", "ssl_cert"],
+  tls_key: ["tlsKey", "ssl_key"],
+}
+
 /** Map of warehouse type to its alias map. */
 const DRIVER_ALIASES: Record<string, AliasMap> = {
   snowflake: SNOWFLAKE_ALIASES,
@@ -98,7 +107,100 @@ const DRIVER_ALIASES: Record<string, AliasMap> = {
   oracle: ORACLE_ALIASES,
   mongodb: MONGODB_ALIASES,
   mongo: MONGODB_ALIASES,
+  clickhouse: CLICKHOUSE_ALIASES,
   // duckdb and sqlite have simple configs — no aliases needed
+}
+
+// ---------------------------------------------------------------------------
+// Connection string password encoding
+// ---------------------------------------------------------------------------
+
+/**
+ * URI-style connection strings (postgres://, mongodb://, etc.) embed
+ * credentials in the userinfo section: `scheme://user:password@host/db`.
+ * If the password contains special characters (@, #, :, /, ?, etc.) and
+ * they are NOT percent-encoded, drivers will mis-parse the URI and fail
+ * with cryptic auth errors.
+ *
+ * This function detects an unencoded password in the userinfo portion and
+ * re-encodes it so the connection string is valid.  Already-encoded
+ * passwords (containing %XX sequences) are left untouched.
+ */
+export function sanitizeConnectionString(connectionString: string): string {
+  // Only touch scheme://... URIs.
+  const schemeMatch = connectionString.match(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//)
+  if (!schemeMatch) return connectionString
+
+  const scheme = schemeMatch[0]
+  const afterScheme = connectionString.slice(scheme.length)
+
+  // Find the userinfo/host separator. A password can legitimately contain
+  // '@', '#', '/', '?', or ':' characters, so the URI spec is ambiguous
+  // when those are unencoded. We use the LAST '@' as the separator because
+  // that correctly handles the common case of passwords with special
+  // characters (the stated purpose of this function — see issue #589).
+  //
+  // The known trade-off: if the query string or path also contains an
+  // unencoded '@' (e.g. `?email=alice@example.com`), the rightmost '@'
+  // is NOT the userinfo separator. We detect this ambiguous case below
+  // with a guard and bail to avoid corrupting the URI.
+  const lastAt = afterScheme.lastIndexOf("@")
+  if (lastAt < 0) return connectionString // No userinfo — nothing to fix
+
+  const beforeAt = afterScheme.slice(0, lastAt)
+  const afterAt = afterScheme.slice(lastAt + 1)
+
+  // Ambiguity guard: if the content AFTER the '@' has no path/query/
+  // fragment delimiter ('/', '?', or '#') but the content BEFORE the
+  // '@' does, then the '@' is almost certainly inside a path, query,
+  // or fragment — not the userinfo separator. Bail and leave the URI
+  // untouched so the caller can pre-encode explicitly.
+  //
+  // Examples that trigger the guard (correctly left alone):
+  //   postgresql://u:p@host/db?email=alice@example.com   ('@' in query)
+  //   postgresql://u:p@host:5432/db@archive              ('@' in path)
+  //   postgresql://u:p@host/db#at@frag                   ('@' in fragment)
+  //
+  // Examples that pass the guard (correctly encoded):
+  //   postgresql://u:p@ss@host/db            (last '@' has '/' after)
+  //   postgresql://u:f@ke#PLACEHOLDER@host/db (last '@' has '/' after)
+  const afterAtHasDelim = /[/?#]/.test(afterAt)
+  const beforeAtHasDelim = /[/?#]/.test(beforeAt)
+  if (!afterAtHasDelim && beforeAtHasDelim) {
+    // Ambiguous '@' — likely in query/path/fragment, not userinfo separator.
+    // Return unchanged; caller should pre-encode the password if auth fails.
+    console.debug?.("sanitizeConnectionString: ambiguous '@' detected, skipping encoding")
+    return connectionString
+  }
+
+  // Idempotent re-encoding: decode any existing percent-escapes and
+  // re-encode. Already-encoded values round-trip unchanged; raw values
+  // with special characters get encoded. Malformed percent sequences
+  // fall back to encoding the raw input.
+  const encodeIdempotent = (v: string): string => {
+    if (v.length === 0) return v
+    try {
+      return encodeURIComponent(decodeURIComponent(v))
+    } catch {
+      return encodeURIComponent(v)
+    }
+  }
+
+  // Split userinfo on the FIRST ':' only (password may contain ':').
+  const colonIdx = beforeAt.indexOf(":")
+  let encodedUserinfo: string
+  if (colonIdx < 0) {
+    // Username-only userinfo: still encode if it contains special chars
+    // (e.g. email addresses used as usernames).
+    encodedUserinfo = encodeIdempotent(beforeAt)
+  } else {
+    const user = beforeAt.slice(0, colonIdx)
+    const password = beforeAt.slice(colonIdx + 1)
+    encodedUserinfo = `${encodeIdempotent(user)}:${encodeIdempotent(password)}`
+  }
+
+  const rebuilt = `${scheme}${encodedUserinfo}@${afterAt}`
+  return rebuilt === connectionString ? connectionString : rebuilt
 }
 
 // ---------------------------------------------------------------------------
@@ -167,6 +269,15 @@ export function normalizeConfig(config: ConnectionConfig): ConnectionConfig {
 
   const aliases = DRIVER_ALIASES[type]
   let result = aliases ? applyAliases(config, aliases) : { ...config }
+
+  // Sanitize connection_string: if the password contains special characters
+  // (@, #, :, /, etc.) that are not percent-encoded, URI-based drivers will
+  // mis-parse the string and fail with cryptic auth errors.  This is the
+  // single integration point — every caller of normalizeConfig() gets the
+  // fix automatically.
+  if (typeof result.connection_string === "string") {
+    result.connection_string = sanitizeConnectionString(result.connection_string)
+  }
 
   // Type-specific post-processing
   // Note: MySQL SSL fields (ssl_ca, ssl_cert, ssl_key) are NOT constructed

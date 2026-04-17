@@ -1,6 +1,6 @@
 # Warehouses
 
-Altimate Code connects to 9 warehouse types. Configure them in `.altimate-code/connections.json` (project-local) or `~/.altimate-code/connections.json` (global).
+Altimate Code connects to 12 warehouse types. Configure them in `.altimate-code/connections.json` (project-local) or `~/.altimate-code/connections.json` (global).
 
 ## Configuration
 
@@ -153,6 +153,9 @@ If you're already authenticated via `gcloud`, omit `credentials_path`:
 }
 ```
 
+!!! tip "Special characters in passwords"
+    Passwords with special characters (`@`, `#`, `:`, `/`) are automatically percent-encoded. No manual escaping required.
+
 ## Redshift
 
 ```json
@@ -210,6 +213,9 @@ If you're already authenticated via `gcloud`, omit `credentials_path`:
 | Field | Required | Description |
 |-------|----------|-------------|
 | `path` | No | Database file path. Omit or use `":memory:"` for in-memory |
+
+!!! note "Concurrent access"
+    DuckDB does not support concurrent write access to the same file. If another process holds a write lock, Altimate Code automatically retries the connection in **read-only** mode so you can still query the data. A clear error message is shown if read-only access also fails.
 
 ## MySQL
 
@@ -279,8 +285,118 @@ If you're already authenticated via `gcloud`, omit `credentials_path`:
 !!! note
     MongoDB uses MQL (MongoDB Query Language) instead of SQL. Queries are submitted as JSON objects via the `execute` method. Supported commands: `find`, `aggregate`, `countDocuments`, `distinct`, `insertOne`, `insertMany`, `updateOne`, `updateMany`, `deleteOne`, `deleteMany`, `createIndex`, `listIndexes`, `createCollection`, `dropCollection`, `ping`.
 
+!!! warning "Blocked operators"
+    For safety, aggregate pipelines block `$out` and `$merge` (write stages) and `$function` and `$accumulator` (arbitrary JavaScript execution). Use `find`, `countDocuments`, or safe aggregate stages for read-only analysis.
+
 !!! info "Server compatibility"
     The MongoDB driver (v6.x) supports MongoDB server versions 3.6 through 8.0, covering all releases from the last 3+ years.
+
+## ClickHouse
+
+```json
+{
+  "clickhouse-prod": {
+    "type": "clickhouse",
+    "host": "localhost",
+    "port": 8123,
+    "database": "analytics",
+    "user": "default",
+    "password": "{env:CLICKHOUSE_PASSWORD}"
+  }
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `connection_string` | No | Full URL (alternative to individual fields, e.g. `http://user:pass@host:8123`) |
+| `host` | No | Hostname (default: `localhost`) |
+| `port` | No | HTTP port (default: `8123`) |
+| `database` | No | Database name (default: `default`) |
+| `user` | No | Username (default: `default`) |
+| `password` | No | Password |
+| `protocol` | No | `http` or `https` (default: `http`) |
+| `request_timeout` | No | Request timeout in ms (default: `30000`) |
+| `tls_ca_cert` | No | Path to CA certificate for TLS |
+| `tls_cert` | No | Path to client certificate for mutual TLS |
+| `tls_key` | No | Path to client key for mutual TLS |
+| `clickhouse_settings` | No | Object of ClickHouse server settings |
+
+### ClickHouse Cloud
+
+```json
+{
+  "clickhouse-cloud": {
+    "type": "clickhouse",
+    "host": "abc123.us-east-1.aws.clickhouse.cloud",
+    "port": 8443,
+    "protocol": "https",
+    "user": "default",
+    "password": "{env:CLICKHOUSE_CLOUD_PASSWORD}",
+    "database": "default"
+  }
+}
+```
+
+### Using a connection string
+
+```json
+{
+  "clickhouse-prod": {
+    "type": "clickhouse",
+    "connection_string": "https://default:secret@my-ch.cloud:8443"
+  }
+}
+```
+
+!!! info "Server compatibility"
+    The ClickHouse driver supports ClickHouse server versions 23.3 and later, covering all non-EOL releases. This includes LTS releases 23.8, 24.3, 24.8, and all stable releases through the current version.
+
+## Oracle
+
+```json
+{
+  "oracle-prod": {
+    "type": "oracle",
+    "host": "localhost",
+    "port": 1521,
+    "service_name": "ORCL",
+    "user": "analyst",
+    "password": "{env:ORACLE_PASSWORD}"
+  }
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `connection_string` | No | Full connect string (alternative to individual fields, e.g. `host:1521/ORCL`) |
+| `host` | No | Hostname (default: `127.0.0.1`) |
+| `port` | No | Port (default: `1521`) |
+| `service_name` | No | Oracle service name (default: `ORCL`) |
+| `database` | No | Alias for `service_name` |
+| `user` | No | Username |
+| `password` | No | Password |
+
+!!! info "Pure JavaScript driver"
+    The Oracle driver uses `oracledb` in thin mode (pure JavaScript) — no Oracle Instant Client installation is required.
+
+## SQLite
+
+```json
+{
+  "dev-sqlite": {
+    "type": "sqlite",
+    "path": "./dev.sqlite"
+  }
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `path` | No | Database file path. Omit or use `":memory:"` for in-memory |
+| `readonly` | No | Open in read-only mode (default: `false`) |
+
+!!! note
+    SQLite uses Bun's built-in `bun:sqlite` driver. WAL journal mode is enabled automatically for writable databases.
 
 ## SQL Server
 
@@ -307,6 +423,16 @@ If you're already authenticated via `gcloud`, omit `credentials_path`:
 | `driver` | No | ODBC driver name (default: `ODBC Driver 18 for SQL Server`) |
 | `azure_auth` | No | Use Azure AD authentication (default: `false`) |
 | `trust_server_certificate` | No | Trust server certificate without validation (default: `false`) |
+
+## Unsupported Databases
+
+The following databases are not yet natively supported, but workarounds are available:
+
+| Database | Workaround |
+|----------|------------|
+| Cassandra | Use the bash tool with `cqlsh` to query directly |
+| CockroachDB | PostgreSQL-compatible — use `type: postgres` |
+| TimescaleDB | PostgreSQL extension — use `type: postgres` |
 
 ## SSH Tunneling
 
@@ -344,9 +470,32 @@ The `/discover` command can automatically detect warehouse connections from:
 
 | Source | Detection |
 |--------|-----------|
-| dbt profiles | Parses `~/.dbt/profiles.yml` |
-| Docker containers | Finds running PostgreSQL, MySQL, and SQL Server containers |
+| dbt profiles | Searches for `profiles.yml` (see resolution order below) |
+| Docker containers | Finds running PostgreSQL, MySQL, SQL Server, and ClickHouse containers |
 | Environment variables | Scans for `SNOWFLAKE_ACCOUNT`, `PGHOST`, `DATABRICKS_HOST`, etc. |
+
+### dbt profiles.yml resolution order
+
+When discovering dbt profiles, altimate checks the following locations **in priority order** and uses the first one found:
+
+| Priority | Location | Description |
+|----------|----------|-------------|
+| 1 | Explicit path | If you pass a `path` parameter to the `dbt_profiles` tool |
+| 2 | `DBT_PROFILES_DIR` env var | Standard dbt environment variable — set it to the directory containing your `profiles.yml` |
+| 3 | Project-local `profiles.yml` | A `profiles.yml` in your dbt project root (next to `dbt_project.yml`) |
+| 4 | `<home>/.dbt/profiles.yml` | The global default location (e.g., `~/.dbt/` on macOS/Linux, `%USERPROFILE%\.dbt\` on Windows) |
+
+This means teams that keep `profiles.yml` in their project repo (a common pattern for CI/CD) will have it detected automatically — no extra configuration needed.
+
+```bash
+# Option 1: Set the environment variable
+export DBT_PROFILES_DIR=/path/to/your/project
+
+# Option 2: Just put profiles.yml next to dbt_project.yml
+# Copy from default location (macOS/Linux)
+cp ~/.dbt/profiles.yml ./profiles.yml
+altimate /discover
+```
 
 See [Warehouse Tools](../data-engineering/tools/warehouse-tools.md) for the full list of environment variable signals.
 
@@ -365,3 +514,16 @@ Testing connection to prod-snowflake (snowflake)...
   Warehouse: COMPUTE_WH
   Database: ANALYTICS
 ```
+
+## Post-Connection Suggestions
+
+After you successfully connect a warehouse, altimate suggests next steps to help you get the most out of your connection. Suggestions are shown progressively based on what you've already done:
+
+1. **Index your schemas** — populate the schema cache for autocomplete and context-aware analysis
+2. **Run SQL analysis** — scan your query history for anti-patterns and optimization opportunities
+3. **Inspect schema structure** — review tables, columns, and relationships
+4. **Check lineage** — trace column-level data flow across your models
+
+If altimate detects a dbt project in your workspace, it also recommends relevant dbt skills (`/dbt-develop`, `/dbt-troubleshoot`, `/dbt-analyze`).
+
+Each suggestion is shown **once per session** — dismissing or acting on a suggestion removes it from the queue. You can also run a suggested action later via its corresponding tool or slash command.
