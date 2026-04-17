@@ -433,8 +433,11 @@ function generateSystem(colors: TerminalColors, mode: "dark" | "light"): ThemeJs
   const transparent = RGBA.fromInts(0, 0, 0, 0)
   const isDark = mode == "dark"
 
-  // altimate_change start — fix: light-mode foreground fallback
-  const fgFallback = isDark ? colors.palette[7]! : "#1a1a1a"
+  // altimate_change start — fix: light-mode foreground fallback (#704)
+  // Dark mode keeps palette[7] (standard light-gray fg on dark bg).
+  // Light mode: palette[7] is typically #c0c0c0 — invisible on white.
+  // Prefer the user's palette[0] (near-black) when present; #1a1a1a otherwise.
+  const fgFallback = isDark ? colors.palette[7]! : (colors.palette[0] ?? "#1a1a1a")
   const fg = RGBA.fromHex(colors.defaultForeground ?? fgFallback)
   // altimate_change end
 
