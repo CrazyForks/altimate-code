@@ -90,27 +90,22 @@ export namespace AltimateApi {
     altimateApiKey: string
   } | null {
     const parts = value.trim().split("::")
+    // altimate_change start — 2 parts means no URL was given (use default); 3+ parts means URL was given
     if (parts.length < 2) return null
-    // altimate_change start — support 2-part `instance-name::api-key` with default URL, keep 3-part `url::instance::key` for custom instances
-    const first = parts[0].trim()
-    const looksLikeUrl = (s: string) => s.startsWith("http://") || s.startsWith("https://")
     let url: string
     let instance: string
     let key: string
-    if (first.includes("://")) {
-      // Leading segment looks like a URL — must be http(s) and the 3-part form
-      if (!looksLikeUrl(first)) return null
-      if (parts.length < 3) return null
-      url = first
+    if (parts.length === 2) {
+      url = DEFAULT_ALTIMATE_URL
+      instance = parts[0].trim()
+      key = parts[1].trim()
+    } else {
+      url = parts[0].trim()
       instance = parts[1].trim()
       key = parts.slice(2).join("::").trim()
-    } else {
-      url = DEFAULT_ALTIMATE_URL
-      instance = first
-      key = parts.slice(1).join("::").trim()
     }
     if (!url || !instance || !key) return null
-    if (!looksLikeUrl(url)) return null
+    if (!url.startsWith("http://") && !url.startsWith("https://")) return null
     // altimate_change end
     return { altimateUrl: url, altimateInstanceName: instance, altimateApiKey: key }
   }

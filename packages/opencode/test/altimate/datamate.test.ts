@@ -270,10 +270,6 @@ describe("parseAltimateKey", () => {
     expect(r?.altimateApiKey).toBe("key::extra")
   })
 
-  test("returns null for too few parts when leading segment is a URL", () => {
-    expect(AltimateApi.parseAltimateKey("https://api.getaltimate.com::mycompany")).toBeNull()
-  })
-
   test("returns null for a single part (no separator)", () => {
     expect(AltimateApi.parseAltimateKey("justonevalue")).toBeNull()
   })
@@ -286,13 +282,6 @@ describe("parseAltimateKey", () => {
       altimateInstanceName: "mycompany",
       altimateApiKey: "abc123",
     })
-  })
-
-  test("preserves :: in api key for 2-part input", () => {
-    const r = AltimateApi.parseAltimateKey("mycompany::key::extra")
-    expect(r?.altimateUrl).toBe("https://api.myaltimate.com")
-    expect(r?.altimateInstanceName).toBe("mycompany")
-    expect(r?.altimateApiKey).toBe("key::extra")
   })
 
   test("trims whitespace for 2-part input", () => {
@@ -308,6 +297,11 @@ describe("parseAltimateKey", () => {
 
   test("returns null for empty api key in 2-part input", () => {
     expect(AltimateApi.parseAltimateKey("mycompany::")).toBeNull()
+  })
+
+  test("3+ parts always treat first segment as URL — non-http rejected", () => {
+    // `mycompany::key::extra` → 3 parts → url=mycompany (fails http(s) check)
+    expect(AltimateApi.parseAltimateKey("mycompany::key::extra")).toBeNull()
   })
   // altimate_change end
 
