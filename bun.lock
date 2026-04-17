@@ -54,12 +54,6 @@
         "pg": "^8.0.0",
         "snowflake-sdk": "^2.0.3",
       },
-      "peerDependencies": {
-        "@azure/identity": ">=4.0.0",
-      },
-      "optionalPeers": [
-        "@azure/identity",
-      ],
     },
     "packages/opencode": {
       "name": "@altimateai/altimate-code",
