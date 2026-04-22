@@ -744,7 +744,9 @@ export namespace Provider {
         const host = Env.get("DATABRICKS_HOST")
         const token = Env.get("DATABRICKS_TOKEN")
         if (!host || !token) return { autoload: false }
+        // altimate_change start — validate DATABRICKS_HOST env to prevent SSRF/CRLF injection
         if (!isValidDatabricksHost(host)) return { autoload: false }
+        // altimate_change end
         return {
           autoload: true,
           options: {
@@ -754,7 +756,9 @@ export namespace Provider {
         }
       }
       const host = auth.accountId ?? Env.get("DATABRICKS_HOST")
+      // altimate_change start — validate host (auth file or env fallback) to prevent SSRF
       if (!host || !isValidDatabricksHost(host)) return { autoload: false }
+      // altimate_change end
       return {
         autoload: true,
         options: {
