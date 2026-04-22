@@ -56,6 +56,14 @@ export function isValidVersion(version: string): boolean {
   return /^\d+\.\d+\.\d+/.test(version.replace(/^v/, ""))
 }
 
+/**
+ * Tracks the (version, machineId|cli) pairs for which we have already emitted
+ * an `upgrade_available` telemetry event in this process, so repeated upgrade()
+ * calls for the same target don't inflate the notified-denominator in the
+ * notification → upgrade funnel.
+ */
+const _notifiedVersions = new Set<string>()
+
 export async function upgrade() {
   const config = await Config.global()
   const method = await Installation.method()
@@ -76,7 +84,43 @@ export async function upgrade() {
     return
   }
 
-  const notify = () => Bus.publish(Installation.Event.UpdateAvailable, { version: latest })
+  const publishUpdate = () => Bus.publish(Installation.Event.UpdateAvailable, { version: latest })
+
+  /**
+   * Proactively notify the user that an upgrade is available AND emit the
+   * `upgrade_available` telemetry so we can measure the notification → upgrade
+   * funnel. Called from the autoupdate=disabled, autoupdate=notify, and
+   * unknown/yarn paths — NOT from the auto-upgrade error-recovery path
+   * (that path already emits `upgrade_attempted(status=error)`, and mixing
+   * the two signals conflates "proactive notification" with "error recovery
+   * notification"). Deduped per (machineId|session, version) within the
+   * process so repeated upgrade() calls don't double-count.
+   */
+  const notify = async () => {
+    try {
+      const { Telemetry } = await import("@/altimate/telemetry")
+      const ctx = Telemetry.getContext()
+      // Prefer machineId for dedup when a session has not started yet (the
+      // upgrade check runs early in CLI startup). Falling back to sessionId
+      // keeps the key stable within an established session; "cli" is a last
+      // resort so the key is never empty.
+      const correlationId = ctx.sessionId || ctx.machineId || "cli"
+      const dedupKey = `${correlationId}:${latest}`
+      if (_notifiedVersions.has(dedupKey)) return publishUpdate()
+      _notifiedVersions.add(dedupKey)
+      Telemetry.track({
+        type: "upgrade_available",
+        timestamp: Date.now(),
+        session_id: correlationId,
+        current_version: Installation.VERSION,
+        latest_version: latest,
+      })
+    } catch (err) {
+      // Telemetry is observability; it must never block the user-facing toast.
+      log.warn("upgrade_available telemetry failed", { error: String(err) })
+    }
+    return publishUpdate()
+  }
 
   // Always notify when update is available, regardless of autoupdate setting
   if (config.autoupdate === false || Flag.OPENCODE_DISABLE_AUTOUPDATE) {
@@ -97,8 +141,13 @@ export async function upgrade() {
   await Installation.upgrade(method, latest)
     .then(() => Bus.publish(Installation.Event.Updated, { version: latest }))
     .catch(async (err) => {
+      // Auto-upgrade failed (e.g., choco/scoop hard-fail, npm exit code). Show
+      // the toast so the user knows a new version exists, but DO NOT emit
+      // `upgrade_available` — `upgrade_attempted(status=error)` already carries
+      // this signal, and emitting both would invert the natural funnel order
+      // (attempt before notification).
       log.warn("auto-upgrade failed, notifying instead", { error: String(err), method, target: latest })
-      await notify()
+      await publishUpdate()
     })
 }
 // altimate_change end

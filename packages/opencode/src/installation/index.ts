@@ -33,7 +33,15 @@ export namespace Installation {
     }).then((x) => x.text)
   }
 
-  async function upgradeCurl(target: string) {
+  // altimate_change start — explicit UpgradeResult type
+  // Shape shared by Process.run() and upgradeCurl() results plus the
+  // synthesized failure results used for unsupported methods (choco/scoop).
+  // Using a named type avoids `as Awaited<ReturnType<typeof upgradeCurl>>`
+  // casts that silently accept mismatches if the real return shape drifts.
+  type UpgradeResult = { code: number; stdout: Buffer; stderr: Buffer }
+  // altimate_change end
+
+  async function upgradeCurl(target: string): Promise<UpgradeResult> {
     const body = await fetch("https://altimate.ai/install").then((res) => {
       if (!res.ok) throw new Error(res.statusText)
       return res.text()
@@ -127,14 +135,20 @@ export namespace Installation {
         command: () => text(["brew", "list", "--formula", "altimate-code"]),
       },
       // altimate_change end
+      // altimate_change start — choco/scoop are supported as an input (--method=choco)
+      // so callers still type-check, but we do NOT auto-detect them. The sentinel
+      // commands below return empty strings; combined with the `installedName`
+      // check further down, these entries can never match. Auto-detecting would
+      // match upstream `opencode` (the wrong product) installed alongside.
       {
         name: "scoop" as const,
-        command: () => text(["scoop", "list", "opencode"]),
+        command: () => Promise.resolve(""),
       },
       {
         name: "choco" as const,
-        command: () => text(["choco", "list", "--limit-output", "opencode"]),
+        command: () => Promise.resolve(""),
       },
+      // altimate_change end
     ]
 
     checks.sort((a, b) => {
@@ -148,8 +162,9 @@ export namespace Installation {
     for (const check of checks) {
       const output = await check.command()
       // altimate_change start — package names for detection
-      const installedName =
-        check.name === "brew" ? "altimate-code" : check.name === "choco" || check.name === "scoop" ? "opencode" : "@altimateai/altimate-code"
+      // choco/scoop entries above are sentinels (empty-string commands), so
+      // they can never match here; only brew + npm-family can resolve.
+      const installedName = check.name === "brew" ? "altimate-code" : "@altimateai/altimate-code"
       // altimate_change end
       if (output.includes(installedName)) {
         return check.name
@@ -177,7 +192,7 @@ export namespace Installation {
   // altimate_change end
 
   export async function upgrade(method: Method, target: string) {
-    let result: Awaited<ReturnType<typeof upgradeCurl>> | undefined
+    let result: UpgradeResult | undefined
     switch (method) {
       case "curl":
         result = await upgradeCurl(target)
@@ -221,20 +236,40 @@ export namespace Installation {
         break
       }
 
+      // altimate_change start — choco/scoop not supported; return a helpful error
+      // (in place of upstream's `choco upgrade opencode` / `scoop install opencode`,
+      // which install the wrong product).
       case "choco":
-        result = await Process.run(["choco", "upgrade", "opencode", `--version=${target}`, "-y"], { nothrow: true })
+      case "scoop": {
+        const msg =
+          `altimate-code is not distributed via ${method}. ` +
+          `Reinstall via npm (\`npm install -g @altimateai/altimate-code\`), ` +
+          `Homebrew (\`brew install AltimateAI/tap/altimate-code\`), ` +
+          `or the install script at https://altimate.ai/install`
+        result = {
+          code: 1,
+          stdout: Buffer.from(""),
+          stderr: Buffer.from(msg),
+        } satisfies UpgradeResult
         break
-      case "scoop":
-        result = await Process.run(["scoop", "install", `opencode@${target}`], { nothrow: true })
-        break
+      }
+      // altimate_change end
       default:
         throw new Error(`Unknown method: ${method}`)
     }
     // altimate_change start — telemetry for upgrade result
-    const telemetryMethod = (["npm", "bun", "brew"].includes(method) ? method : "other") as "npm" | "bun" | "brew" | "other"
+    // choco/scoop are retained as distinct values so analytics can distinguish
+    // Windows users hitting the unsupported-method path from generic "other"
+    // failures. See the upgrade_attempted event definition in telemetry/index.ts.
+    const telemetryMethod = (["npm", "bun", "brew", "choco", "scoop"].includes(method) ? method : "other") as
+      | "npm"
+      | "bun"
+      | "brew"
+      | "choco"
+      | "scoop"
+      | "other"
     if (!result || result.code !== 0) {
-      const stderr =
-        method === "choco" ? "not running from an elevated command shell" : result?.stderr.toString("utf8") || ""
+      const stderr = result?.stderr.toString("utf8") || ""
       const T = await getTelemetry()
       T.track({
         type: "upgrade_attempted",
@@ -323,28 +358,13 @@ export namespace Installation {
         .then((data: any) => data.version)
     }
 
-    if (detectedMethod === "choco") {
-      return fetch(
-        "https://community.chocolatey.org/api/v2/Packages?$filter=Id%20eq%20%27opencode%27%20and%20IsLatestVersion&$select=Version",
-        { headers: { Accept: "application/json;odata=verbose" } },
-      )
-        .then((res) => {
-          if (!res.ok) throw new Error(res.statusText)
-          return res.json()
-        })
-        .then((data: any) => data.d.results[0].Version)
-    }
-
-    if (detectedMethod === "scoop") {
-      return fetch("https://raw.githubusercontent.com/ScoopInstaller/Main/master/bucket/opencode.json", {
-        headers: { Accept: "application/json" },
-      })
-        .then((res) => {
-          if (!res.ok) throw new Error(res.statusText)
-          return res.json()
-        })
-        .then((data: any) => data.version)
-    }
+    // altimate_change start — choco/scoop not supported; fall through to GitHub releases API
+    // Upstream opencode queried chocolatey/scoop for the `opencode` package, which
+    // returns the wrong product's version. altimate-code is not published to
+    // either manager, so treat these methods like any other: use GitHub releases
+    // as the source of truth. This keeps `latest()` returning the right version
+    // even if detection somehow surfaced choco/scoop (e.g., via --method=choco).
+    // altimate_change end
 
     return fetch("https://api.github.com/repos/AltimateAI/altimate-code/releases/latest")
       .then((res) => {

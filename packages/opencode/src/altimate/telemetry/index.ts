@@ -218,9 +218,29 @@ export namespace Telemetry {
         session_id: string
         from_version: string
         to_version: string
-        method: "npm" | "bun" | "brew" | "other"
+        // choco/scoop are retained for telemetry granularity even though
+        // altimate-code is not published to those managers — a user who
+        // explicitly passes --method=choco|scoop hits a structured error
+        // that we want to measure separately from "other" noise.
+        method: "npm" | "bun" | "brew" | "choco" | "scoop" | "other"
         status: "success" | "error"
         error?: string
+      }
+    | {
+        // Emitted ONLY when the user is PROACTIVELY shown an "upgrade available"
+        // notification (autoupdate disabled, autoupdate=notify, or method is
+        // unknown/yarn). NOT emitted from the auto-upgrade error-recovery path
+        // where upgrade_attempted(status=error) already signals the outcome.
+        // Pair with `upgrade_attempted` to compute the proactive notification →
+        // action funnel:
+        //   notified   = count(upgrade_available)
+        //   upgraded   = count(upgrade_attempted where status=success)
+        //   skipped    = notified - upgraded (dedup per machine / cohort)
+        type: "upgrade_available"
+        timestamp: number
+        session_id: string
+        current_version: string
+        latest_version: string
       }
     | {
         type: "session_forked"
@@ -1220,7 +1240,12 @@ export namespace Telemetry {
   }
 
   export function getContext() {
-    return { sessionId, projectId }
+    // altimate_change start — expose machineId so callers can use it as a
+    // stable fallback correlation key when a session has not been established
+    // yet (e.g., CLI-only paths like the upgrade check that runs before
+    // session_start).
+    return { sessionId, projectId, machineId }
+    // altimate_change end
   }
 
   /** Returns true only after init() has completed and telemetry is enabled. */

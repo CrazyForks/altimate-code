@@ -29,7 +29,7 @@ const trackSpy = spyOn(Telemetry, "track").mockImplementation((event: any) => {
 
 const getContextSpy = spyOn(Telemetry, "getContext").mockImplementation(() => {
   if (shouldThrow) throw new Error("getContext EXPLOSION")
-  return { sessionId: "test-session", projectId: "test-project" }
+  return { sessionId: "test-session", projectId: "test-project", machineId: "test-machine" }
 })
 
 afterAll(() => {

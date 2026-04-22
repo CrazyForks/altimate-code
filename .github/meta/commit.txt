@@ -1,3 +1,7 @@
-release: v0.6.0
+fix: wrap isValidDatabricksHost env-fallback in altimate_change markers
+
+The post-push Marker Guard uses `git diff -U5 <pre-push>...HEAD` so the
+hunk for this single added line did not include the surrounding block
+marker 8 lines above. Add an inline marker pair to satisfy strict mode.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>

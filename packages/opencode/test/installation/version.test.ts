@@ -57,29 +57,33 @@ describe("Installation.latest() returns clean versions", () => {
     expect(version.startsWith("v")).toBe(false)
   })
 
-  test("scoop manifest: returns clean version", async () => {
+  // altimate_change start — choco/scoop fall through to GitHub releases
+  // We do not publish altimate-code to chocolatey or scoop. latest() for these
+  // methods falls through to the GitHub releases API (same path as "unknown").
+  test("scoop: falls through to GitHub releases (altimate-code is not on scoop)", async () => {
     globalThis.fetch = (async () =>
-      new Response(JSON.stringify({ version: "2.3.4" }), {
+      new Response(JSON.stringify({ tag_name: "v0.6.0" }), {
         status: 200,
         headers: { "content-type": "application/json" },
       })) as unknown as typeof fetch
 
     const version = await Installation.latest("scoop")
-    expect(version).toBe("2.3.4")
+    expect(version).toBe("0.6.0")
     expect(version.startsWith("v")).toBe(false)
   })
 
-  test("chocolatey feed: returns clean version", async () => {
+  test("choco: falls through to GitHub releases (altimate-code is not on chocolatey)", async () => {
     globalThis.fetch = (async () =>
-      new Response(
-        JSON.stringify({ d: { results: [{ Version: "3.4.5" }] } }),
-        { status: 200, headers: { "content-type": "application/json" } },
-      )) as unknown as typeof fetch
+      new Response(JSON.stringify({ tag_name: "v0.6.0" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })) as unknown as typeof fetch
 
     const version = await Installation.latest("choco")
-    expect(version).toBe("3.4.5")
+    expect(version).toBe("0.6.0")
     expect(version.startsWith("v")).toBe(false)
   })
+  // altimate_change end
 })
 
 describe("version comparison for upgrade skip", () => {

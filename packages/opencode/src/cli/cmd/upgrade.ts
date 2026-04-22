@@ -17,7 +17,12 @@ export const UpgradeCommand = {
         alias: "m",
         describe: "installation method to use",
         type: "string",
-        choices: ["curl", "npm", "pnpm", "bun", "brew", "choco", "scoop"],
+        // altimate_change start — choco/scoop removed: altimate-code is not
+        // distributed via chocolatey or scoop, and Installation.upgrade()
+        // hard-fails these methods with a helpful error. Offering them in
+        // `--help` would lead users into that failure path.
+        choices: ["curl", "npm", "pnpm", "bun", "brew"],
+        // altimate_change end
       })
   },
   handler: async (args: { target?: string; method?: string }) => {
@@ -58,12 +63,12 @@ export const UpgradeCommand = {
     if (err) {
       spinner.stop("Upgrade failed", 1)
       if (err instanceof Installation.UpgradeFailedError) {
-        // necessary because choco only allows install/upgrade in elevated terminals
-        if (method === "choco" && err.data.stderr.includes("not running from an elevated command shell")) {
-          prompts.log.error("Please run the terminal as Administrator and try again")
-        } else {
-          prompts.log.error(err.data.stderr)
-        }
+        // altimate_change start — choco/scoop now synthesize their own helpful
+        // stderr ("altimate-code is not distributed via choco..."), so the old
+        // `method === "choco" && stderr.includes("not running from an elevated
+        // command shell")` branch was unreachable. Print the stderr directly.
+        prompts.log.error(err.data.stderr)
+        // altimate_change end
       } else if (err instanceof Error) prompts.log.error(err.message)
       prompts.outro("Done")
       return

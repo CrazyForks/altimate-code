@@ -128,16 +128,21 @@ async function showRemovalSummary(targets: RemovalTargets, method: Installation.
   }
 
   if (method !== "curl" && method !== "unknown") {
+    // altimate_change start — altimate-code package identifiers
+    // Upstream opencode uninstalled `opencode-ai` (npm) / `opencode` (brew),
+    // which would uninstall the WRONG product for altimate-code users. Also,
+    // altimate-code is not distributed via chocolatey or scoop, so those
+    // entries are dropped (method auto-detection never returns them anyway;
+    // explicit --method=choco|scoop would print the generic method name).
     const cmds: Record<string, string> = {
-      npm: "npm uninstall -g opencode-ai",
-      pnpm: "pnpm uninstall -g opencode-ai",
-      bun: "bun remove -g opencode-ai",
-      yarn: "yarn global remove opencode-ai",
-      brew: "brew uninstall opencode",
-      choco: "choco uninstall opencode",
-      scoop: "scoop uninstall opencode",
+      npm: "npm uninstall -g @altimateai/altimate-code",
+      pnpm: "pnpm uninstall -g @altimateai/altimate-code",
+      bun: "bun remove -g @altimateai/altimate-code",
+      yarn: "yarn global remove @altimateai/altimate-code",
+      brew: "brew uninstall altimate-code",
     }
     prompts.log.info(`  ✓ Package: ${cmds[method] || method}`)
+    // altimate_change end
   }
 }
 
@@ -179,34 +184,31 @@ async function executeUninstall(method: Installation.Method, targets: RemovalTar
   }
 
   if (method !== "curl" && method !== "unknown") {
+    // altimate_change start — altimate-code package identifiers
+    // See the matching block in showRemovalSummary for full rationale.
+    // choco/scoop are intentionally absent: altimate-code is not distributed
+    // there, and the old Windows UAC (choco-elevation) fallback branch is
+    // removed along with them.
     const cmds: Record<string, string[]> = {
-      npm: ["npm", "uninstall", "-g", "opencode-ai"],
-      pnpm: ["pnpm", "uninstall", "-g", "opencode-ai"],
-      bun: ["bun", "remove", "-g", "opencode-ai"],
-      yarn: ["yarn", "global", "remove", "opencode-ai"],
-      brew: ["brew", "uninstall", "opencode"],
-      choco: ["choco", "uninstall", "opencode"],
-      scoop: ["scoop", "uninstall", "opencode"],
+      npm: ["npm", "uninstall", "-g", "@altimateai/altimate-code"],
+      pnpm: ["pnpm", "uninstall", "-g", "@altimateai/altimate-code"],
+      bun: ["bun", "remove", "-g", "@altimateai/altimate-code"],
+      yarn: ["yarn", "global", "remove", "@altimateai/altimate-code"],
+      brew: ["brew", "uninstall", "altimate-code"],
     }
 
     const cmd = cmds[method]
     if (cmd) {
       spinner.start(`Running ${cmd.join(" ")}...`)
-      const result = await Process.run(method === "choco" ? ["choco", "uninstall", "opencode", "-y", "-r"] : cmd, {
-        nothrow: true,
-      })
+      const result = await Process.run(cmd, { nothrow: true })
       if (result.code !== 0) {
         spinner.stop(`Package manager uninstall failed: exit code ${result.code}`, 1)
-        const text = `${result.stdout.toString("utf8")}\n${result.stderr.toString("utf8")}`
-        if (method === "choco" && text.includes("not running from an elevated command shell")) {
-          prompts.log.warn(`You may need to run '${cmd.join(" ")}' from an elevated command shell`)
-        } else {
-          prompts.log.warn(`You may need to run manually: ${cmd.join(" ")}`)
-        }
+        prompts.log.warn(`You may need to run manually: ${cmd.join(" ")}`)
       } else {
         spinner.stop("Package removed")
       }
     }
+    // altimate_change end
   }
 
   if (method === "curl" && targets.binary) {
