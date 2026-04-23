@@ -5,6 +5,7 @@
  */
 
 import * as Registry from "../connections/registry"
+import { bqRegionFor, interpolateBqRegion } from "./bq-utils"
 import type {
   RoleGrantsParams,
   RoleGrantsResult,
@@ -75,7 +76,7 @@ SELECT
     'NO' as grant_option,
     '' as granted_by,
     '' as created_on
-FROM \`region-US.INFORMATION_SCHEMA.OBJECT_PRIVILEGES\`
+FROM \`region-{region}.INFORMATION_SCHEMA.OBJECT_PRIVILEGES\`
 WHERE 1=1
 {grantee_filter}
 ORDER BY object_type, object_name
@@ -123,7 +124,7 @@ function rowsToRecords(result: { columns: string[]; rows: any[][] }): Record<str
 }
 
 function buildGrantsSql(
-  whType: string, role?: string, objectName?: string, limit: number = 100,
+  whType: string, role?: string, objectName?: string, limit: number = 100, bqRegion?: unknown,
 ): { sql: string; binds: any[] } | null {
   if (whType === "snowflake") {
     const binds: any[] = []
@@ -142,7 +143,7 @@ function buildGrantsSql(
     const granteeF = role ? (binds.push(role), "AND grantee = ?") : ""
     binds.push(limit)
     return {
-      sql: BIGQUERY_GRANTS_SQL.replace("{grantee_filter}", granteeF),
+      sql: interpolateBqRegion(BIGQUERY_GRANTS_SQL.replace("{grantee_filter}", granteeF), bqRegion),
       binds,
     }
   }
@@ -165,8 +166,9 @@ function buildGrantsSql(
 export async function queryGrants(params: RoleGrantsParams): Promise<RoleGrantsResult> {
   const whType = getWhType(params.warehouse)
   const limit = params.limit ?? 100
+  const bqRegion = whType === "bigquery" ? bqRegionFor(params.warehouse) : undefined
 
-  const built = buildGrantsSql(whType, params.role, params.object_name, limit)
+  const built = buildGrantsSql(whType, params.role, params.object_name, limit, bqRegion)
   if (!built) {
     return {
       success: false,

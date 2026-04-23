@@ -5,6 +5,7 @@
  */
 
 import * as Registry from "../connections/registry"
+import { bqRegionFor, interpolateBqRegion } from "./bq-utils"
 import type {
   CreditAnalysisParams,
   CreditAnalysisResult,
@@ -80,7 +81,7 @@ SELECT
     0 as credits_cloud,
     COUNT(*) as query_count,
     AVG(total_bytes_billed) / 1099511627776.0 * 5.0 as avg_credits_per_query
-FROM \`region-US.INFORMATION_SCHEMA.JOBS\`
+FROM \`region-{region}.INFORMATION_SCHEMA.JOBS\`
 WHERE creation_time >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL ? DAY)
   AND job_type = 'QUERY'
   AND state = 'DONE'
@@ -97,7 +98,7 @@ SELECT
     0 as total_cloud_credits,
     COUNT(DISTINCT DATE(creation_time)) as active_days,
     AVG(total_bytes_billed) / 1099511627776.0 * 5.0 as avg_daily_credits
-FROM \`region-US.INFORMATION_SCHEMA.JOBS\`
+FROM \`region-{region}.INFORMATION_SCHEMA.JOBS\`
 WHERE creation_time >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL ? DAY)
   AND job_type = 'QUERY'
   AND state = 'DONE'
@@ -115,7 +116,7 @@ SELECT
     0 as rows_produced,
     total_bytes_billed / 1099511627776.0 * 5.0 as credits_used,
     start_time
-FROM \`region-US.INFORMATION_SCHEMA.JOBS\`
+FROM \`region-{region}.INFORMATION_SCHEMA.JOBS\`
 WHERE creation_time >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL ? DAY)
   AND job_type = 'QUERY'
   AND state = 'DONE'
@@ -191,7 +192,7 @@ function getWhType(warehouse: string): string {
 }
 
 function buildCreditUsageSql(
-  whType: string, days: number, limit: number, warehouseFilter?: string,
+  whType: string, days: number, limit: number, warehouseFilter?: string, bqRegion?: unknown,
 ): { sql: string; binds: any[] } | null {
   if (whType === "snowflake") {
     const binds: any[] = [-days]
@@ -203,7 +204,10 @@ function buildCreditUsageSql(
     }
   }
   if (whType === "bigquery") {
-    return { sql: BIGQUERY_CREDIT_USAGE_SQL, binds: [days, limit] }
+    return {
+      sql: interpolateBqRegion(BIGQUERY_CREDIT_USAGE_SQL, bqRegion),
+      binds: [days, limit],
+    }
   }
   if (whType === "databricks") {
     return { sql: DATABRICKS_CREDIT_USAGE_SQL, binds: [days, limit] }
@@ -211,12 +215,15 @@ function buildCreditUsageSql(
   return null
 }
 
-function buildCreditSummarySql(whType: string, days: number): { sql: string; binds: any[] } | null {
+function buildCreditSummarySql(whType: string, days: number, bqRegion?: unknown): { sql: string; binds: any[] } | null {
   if (whType === "snowflake") {
     return { sql: SNOWFLAKE_CREDIT_SUMMARY_SQL, binds: [-days] }
   }
   if (whType === "bigquery") {
-    return { sql: BIGQUERY_CREDIT_SUMMARY_SQL, binds: [days] }
+    return {
+      sql: interpolateBqRegion(BIGQUERY_CREDIT_SUMMARY_SQL, bqRegion),
+      binds: [days],
+    }
   }
   if (whType === "databricks") {
     return { sql: DATABRICKS_CREDIT_SUMMARY_SQL, binds: [days] }
@@ -224,12 +231,15 @@ function buildCreditSummarySql(whType: string, days: number): { sql: string; bin
   return null
 }
 
-function buildExpensiveSql(whType: string, days: number, limit: number): { sql: string; binds: any[] } | null {
+function buildExpensiveSql(whType: string, days: number, limit: number, bqRegion?: unknown): { sql: string; binds: any[] } | null {
   if (whType === "snowflake") {
     return { sql: SNOWFLAKE_EXPENSIVE_SQL, binds: [-days, limit] }
   }
   if (whType === "bigquery") {
-    return { sql: BIGQUERY_EXPENSIVE_SQL, binds: [days, limit] }
+    return {
+      sql: interpolateBqRegion(BIGQUERY_EXPENSIVE_SQL, bqRegion),
+      binds: [days, limit],
+    }
   }
   if (whType === "databricks") {
     return { sql: DATABRICKS_EXPENSIVE_SQL, binds: [days, limit] }
@@ -295,9 +305,10 @@ export async function analyzeCredits(params: CreditAnalysisParams): Promise<Cred
   const whType = getWhType(params.warehouse)
   const days = params.days ?? 30
   const limit = params.limit ?? 50
+  const bqRegion = whType === "bigquery" ? bqRegionFor(params.warehouse) : undefined
 
-  const dailyBuilt = buildCreditUsageSql(whType, days, limit, params.warehouse_filter)
-  const summaryBuilt = buildCreditSummarySql(whType, days)
+  const dailyBuilt = buildCreditUsageSql(whType, days, limit, params.warehouse_filter, bqRegion)
+  const summaryBuilt = buildCreditSummarySql(whType, days, bqRegion)
 
   if (!dailyBuilt || !summaryBuilt) {
     return {
@@ -346,8 +357,9 @@ export async function getExpensiveQueries(params: ExpensiveQueriesParams): Promi
   const whType = getWhType(params.warehouse)
   const days = params.days ?? 7
   const limit = params.limit ?? 20
+  const bqRegion = whType === "bigquery" ? bqRegionFor(params.warehouse) : undefined
 
-  const built = buildExpensiveSql(whType, days, limit)
+  const built = buildExpensiveSql(whType, days, limit, bqRegion)
   if (!built) {
     return {
       success: false,

@@ -5,6 +5,7 @@
  */
 
 import * as Registry from "../connections/registry"
+import { bqRegionFor, interpolateBqRegion } from "./bq-utils"
 import type {
   UnusedResourcesParams,
   UnusedResourcesResult,
@@ -90,7 +91,7 @@ SELECT
     size_bytes,
     TIMESTAMP_MILLIS(last_modified_time) as last_altered,
     creation_time as created
-FROM \`region-US.INFORMATION_SCHEMA.TABLE_STORAGE\`
+FROM \`region-{region}.INFORMATION_SCHEMA.TABLE_STORAGE\`
 WHERE NOT deleted
   AND last_modified_time < UNIX_MILLIS(TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL ? DAY))
 ORDER BY size_bytes DESC
@@ -186,7 +187,8 @@ export async function findUnusedResources(params: UnusedResourcesParams): Promis
       }
     } else if (whType === "bigquery") {
       try {
-        const result = await connector.execute(BIGQUERY_UNUSED_TABLES_SQL, limit, [days, limit])
+        const sql = interpolateBqRegion(BIGQUERY_UNUSED_TABLES_SQL, bqRegionFor(params.warehouse))
+        const result = await connector.execute(sql, limit, [days, limit])
         unusedTables = rowsToRecords(result)
       } catch (e) {
         errors.push(`Could not query unused tables: ${e}`)

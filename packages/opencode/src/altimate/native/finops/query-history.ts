@@ -5,6 +5,7 @@
  */
 
 import * as Registry from "../connections/registry"
+import { bqRegionFor, interpolateBqRegion, sanitizeBqRegion } from "./bq-utils"
 import type { QueryHistoryParams, QueryHistoryResult } from "../types"
 
 // ---------------------------------------------------------------------------
@@ -59,6 +60,12 @@ ORDER BY total_exec_time DESC
 LIMIT {limit}
 `
 
+// BigQuery's INFORMATION_SCHEMA.JOBS does not have top-level `error_message`,
+// `error_code`, or `total_rows` columns. Errors live under the `error_result`
+// STRUCT ({reason, location, message, debug_info}) and per-row counts aren't
+// exposed at the jobs level. `state` returns 'DONE' (not 'SUCCESS'), so we
+// derive execution_status from error_result to stay consistent with the other
+// warehouse templates and the summary loop in getQueryHistory().
 const BIGQUERY_HISTORY_SQL = `
 SELECT
     job_id as query_id,
@@ -67,16 +74,16 @@ SELECT
     user_email as user_name,
     '' as warehouse_name,
     reservation_id as warehouse_size,
-    state as execution_status,
-    NULL as error_code,
-    error_message,
+    CASE WHEN error_result IS NULL THEN 'SUCCESS' ELSE 'FAILED' END as execution_status,
+    error_result.reason as error_code,
+    error_result.message as error_message,
     start_time,
     end_time,
     TIMESTAMP_DIFF(end_time, start_time, SECOND) as execution_time_sec,
     total_bytes_billed as bytes_scanned,
-    total_rows as rows_produced,
+    CAST(NULL AS INT64) as rows_produced,
     0 as credits_used_cloud_services
-FROM \`region-US.INFORMATION_SCHEMA.JOBS\`
+FROM \`region-{region}.INFORMATION_SCHEMA.JOBS\`
 WHERE creation_time >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL ? DAY)
 ORDER BY creation_time DESC
 LIMIT ?
@@ -146,6 +153,7 @@ function buildHistoryQuery(
   limit: number,
   user?: string,
   warehouseFilter?: string,
+  bqRegion?: unknown,
 ): { sql: string; binds: any[] } | null {
   if (whType === "snowflake") {
     const binds: any[] = [-days]
@@ -161,7 +169,10 @@ function buildHistoryQuery(
     return { sql: POSTGRES_HISTORY_SQL.replace("{limit}", String(Math.floor(Number(limit)))), binds: [] }
   }
   if (whType === "bigquery") {
-    return { sql: BIGQUERY_HISTORY_SQL, binds: [days, limit] }
+    return {
+      sql: interpolateBqRegion(BIGQUERY_HISTORY_SQL, bqRegion),
+      binds: [days, limit],
+    }
   }
   if (whType === "databricks") {
     return { sql: DATABRICKS_HISTORY_SQL, binds: [days, limit] }
@@ -202,8 +213,9 @@ export async function getQueryHistory(params: QueryHistoryParams): Promise<Query
   const whType = getWhType(params.warehouse)
   const days = params.days ?? 7
   const limit = params.limit ?? 100
+  const bqRegion = whType === "bigquery" ? bqRegionFor(params.warehouse) : undefined
 
-  const built = buildHistoryQuery(whType, days, limit, params.user, params.warehouse_filter)
+  const built = buildHistoryQuery(whType, days, limit, params.user, params.warehouse_filter, bqRegion)
   if (!built) {
     return {
       success: false,
