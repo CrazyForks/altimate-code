@@ -28,6 +28,7 @@ import { SQL_TEMPLATES as HistoryTemplates } from "../../src/altimate/native/fin
 import { SQL_TEMPLATES as AdvisorTemplates } from "../../src/altimate/native/finops/warehouse-advisor"
 import { SQL_TEMPLATES as UnusedTemplates } from "../../src/altimate/native/finops/unused-resources"
 import { SQL_TEMPLATES as RoleTemplates } from "../../src/altimate/native/finops/role-access"
+import { sanitizeBqRegion, interpolateBqRegion } from "../../src/altimate/native/finops/bq-utils"
 import { ensureUpstreamSelector } from "../../src/altimate/native/dbt/runner"
 import { parseManifest } from "../../src/altimate/native/dbt/manifest"
 import { mapType } from "../../src/altimate/native/local/schema-sync"
@@ -152,6 +153,156 @@ describe("FinOps: SQL template generation", () => {
       const built = HistoryTemplates.buildHistoryQuery("bigquery", 14, 100)
       expect(built?.sql).toContain("INFORMATION_SCHEMA.JOBS")
       expect(built?.binds).toContain(14)
+    })
+
+    test("BigQuery history SQL uses error_result struct, not bare error_message / error_code", () => {
+      // INFORMATION_SCHEMA.JOBS exposes errors via error_result STRUCT
+      // (reason, location, message). Earlier versions selected bare `error_message`
+      // and `error_code` identifiers, which BQ rejects with
+      // "Unrecognized name: error_message" — don't regress.
+      const sql = HistoryTemplates.BIGQUERY_HISTORY_SQL
+      expect(sql).toContain("error_result.message as error_message")
+      expect(sql).toContain("error_result.reason as error_code")
+      expect(sql).not.toMatch(/^\s*error_message,\s*$/m)
+      expect(sql).not.toMatch(/^\s*NULL as error_code,?\s*$/m)
+    })
+
+    test("BigQuery history SQL does not reference total_rows (not a JOBS column)", () => {
+      // `total_rows` exists in INFORMATION_SCHEMA.PARTITIONS, not JOBS. Selecting
+      // it would throw "Unrecognized name: total_rows" once error_message is fixed.
+      const sql = HistoryTemplates.BIGQUERY_HISTORY_SQL
+      expect(sql).not.toMatch(/\btotal_rows\b/)
+      expect(sql).toContain("as rows_produced")
+    })
+
+    test("BigQuery history SQL derives execution_status from error_result (not bare state)", () => {
+      // BQ's `state` column returns 'DONE', not 'SUCCESS'. getQueryHistory()
+      // counts rows whose execution_status !== 'SUCCESS' as errors, so a bare
+      // `state as execution_status` would flag every completed BQ job as failed.
+      const sql = HistoryTemplates.BIGQUERY_HISTORY_SQL
+      expect(sql).toMatch(/CASE WHEN error_result IS NULL THEN 'SUCCESS'/)
+      expect(sql).not.toMatch(/^\s*state as execution_status,\s*$/m)
+    })
+
+    test("BigQuery history SQL defaults to region-us when no location provided", () => {
+      const built = HistoryTemplates.buildHistoryQuery("bigquery", 7, 100)
+      expect(built?.sql).toContain("`region-us.INFORMATION_SCHEMA.JOBS`")
+      expect(built?.sql).not.toContain("{region}")
+    })
+
+    test("BigQuery history SQL threads explicit region (EU)", () => {
+      const built = HistoryTemplates.buildHistoryQuery("bigquery", 7, 100, undefined, undefined, "EU")
+      expect(built?.sql).toContain("`region-eu.INFORMATION_SCHEMA.JOBS`")
+    })
+
+    test("BigQuery history SQL threads multi-part region (us-central1)", () => {
+      const built = HistoryTemplates.buildHistoryQuery("bigquery", 7, 100, undefined, undefined, "us-central1")
+      expect(built?.sql).toContain("`region-us-central1.INFORMATION_SCHEMA.JOBS`")
+    })
+
+    test("sanitizeBqRegion strips unsafe characters and falls back to 'us'", () => {
+      expect(sanitizeBqRegion("US")).toBe("us")
+      expect(sanitizeBqRegion("EU")).toBe("eu")
+      expect(sanitizeBqRegion("us-central1")).toBe("us-central1")
+      expect(sanitizeBqRegion("asia-east1")).toBe("asia-east1")
+      expect(sanitizeBqRegion("europe-west2")).toBe("europe-west2")
+      // Injection attempts — backtick, semicolon, comment markers must be stripped
+      expect(sanitizeBqRegion("us`; DROP TABLE")).toBe("usdroptable")
+      expect(sanitizeBqRegion("us/*x*/")).toBe("usx")
+      // Empty / non-string inputs fall back to "us"
+      expect(sanitizeBqRegion("")).toBe("us")
+      expect(sanitizeBqRegion(undefined)).toBe("us")
+      expect(sanitizeBqRegion(null)).toBe("us")
+      expect(sanitizeBqRegion(42)).toBe("us")
+    })
+
+    test("sanitizeBqRegion trims leading/trailing hyphens", () => {
+      // BQ region names never start or end with a hyphen; strip them so odd
+      // input like "-us-" becomes "us" instead of producing `region--us-`.
+      expect(sanitizeBqRegion("-us-")).toBe("us")
+      expect(sanitizeBqRegion("--eu-west1--")).toBe("eu-west1")
+      expect(sanitizeBqRegion("---")).toBe("us")
+    })
+
+    test("sanitizeBqRegion caps length at 64 chars", () => {
+      // Guard against pathological inputs — BQ region names are short (<30).
+      const long = "a".repeat(300)
+      const out = sanitizeBqRegion(long)
+      expect(out.length).toBeLessThanOrEqual(64)
+      expect(out).toMatch(/^a+$/)
+    })
+
+    test("interpolateBqRegion replaces every {region} placeholder", () => {
+      // Defensive against future templates that reference multiple INFORMATION_SCHEMA
+      // views (e.g. JOIN JOBS with JOBS_TIMELINE). replaceAll, not replace.
+      const tpl = "FROM `region-{region}.X` JOIN `region-{region}.Y`"
+      expect(interpolateBqRegion(tpl, "eu")).toBe("FROM `region-eu.X` JOIN `region-eu.Y`")
+    })
+
+    test("all BQ finops SQL templates use {region} placeholder (no hardcoded region-US)", () => {
+      // Catches the exact regression Gemini flagged: hardcoded region-US in
+      // role-access.ts and unused-resources.ts was shipped for months because
+      // the unit test suite only covered query-history.
+      const templates: Array<[string, string]> = [
+        ["query-history BQ", HistoryTemplates.BIGQUERY_HISTORY_SQL],
+        ["credit-analyzer usage", CreditTemplates.BIGQUERY_CREDIT_USAGE_SQL],
+        ["credit-analyzer summary", CreditTemplates.BIGQUERY_CREDIT_SUMMARY_SQL],
+        ["credit-analyzer expensive", CreditTemplates.BIGQUERY_EXPENSIVE_SQL],
+        ["warehouse-advisor load", AdvisorTemplates.BIGQUERY_LOAD_SQL],
+        ["warehouse-advisor sizing", AdvisorTemplates.BIGQUERY_SIZING_SQL],
+        ["role-access grants", RoleTemplates.BIGQUERY_GRANTS_SQL],
+        ["unused-resources tables", UnusedTemplates.BIGQUERY_UNUSED_TABLES_SQL],
+      ]
+      for (const [name, sql] of templates) {
+        expect(sql, `${name} must use {region} placeholder`).toContain("{region}")
+        expect(sql, `${name} must not contain hardcoded region-US`).not.toContain("region-US")
+      }
+    })
+  })
+
+  describe("BQ region threading (all finops modules)", () => {
+    test("credit-analyzer usage / summary / expensive SQL threads region", () => {
+      for (const [name, builder] of [
+        ["buildCreditUsageSql", (r: string) => CreditTemplates.buildCreditUsageSql("bigquery", 7, 50, undefined, r)],
+        ["buildCreditSummarySql", (r: string) => CreditTemplates.buildCreditSummarySql("bigquery", 7, r)],
+        ["buildExpensiveSql", (r: string) => CreditTemplates.buildExpensiveSql("bigquery", 7, 20, r)],
+      ] as const) {
+        const eu = builder("EU")
+        expect(eu?.sql, `${name}(EU)`).toContain("`region-eu.INFORMATION_SCHEMA.JOBS`")
+        expect(eu?.sql, `${name}(EU) fully substituted`).not.toContain("{region}")
+
+        // Default (undefined) falls back to us
+        const def = builder("")
+        expect(def?.sql, `${name}(default)`).toContain("`region-us.INFORMATION_SCHEMA.JOBS`")
+      }
+    })
+
+    test("warehouse-advisor load / sizing SQL threads region", () => {
+      const load = AdvisorTemplates.buildLoadSql("bigquery", 14, "asia-east1")
+      expect(load).toContain("`region-asia-east1.INFORMATION_SCHEMA.JOBS_TIMELINE`")
+      expect(load).not.toContain("{region}")
+
+      const sizing = AdvisorTemplates.buildSizingSql("bigquery", 14, "EU")
+      expect(sizing).toContain("`region-eu.INFORMATION_SCHEMA.JOBS`")
+      expect(sizing).not.toContain("{region}")
+    })
+
+    test("role-access grants SQL threads region for BigQuery", () => {
+      const built = RoleTemplates.buildGrantsSql("bigquery", undefined, undefined, 100, "us-central1")
+      expect(built?.sql).toContain("`region-us-central1.INFORMATION_SCHEMA.OBJECT_PRIVILEGES`")
+      expect(built?.sql).not.toContain("{region}")
+    })
+
+    test("non-BigQuery warehouses ignore bqRegion parameter — Snowflake unchanged", () => {
+      const sf = HistoryTemplates.buildHistoryQuery("snowflake", 7, 100, undefined, undefined, "eu")
+      expect(sf?.sql).not.toContain("region-")
+      expect(sf?.sql).toContain("QUERY_HISTORY")
+    })
+
+    test("non-BigQuery warehouses ignore bqRegion parameter — Databricks unchanged", () => {
+      const db = HistoryTemplates.buildHistoryQuery("databricks", 7, 100, undefined, undefined, "eu")
+      expect(db?.sql).not.toContain("region-")
+      expect(db?.sql).toContain("system.query.history")
     })
 
     test("builds Databricks history SQL", () => {
