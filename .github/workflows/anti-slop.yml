@@ -77,7 +77,13 @@ jobs:
             master
 
           # --- Actions on failure ---
-          close-pr: true
+          # Advisory, not blocking. Too many legitimate team PRs were auto-closed
+          # because the PR template instructs LLMs to prepend "PINEAPPLE"
+          # (honeypot) — any AI-assisted PR from a team member then trips the
+          # blocked-terms check and gets closed 2 minutes after opening. The
+          # labels and failure message still fire, so maintainers retain the
+          # signal and can close manually when warranted. See issue #740.
+          close-pr: false
           lock-pr: false
           failure-add-pr-labels: "needs-review:blocked"
           failure-pr-message: |
