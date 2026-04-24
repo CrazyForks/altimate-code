@@ -35,7 +35,7 @@ Summary:
 
 **Data sources by warehouse:**
 - Snowflake: `QUERY_HISTORY` function
-- BigQuery: `INFORMATION_SCHEMA.JOBS`
+- BigQuery: region-qualified `` `region-<location>.INFORMATION_SCHEMA.JOBS` `` — the region is auto-resolved from the BigQuery connection's `location` (e.g. `us`, `eu`, `us-central1`, `asia-northeast1`). If `location` is unset the tool defaults to `us`. Set `location` explicitly for non-US projects or you will query the wrong region.
 - Databricks: `system.query.history`
 - PostgreSQL: `pg_stat_statements`
 

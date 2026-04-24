@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-04-24
+
+### Fixed
+
+- **BigQuery finops tools were broken — now work, in any region.** `finops_query_history` was failing 100% on BigQuery with `Unrecognized name: error_message at [11:5]`. Three separate bugs in the `INFORMATION_SCHEMA.JOBS` template: (a) `error_message` and `error_code` were read as top-level columns but they only exist inside the `error_result` struct — now reads `error_result.message` and `error_result.reason`; (b) `total_rows` is a `PARTITIONS` column, not `JOBS` — replaced with `CAST(NULL AS INT64) AS rows_produced`; (c) BigQuery's `state` returns `'DONE'`, not `'SUCCESS'`, so the summary loop was reporting every completed job as FAILED — now derives `execution_status` from `error_result IS NULL`. Every successful BQ job now reports as SUCCESS. (#739, closes #738)
+- **BigQuery finops unusable outside US region.** All five finops modules (`finops_query_history`, `finops_analyze_credits`, `finops_expensive_queries`, `finops_warehouse_advice`, `finops_unused_resources`, `finops_role_grants`) hardcoded `` `region-US.INFORMATION_SCHEMA.*` ``. Now reads the BigQuery connection's configured `location` (e.g. `us`, `eu`, `us-central1`, `asia-northeast1`), sanitised via an `[a-z0-9-]` allowlist with a 64-char cap and hyphen trim. If `location` is unset the tool defaults to `us` — **set `location` explicitly on the BigQuery connection for non-US projects** or you will query the wrong region. Snowflake and Databricks paths are unchanged. (#739)
+
+### Docs
+
+- **New showcase page** (`docs/examples/`) with 12 end-to-end workflow demos — dbt peer review, column-level lineage diff, MS SQL → Fabric migration, Fabric platform admin, upstream schema change, NYC Taxi, Olist, Spotify, and more. (#742)
+- **`location` field documented** on the BigQuery connection and called out on the finops tools page.
+
+### Data handling
+
+- `finops_query_history`, `finops_analyze_credits`, and `finops_warehouse_advice` read `user_email` (BigQuery), `user_name` (Snowflake / Databricks / ClickHouse), and raw `query_text` from warehouse system views. Results are returned to the agent and enter the LLM context window. No telemetry or backend upload. Review your tenant's data-handling policy before enabling finops tools in regulated (PII / PHI / PCI) environments.
+- `finops_unused_resources` on BigQuery reads `INFORMATION_SCHEMA.TABLE_STORAGE`, which is an org-level view. Project-scoped service accounts typically require `bigquery.resourceAdmin` at the org to avoid a permission error.
+
+### Internal
+
+- `anti-slop` CI workflow is now advisory — labels + comments still fire on blocked-term hits, but the workflow no longer auto-closes PRs. Root cause: the repo's pull-request template embeds an HTML comment instructing AI to insert "PINEAPPLE", which `anti-slop.yml` also blocklists — every AI-assisted team-member PR was auto-closing within two minutes. (#741, closes #740)
+- Marker-guard hotfix: the `isValidDatabricksHost` env-fallback path added in v0.6.0 straddled the post-push Marker Guard's `-U5` diff window; wrapped in an inline `altimate_change` marker pair to keep strict mode green.
+
+### Testing
+
+- New adversarial tests for v0.6.1 in `packages/opencode/test/skill/release-v0.6.1-adversarial.test.ts`: `sanitizeBqRegion` injection vectors (CRLF, null bytes, backticks, path traversal, Unicode homoglyphs, prototype-pollution-adjacent inputs), `interpolateBqRegion` idempotency and multi-placeholder safety, `bqRegionFor` registry edge cases, BIGQUERY_HISTORY_SQL column-name regression guards (all four #739 bugs), cross-module "every BQ template uses `{region}`" guard, and full-pipeline `buildHistoryQuery` behaviour including Snowflake / Databricks no-regression guards.
+
 ## [0.6.0] - 2026-04-21
 
 ### Added

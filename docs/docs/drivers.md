@@ -114,6 +114,8 @@ altimate-dbt init --project-root /path/to/dbt/project --python-path $(which pyth
 | Service Account | `project`, `credentials_path` (path to JSON key file) |
 | ADC | `project` (uses Application Default Credentials) |
 
+Optional: `location` (e.g. `us`, `eu`, `us-central1`, `asia-northeast1`). Required for non-US projects using finops tools — the `INFORMATION_SCHEMA` views are region-scoped. Defaults to `us` if unset.
+
 ### Databricks
 | Method | Config Fields |
 |--------|--------------|
