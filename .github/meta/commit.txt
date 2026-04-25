@@ -1,41 +1,15 @@
-chore: bridge upstream v1.4.0 across history rewrite — DRAFT
+fix: bridge merge cross-boundary fixes — dbt-tools + filesystem
 
-Upstream rewrote git history between v1.3.17 and v1.4.0 (2026-04-04),
-leaving zero common ancestor with our fork. The standard `merge.ts`
-tooling cannot bridge across this. This commit overlays v1.4.0's tree
-using a new `script/upstream/bridge-merge.ts` tool.
+Two boundary issues from the v1.4.0 bridge merge:
 
-Bridge approach:
-- For files in v1.4.0 NOT in keepOurs/skipFiles: take v1.4.0's content
-- For files with `altimate_change` markers in main: KEEP main's version
-  entirely (no marker re-application — the markers don't carry
-  replace-vs-insert semantics, so re-application produces duplicates)
-- For files in main not in v1.4.0: keep by default; flag for review
-- Restore PR #18186 (anthropic legal requests) so we keep Anthropic
-  as a provider — the user asked for this exclusion.
+1. `packages/dbt-tools/src/adapter.ts` — `DBTCloudProjectIntegration`
+   and `DBTFusionCommandProjectIntegration` constructors now require
+   a `cloudVariantDetector` parameter (added in newer
+   @altimateai/dbt-integration). Pass a fresh `DbtCloudVariantDetector`
+   instance per adapter.
 
-Bridge results:
-- 730 files overlaid from v1.4.0
-- 61 marker-bearing files preserved from main entirely
-- 65 keepOurs files left unchanged
-- 3676 skipFiles excluded
-- 243 files upstream removed but kept by default (see review list)
-- PR #18186 changes preserved via main-version retention of marker files
-
-Verification:
-- bun install: clean (after removing packages/slack and packages/console
-  workspace entries we don't ship)
-- turbo typecheck: 5 packages clean, dbt-tools has 2 constructor-arity
-  errors (DBTCoreProjectIntegration / DBTCoreCommandProjectIntegration)
-  caused by upstream signature changes — needs followup fix
-
-NOT ready to merge. Followup work needed:
-1. Fix dbt-tools typecheck errors (constructor arity)
-2. Per the 61 preserved marker files, manually merge upstream's
-   improvements while keeping markers intact (see report)
-3. Triage 243 review-list files (add to keepOurs or skipFiles)
-4. Address marker hygiene gaps surfaced (e.g. agent.ts safetyDenials
-   const is altimate code without markers)
-5. Run full test suite
-
-See .bridge-merge-report.md for the full per-file breakdown.
+2. `packages/opencode/src/util/filesystem.ts` — add
+   `normalizePathPattern` (Windows path-pattern helper). The function
+   exists in v1.4.0's filesystem.ts; we kept main's version because
+   filesystem.ts has altimate_change markers, but the test file
+   (overlaid from v1.4.0) calls the new helper.

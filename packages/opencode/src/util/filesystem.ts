@@ -119,6 +119,15 @@ export namespace Filesystem {
     }
   }
 
+  export function normalizePathPattern(p: string): string {
+    if (process.platform !== "win32") return p
+    if (p === "*") return p
+    const match = p.match(/^(.*)[\\/]\*$/)
+    if (!match) return normalizePath(p)
+    const dir = /^[A-Za-z]:$/.test(match[1]!) ? match[1] + "\\" : match[1]!
+    return join(normalizePath(dir), "*")
+  }
+
   // We cannot rely on path.resolve() here because git.exe may come from Git Bash, Cygwin, or MSYS2, so we need to translate these paths at the boundary.
   // Also resolves symlinks so that callers using the result as a cache key
   // always get the same canonical path for a given physical directory.

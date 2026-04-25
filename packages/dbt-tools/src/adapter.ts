@@ -26,6 +26,7 @@ import {
   DBTCoreCommandProjectIntegration,
   DBTFusionCommandProjectIntegration,
   CommandProcessExecutionFactory,
+  DbtCloudVariantDetector,
 } from "@altimateai/dbt-integration"
 import type {
   DBTConfiguration,
@@ -103,14 +104,16 @@ export async function create(cfg: Config): Promise<DBTProjectIntegrationAdapter>
   const core = (root: string, diag: DBTDiagnosticData[], defer: DeferConfig, changed: () => void): DBTProjectIntegration =>
     new DBTCoreProjectIntegration(infra, runtime, provider, python, cli, term, config, client, root, diag, defer, changed)
 
+  const cloudVariantDetector = new DbtCloudVariantDetector(term)
+
   const cloud = (root: string, diag: DBTDiagnosticData[], defer: DeferConfig, changed: () => void): DBTProjectIntegration =>
-    new DBTCloudProjectIntegration(infra, factory, cli, runtime, provider, term, root, diag, defer, changed)
+    new DBTCloudProjectIntegration(infra, factory, cli, runtime, provider, term, root, diag, defer, changed, cloudVariantDetector)
 
   const command = (root: string, diag: DBTDiagnosticData[], defer: DeferConfig, changed: () => void): DBTProjectIntegration =>
     new DBTCoreCommandProjectIntegration(infra, runtime, provider, python, cli, term, config, client, root, diag, defer, changed)
 
   const fusion = (root: string, diag: DBTDiagnosticData[], defer: DeferConfig, changed: () => void): DBTProjectIntegration =>
-    new DBTFusionCommandProjectIntegration(infra, factory, cli, runtime, provider, term, root, diag, defer, changed)
+    new DBTFusionCommandProjectIntegration(infra, factory, cli, runtime, provider, term, root, diag, defer, changed, cloudVariantDetector)
 
   const adapter = new DBTProjectIntegrationAdapter(
     config,
