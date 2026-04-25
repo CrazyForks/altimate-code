@@ -22,7 +22,6 @@ export const TuiOptions = z.object({
     .enum(["auto", "stacked"])
     .optional()
     .describe("Control diff rendering style: 'auto' adapts to terminal width, 'stacked' always shows single column"),
-  mouse: z.boolean().optional().describe("Enable or disable mouse capture (default: true)"),
 })
 
 export const TuiInfo = z
@@ -30,8 +29,6 @@ export const TuiInfo = z
     $schema: z.string().optional(),
     theme: z.string().optional(),
     keybinds: KeybindOverride.optional(),
-    plugin: Config.PluginSpec.array().optional(),
-    plugin_enabled: z.record(z.string(), z.boolean()).optional(),
   })
   .extend(TuiOptions.shape)
   .strict()

@@ -2,14 +2,10 @@ import { describe, expect, test } from "bun:test"
 import type { NamedError } from "@opencode-ai/util/error"
 import { APICallError } from "ai"
 import { setTimeout as sleep } from "node:timers/promises"
-import { Effect, Schedule } from "effect"
+import { createServer } from "node:net"
 import { SessionRetry } from "../../src/session/retry"
 import { MessageV2 } from "../../src/session/message-v2"
 import { ProviderID } from "../../src/provider/schema"
-import { SessionID } from "../../src/session/schema"
-import { SessionStatus } from "../../src/session/status"
-import { Instance } from "../../src/project/instance"
-import { tmpdir } from "../fixture/fixture"
 
 const providerID = ProviderID.make("test")
 
@@ -74,47 +70,30 @@ describe("session.retry.delay", () => {
     expect(SessionRetry.delay(1, longError)).toBe(700000)
   })
 
-  test("caps oversized header delays to the runtime timer limit", () => {
-    const error = apiError({ "retry-after-ms": "999999999999" })
-    expect(SessionRetry.delay(1, error)).toBe(SessionRetry.RETRY_MAX_DELAY)
+  test("sleep caps delay to max 32-bit signed integer to avoid TimeoutOverflowWarning", async () => {
+    const controller = new AbortController()
+
+    const warnings: string[] = []
+    const originalWarn = process.emitWarning
+    process.emitWarning = (warning: string | Error) => {
+      warnings.push(typeof warning === "string" ? warning : warning.message)
+    }
+
+    const promise = SessionRetry.sleep(2_560_914_000, controller.signal)
+    controller.abort()
+
+    try {
+      await promise
+    } catch {}
+
+    process.emitWarning = originalWarn
+    expect(warnings.some((w) => w.includes("TimeoutOverflowWarning"))).toBe(false)
   })
+})
 
-  test("policy updates retry status and increments attempts", async () => {
-    await using tmp = await tmpdir()
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
-        const sessionID = SessionID.make("session-retry-test")
-        const error = apiError({ "retry-after-ms": "0" })
-
-        await Effect.runPromise(
-          Effect.gen(function* () {
-            const step = yield* Schedule.toStepWithMetadata(
-              SessionRetry.policy({
-                parse: (err) => err as MessageV2.APIError,
-                set: (info) =>
-                  Effect.promise(() =>
-                    SessionStatus.set(sessionID, {
-                      type: "retry",
-                      attempt: info.attempt,
-                      message: info.message,
-                      next: info.next,
-                    }),
-                  ),
-              }),
-            )
-            yield* step(error)
-            yield* step(error)
-          }),
-        )
-
-        expect(await SessionStatus.get(sessionID)).toMatchObject({
-          type: "retry",
-          attempt: 2,
-          message: "boom",
-        })
-      },
-    })
+describe("session.retry.max_attempts", () => {
+  test("RETRY_MAX_ATTEMPTS is 5", () => {
+    expect(SessionRetry.RETRY_MAX_ATTEMPTS).toBe(5)
   })
 })
 
@@ -129,9 +108,9 @@ describe("session.retry.retryable", () => {
     expect(SessionRetry.retryable(error)).toBe("Provider is overloaded")
   })
 
-  test("does not retry unknown json messages", () => {
+  test("handles json messages without code", () => {
     const error = wrap(JSON.stringify({ error: { message: "no_kv_space" } }))
-    expect(SessionRetry.retryable(error)).toBeUndefined()
+    expect(SessionRetry.retryable(error)).toBe(`{"error":{"message":"no_kv_space"}}`)
   })
 
   test("does not throw on numeric error codes", () => {
@@ -145,25 +124,6 @@ describe("session.retry.retryable", () => {
     expect(SessionRetry.retryable(error)).toBeUndefined()
   })
 
-  test("retries plain text rate limit errors from Alibaba", () => {
-    const msg =
-      "Upstream error from Alibaba: Request rate increased too quickly. To ensure system stability, please adjust your client logic to scale requests more smoothly over time."
-    const error = wrap(msg)
-    expect(SessionRetry.retryable(error)).toBe(msg)
-  })
-
-  test("retries plain text rate limit errors", () => {
-    const msg = "Rate limit exceeded, please try again later"
-    const error = wrap(msg)
-    expect(SessionRetry.retryable(error)).toBe(msg)
-  })
-
-  test("retries too many requests in plain text", () => {
-    const msg = "Too many requests, please slow down"
-    const error = wrap(msg)
-    expect(SessionRetry.retryable(error)).toBe(msg)
-  })
-
   test("does not retry context overflow errors", () => {
     const error = new MessageV2.ContextOverflowError({
       message: "Input exceeds context window of this model",
@@ -173,16 +133,27 @@ describe("session.retry.retryable", () => {
     expect(SessionRetry.retryable(error)).toBeUndefined()
   })
 
-  test("retries ZlibError decompression failures", () => {
-    const error = new MessageV2.APIError({
-      message: "Response decompression failed",
-      isRetryable: true,
-      metadata: { code: "ZlibError" },
-    }).toObject() as MessageV2.APIError
+  test("retries auth errors with recovery message", () => {
+    const error = new MessageV2.AuthError({
+      providerID: "anthropic",
+      message: "Anthropic OAuth token refresh failed (HTTP 401)",
+    }).toObject() as ReturnType<NamedError["toObject"]>
 
-    const retryable = SessionRetry.retryable(error)
-    expect(retryable).toBeDefined()
-    expect(retryable).toBe("Response decompression failed")
+    const result = SessionRetry.retryable(error)
+    expect(result).toBeDefined()
+    expect(result).toContain("Authentication failed")
+    expect(result).toContain("altimate-code auth login anthropic")
+  })
+
+  test("retries auth errors for other providers", () => {
+    const error = new MessageV2.AuthError({
+      providerID: "openai",
+      message: "Codex OAuth token refresh failed (HTTP 403)",
+    }).toObject() as ReturnType<NamedError["toObject"]>
+
+    const result = SessionRetry.retryable(error)
+    expect(result).toBeDefined()
+    expect(result).toContain("altimate-code auth login openai")
   })
 })
 
@@ -190,37 +161,37 @@ describe("session.message-v2.fromError", () => {
   test.concurrent(
     "converts ECONNRESET socket errors to retryable APIError",
     async () => {
-      using server = Bun.serve({
-        port: 0,
-        idleTimeout: 8,
-        async fetch(req) {
-          return new Response(
-            new ReadableStream({
-              async pull(controller) {
-                controller.enqueue("Hello,")
-                await sleep(10000)
-                controller.enqueue(" World!")
-                controller.close()
-              },
-            }),
-            { headers: { "Content-Type": "text/plain" } },
-          )
-        },
+      // Use a raw TCP server that sends a partial HTTP response then
+      // destroys the socket, triggering an immediate ECONNRESET on the client.
+      const server = createServer((socket) => {
+        // Send partial chunked HTTP response then destroy the connection
+        socket.write(
+          "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nTransfer-Encoding: chunked\r\n\r\n6\r\nHello,\r\n",
+        )
+        // Destroy after a brief delay to ensure the client has started reading
+        setTimeout(() => socket.destroy(), 20)
       })
 
-      const error = await fetch(new URL("/", server.url.origin))
-        .then((res) => res.text())
-        .catch((e) => e)
+      await new Promise<void>((resolve) => server.listen(0, resolve))
+      const port = (server.address() as { port: number }).port
 
-      const result = MessageV2.fromError(error, { providerID })
+      try {
+        const error = await fetch(`http://127.0.0.1:${port}/`)
+          .then((res) => res.text())
+          .catch((e) => e)
 
-      expect(MessageV2.APIError.isInstance(result)).toBe(true)
-      expect((result as MessageV2.APIError).data.isRetryable).toBe(true)
-      expect((result as MessageV2.APIError).data.message).toBe("Connection reset by server")
-      expect((result as MessageV2.APIError).data.metadata?.code).toBe("ECONNRESET")
-      expect((result as MessageV2.APIError).data.metadata?.message).toInclude("socket connection")
+        const result = MessageV2.fromError(error, { providerID })
+
+        expect(MessageV2.APIError.isInstance(result)).toBe(true)
+        expect((result as MessageV2.APIError).data.isRetryable).toBe(true)
+        expect((result as MessageV2.APIError).data.message).toBe("Connection reset by server")
+        expect((result as MessageV2.APIError).data.metadata?.code).toBe("ECONNRESET")
+        expect((result as MessageV2.APIError).data.metadata?.message).toInclude("socket connection")
+      } finally {
+        server.close()
+      }
     },
-    15_000,
+    5_000,
   )
 
   test("ECONNRESET socket error is retryable", () => {
@@ -233,6 +204,41 @@ describe("session.message-v2.fromError", () => {
     const retryable = SessionRetry.retryable(error)
     expect(retryable).toBeDefined()
     expect(retryable).toBe("Connection reset by server")
+  })
+
+  test("converts token refresh failure to ProviderAuthError", () => {
+    const error = new Error("Anthropic OAuth token refresh failed (HTTP 401). Try re-authenticating: altimate-code auth login anthropic")
+    const result = MessageV2.fromError(error, { providerID: "anthropic" as any })
+
+    expect(result.name).toBe("ProviderAuthError")
+    expect((result as any).data.providerID).toBe("anthropic")
+    expect((result as any).data.message).toContain("token refresh failed")
+  })
+
+  test("converts codex token refresh failure to ProviderAuthError", () => {
+    const error = new Error("Codex OAuth token refresh failed (HTTP 403). Try re-authenticating: altimate-code auth login openai")
+    const result = MessageV2.fromError(error, { providerID: "openai" as any })
+
+    expect(result.name).toBe("ProviderAuthError")
+    expect((result as any).data.providerID).toBe("openai")
+  })
+
+  test("provides descriptive message for generic Error with no message", () => {
+    const error = new Error()
+    const result = MessageV2.fromError(error, { providerID: "test" as any })
+
+    expect(result.name).toBe("UnknownError")
+    // Should not be just "Error" — should include stack or context
+    expect((result as any).data.message).not.toBe("Error")
+    expect((result as any).data.message.length).toBeGreaterThan(5)
+  })
+
+  test("provides descriptive message for TypeError with no message", () => {
+    const error = new TypeError()
+    const result = MessageV2.fromError(error, { providerID: "test" as any })
+
+    expect(result.name).toBe("UnknownError")
+    expect((result as any).data.message).toContain("TypeError")
   })
 
   test("marks OpenAI 404 status codes as retryable", () => {

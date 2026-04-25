@@ -7,7 +7,7 @@ import type { MessageV2 } from "../../../session/message-v2"
 import { MessageID, PartID } from "../../../session/schema"
 import { ToolRegistry } from "../../../tool/registry"
 import { Instance } from "../../../project/instance"
-import { Permission } from "../../../permission"
+import { PermissionNext } from "../../../permission/next"
 import { iife } from "../../../util/iife"
 import { bootstrap } from "../../bootstrap"
 import { cmd } from "../cmd"
@@ -71,14 +71,11 @@ export const AgentCommand = cmd({
 
 async function getAvailableTools(agent: Agent.Info) {
   const model = agent.model ?? (await Provider.defaultModel())
-  return ToolRegistry.tools({
-    ...model,
-    agent,
-  })
+  return ToolRegistry.tools(model, agent)
 }
 
 async function resolveTools(agent: Agent.Info, availableTools: Awaited<ReturnType<typeof getAvailableTools>>) {
-  const disabled = Permission.disabled(
+  const disabled = PermissionNext.disabled(
     availableTools.map((tool) => tool.id),
     agent.permission,
   )
@@ -148,7 +145,7 @@ async function createToolContext(agent: Agent.Info) {
   }
   await Session.updateMessage(message)
 
-  const ruleset = Permission.merge(agent.permission, session.permission ?? [])
+  const ruleset = PermissionNext.merge(agent.permission, session.permission ?? [])
 
   return {
     sessionID: session.id,
@@ -158,11 +155,11 @@ async function createToolContext(agent: Agent.Info) {
     abort: new AbortController().signal,
     messages: [],
     metadata: () => {},
-    async ask(req: Omit<Permission.Request, "id" | "sessionID" | "tool">) {
+    async ask(req: Omit<PermissionNext.Request, "id" | "sessionID" | "tool">) {
       for (const pattern of req.patterns) {
-        const rule = Permission.evaluate(req.permission, pattern, ruleset)
+        const rule = PermissionNext.evaluate(req.permission, pattern, ruleset)
         if (rule.action === "deny") {
-          throw new Permission.DeniedError({ ruleset })
+          throw new PermissionNext.DeniedError(ruleset)
         }
       }
     },

@@ -6,7 +6,6 @@ import path from "path"
 import { fileURLToPath } from "url"
 import { UI } from "@/cli/ui"
 import { Log } from "@/util/log"
-import { errorMessage } from "@/util/error"
 import { withTimeout } from "@/util/timeout"
 import { withNetworkOptions, resolveNetworkOptions } from "@/cli/network"
 import { Filesystem } from "@/util/filesystem"
@@ -15,7 +14,6 @@ import type { EventSource } from "./context/sdk"
 import { win32DisableProcessedInput, win32InstallCtrlCGuard } from "./win32"
 import { TuiConfig } from "@/config/tui"
 import { Instance } from "@/project/instance"
-import { writeHeapSnapshot } from "v8"
 
 declare global {
   const OPENCODE_WORKER_PATH: string
@@ -43,18 +41,9 @@ function createWorkerFetch(client: RpcClient): typeof fetch {
 
 function createEventSource(client: RpcClient): EventSource {
   return {
-    subscribe: async (directory, handler) => {
-      const id = await client.call("subscribe", { directory })
-      const unsub = client.on<{ id: string; event: Event }>("event", (e) => {
-        if (e.id === id) {
-          handler(e.event)
-        }
-      })
-
-      return () => {
-        unsub()
-        client.call("unsubscribe", { id })
-      }
+    on: (handler) => client.on<Event>("event", handler),
+    setWorkspace: (workspaceID) => {
+      void client.call("setWorkspace", { workspaceID })
     },
   }
 }
@@ -75,12 +64,12 @@ async function input(value?: string) {
 
 export const TuiThreadCommand = cmd({
   command: "$0 [project]",
-  describe: "start opencode tui",
+  describe: "start altimate-code tui",
   builder: (yargs) =>
     withNetworkOptions(yargs)
       .positional("project", {
         type: "string",
-        describe: "path to start opencode in",
+        describe: "path to start altimate-code in",
       })
       .option("model", {
         type: "string",
@@ -155,7 +144,7 @@ export const TuiThreadCommand = cmd({
       const reload = () => {
         client.call("reload", undefined).catch((err) => {
           Log.Default.warn("worker reload failed", {
-            error: errorMessage(err),
+            error: err instanceof Error ? err.message : String(err),
           })
         })
       }
@@ -172,7 +161,7 @@ export const TuiThreadCommand = cmd({
         process.off("SIGUSR2", reload)
         await withTimeout(client.call("shutdown", undefined), 5000).catch((error) => {
           Log.Default.warn("worker shutdown failed", {
-            error: errorMessage(error),
+            error: error instanceof Error ? error.message : String(error),
           })
         })
         worker.terminate()
@@ -200,7 +189,7 @@ export const TuiThreadCommand = cmd({
             events: undefined,
           }
         : {
-            url: "http://opencode.internal",
+            url: "http://altimate-code.internal",
             fetch: createWorkerFetch(client),
             events: createEventSource(client),
           }
@@ -212,11 +201,6 @@ export const TuiThreadCommand = cmd({
       try {
         await tui({
           url: transport.url,
-          async onSnapshot() {
-            const tui = writeHeapSnapshot("tui.heapsnapshot")
-            const server = await client.call("snapshot", undefined)
-            return [tui, server]
-          },
           config,
           directory: cwd,
           fetch: transport.fetch,

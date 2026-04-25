@@ -15,7 +15,7 @@ export const ProjectRoutes = lazy(() =>
       "/",
       describeRoute({
         summary: "List all projects",
-        description: "Get a list of projects that have been opened with OpenCode.",
+        description: "Get a list of projects that have been opened with Altimate Code.",
         operationId: "project.list",
         responses: {
           200: {
@@ -29,7 +29,7 @@ export const ProjectRoutes = lazy(() =>
         },
       }),
       async (c) => {
-        const projects = Project.list()
+        const projects = await Project.list()
         return c.json(projects)
       },
     )
@@ -37,7 +37,7 @@ export const ProjectRoutes = lazy(() =>
       "/current",
       describeRoute({
         summary: "Get current project",
-        description: "Retrieve the currently active project that OpenCode is working with.",
+        description: "Retrieve the currently active project that Altimate Code is working with.",
         operationId: "project.current",
         responses: {
           200: {
@@ -107,7 +107,7 @@ export const ProjectRoutes = lazy(() =>
         },
       }),
       validator("param", z.object({ projectID: ProjectID.zod })),
-      validator("json", Project.UpdateInput.omit({ projectID: true })),
+      validator("json", Project.update.schema.omit({ projectID: true })),
       async (c) => {
         const projectID = c.req.valid("param").projectID
         const body = c.req.valid("json")
