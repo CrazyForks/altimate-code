@@ -5,7 +5,7 @@
  */
 
 import * as Registry from "../connections/registry"
-import { bqRegionFor, interpolateBqRegion } from "./bq-utils"
+import { augmentBqError, bqRegionFor, interpolateBqRegion, sanitizeBqRegion } from "./bq-utils"
 import type {
   WarehouseAdvisorParams,
   WarehouseAdvisorResult,
@@ -223,6 +223,7 @@ export async function adviseWarehouse(params: WarehouseAdvisorParams): Promise<W
   const whType = getWhType(params.warehouse)
   const days = params.days ?? 14
   const bqRegion = whType === "bigquery" ? bqRegionFor(params.warehouse) : undefined
+  const sanitisedBqRegion = whType === "bigquery" ? sanitizeBqRegion(bqRegion) : undefined
 
   const loadSql = buildLoadSql(whType, days, bqRegion)
   const sizingSql = buildSizingSql(whType, days, bqRegion)
@@ -235,6 +236,7 @@ export async function adviseWarehouse(params: WarehouseAdvisorParams): Promise<W
       recommendations: [],
       days_analyzed: days,
       error: `Warehouse sizing advice is not available for ${whType} warehouses.`,
+      ...(sanitisedBqRegion && { bq_region: sanitisedBqRegion }),
     }
   }
 
@@ -276,6 +278,7 @@ export async function adviseWarehouse(params: WarehouseAdvisorParams): Promise<W
       warehouse_performance: sizingData,
       recommendations,
       days_analyzed: days,
+      ...(sanitisedBqRegion && { bq_region: sanitisedBqRegion }),
     }
   } catch (e) {
     return {
@@ -284,7 +287,8 @@ export async function adviseWarehouse(params: WarehouseAdvisorParams): Promise<W
       warehouse_performance: [],
       recommendations: [],
       days_analyzed: days,
-      error: String(e),
+      error: sanitisedBqRegion ? augmentBqError(e, sanitisedBqRegion) : String(e),
+      ...(sanitisedBqRegion && { bq_region: sanitisedBqRegion }),
     }
   }
 }

@@ -5,7 +5,13 @@
  */
 
 import * as Registry from "../connections/registry"
-import { bqRegionFor, interpolateBqRegion } from "./bq-utils"
+import {
+  augmentBqError,
+  bqRegionFor,
+  interpolateBqRegion,
+  isBqPermissionError,
+  sanitizeBqRegion,
+} from "./bq-utils"
 import type {
   UnusedResourcesParams,
   UnusedResourcesResult,
@@ -145,6 +151,8 @@ export async function findUnusedResources(params: UnusedResourcesParams): Promis
   const whType = getWhType(params.warehouse)
   const days = params.days ?? 30
   const limit = params.limit ?? 50
+  const bqRegion = whType === "bigquery" ? bqRegionFor(params.warehouse) : undefined
+  const sanitisedBqRegion = whType === "bigquery" ? sanitizeBqRegion(bqRegion) : undefined
 
   if (!["snowflake", "bigquery", "databricks"].includes(whType)) {
     return {
@@ -187,11 +195,22 @@ export async function findUnusedResources(params: UnusedResourcesParams): Promis
       }
     } else if (whType === "bigquery") {
       try {
-        const sql = interpolateBqRegion(BIGQUERY_UNUSED_TABLES_SQL, bqRegionFor(params.warehouse))
+        const sql = interpolateBqRegion(BIGQUERY_UNUSED_TABLES_SQL, bqRegion)
         const result = await connector.execute(sql, limit, [days, limit])
         unusedTables = rowsToRecords(result)
       } catch (e) {
-        errors.push(`Could not query unused tables: ${e}`)
+        // TABLE_STORAGE is an org-level view. Most project-scoped service
+        // accounts lack bigquery.resourceAdmin at the org and hit 403 here —
+        // point them at the specific permission rather than a raw SQL error.
+        if (isBqPermissionError(e)) {
+          errors.push(
+            `Could not query unused tables: BigQuery returned a permission error for INFORMATION_SCHEMA.TABLE_STORAGE. ` +
+              `This view is org-level and requires bigquery.resourceAdmin (or equivalent) at the organisation. ` +
+              `Project-scoped service accounts typically can't read it. Raw error: ${e}`,
+          )
+        } else {
+          errors.push(`Could not query unused tables: ${augmentBqError(e, sanitisedBqRegion!)}`)
+        }
       }
     } else if (whType === "databricks") {
       try {
@@ -220,6 +239,7 @@ export async function findUnusedResources(params: UnusedResourcesParams): Promis
       },
       days_analyzed: days,
       error: errors.length > 0 ? errors.join("; ") : undefined,
+      ...(sanitisedBqRegion && { bq_region: sanitisedBqRegion }),
     }
   } catch (e) {
     return {
@@ -228,7 +248,8 @@ export async function findUnusedResources(params: UnusedResourcesParams): Promis
       idle_warehouses: [],
       summary: {},
       days_analyzed: days,
-      error: String(e),
+      error: sanitisedBqRegion ? augmentBqError(e, sanitisedBqRegion) : String(e),
+      ...(sanitisedBqRegion && { bq_region: sanitisedBqRegion }),
     }
   }
 }

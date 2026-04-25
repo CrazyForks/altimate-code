@@ -5,7 +5,7 @@
  */
 
 import * as Registry from "../connections/registry"
-import { bqRegionFor, interpolateBqRegion } from "./bq-utils"
+import { augmentBqError, bqRegionFor, interpolateBqRegion, sanitizeBqRegion } from "./bq-utils"
 import type {
   RoleGrantsParams,
   RoleGrantsResult,
@@ -167,6 +167,7 @@ export async function queryGrants(params: RoleGrantsParams): Promise<RoleGrantsR
   const whType = getWhType(params.warehouse)
   const limit = params.limit ?? 100
   const bqRegion = whType === "bigquery" ? bqRegionFor(params.warehouse) : undefined
+  const sanitisedBqRegion = whType === "bigquery" ? sanitizeBqRegion(bqRegion) : undefined
 
   const built = buildGrantsSql(whType, params.role, params.object_name, limit, bqRegion)
   if (!built) {
@@ -176,6 +177,7 @@ export async function queryGrants(params: RoleGrantsParams): Promise<RoleGrantsR
       grant_count: 0,
       privilege_summary: {},
       error: `Role/access queries are not available for ${whType} warehouses.`,
+      ...(sanitisedBqRegion && { bq_region: sanitisedBqRegion }),
     }
   }
 
@@ -195,6 +197,7 @@ export async function queryGrants(params: RoleGrantsParams): Promise<RoleGrantsR
       grants,
       grant_count: grants.length,
       privilege_summary: privilegeSummary,
+      ...(sanitisedBqRegion && { bq_region: sanitisedBqRegion }),
     }
   } catch (e) {
     return {
@@ -202,7 +205,8 @@ export async function queryGrants(params: RoleGrantsParams): Promise<RoleGrantsR
       grants: [],
       grant_count: 0,
       privilege_summary: {},
-      error: String(e),
+      error: sanitisedBqRegion ? augmentBqError(e, sanitisedBqRegion) : String(e),
+      ...(sanitisedBqRegion && { bq_region: sanitisedBqRegion }),
     }
   }
 }

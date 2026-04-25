@@ -534,6 +534,8 @@ export interface QueryHistoryResult {
   queries: Record<string, unknown>[]
   summary: Record<string, unknown>
   warehouse_type?: string
+  /** For BigQuery warehouses: the sanitised region the query was executed against. */
+  bq_region?: string
   error?: string
 }
 
@@ -553,6 +555,8 @@ export interface CreditAnalysisResult {
   total_credits: number
   days_analyzed: number
   recommendations: Record<string, unknown>[]
+  /** For BigQuery warehouses: the sanitised region the query was executed against. */
+  bq_region?: string
   error?: string
 }
 
@@ -569,6 +573,8 @@ export interface ExpensiveQueriesResult {
   queries: Record<string, unknown>[]
   query_count: number
   days_analyzed: number
+  /** For BigQuery warehouses: the sanitised region the query was executed against. */
+  bq_region?: string
   error?: string
 }
 
@@ -585,6 +591,8 @@ export interface WarehouseAdvisorResult {
   warehouse_performance: Record<string, unknown>[]
   recommendations: Record<string, unknown>[]
   days_analyzed: number
+  /** For BigQuery warehouses: the sanitised region the query was executed against. */
+  bq_region?: string
   error?: string
 }
 
@@ -602,6 +610,8 @@ export interface UnusedResourcesResult {
   idle_warehouses: Record<string, unknown>[]
   summary: Record<string, unknown>
   days_analyzed: number
+  /** For BigQuery warehouses: the sanitised region the query was executed against. */
+  bq_region?: string
   error?: string
 }
 
@@ -619,6 +629,8 @@ export interface RoleGrantsResult {
   grants: Record<string, unknown>[]
   grant_count: number
   privilege_summary: Record<string, number>
+  /** For BigQuery warehouses: the sanitised region the query was executed against. */
+  bq_region?: string
   error?: string
 }
 

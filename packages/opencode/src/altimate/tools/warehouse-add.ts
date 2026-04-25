@@ -47,6 +47,28 @@ IMPORTANT: For private key file paths, always use "private_key_path" (not "priva
         // altimate_change start — append post-connect feature suggestions (async, non-blocking)
         let output = `Successfully added warehouse '${result.name}' (type: ${result.type}).\n\nUse warehouse_test to verify connectivity.`
 
+        // BigQuery connections without a `location` field silently fall back to
+        // the `us` region in finops tools (query-history / credit-analyzer /
+        // warehouse-advisor / unused-resources / role-grants all key off
+        // region-qualified `INFORMATION_SCHEMA.*` views). For non-US projects
+        // this produces empty results rather than a clear error. Warn once at
+        // add time so users notice before they hit an empty-looking dashboard.
+        // Also catches whitespace-only values — `sanitizeBqRegion` trims at
+        // query time and falls back to "us", so `location: "   "` would
+        // otherwise pass this guard but query the wrong region.
+        const rawLocation = (args.config as Record<string, unknown>).location
+        if (
+          result.type === "bigquery" &&
+          !String(rawLocation ?? "").trim()
+        ) {
+          output +=
+            `\n\nWarning: no "location" set on this BigQuery connection. ` +
+            `Finops tools (query-history, credit-analyzer, warehouse-advisor, ` +
+            `unused-resources, role-grants) will query the \`us\` region by default. ` +
+            `If this project lives in \`eu\`, \`asia-northeast1\`, \`us-central1\`, ` +
+            `or any non-US region, re-add the connection with \`"location": "<region>"\`.`
+        }
+
         // Run suggestion gathering concurrently with a timeout to avoid
         // adding noticeable latency to the warehouse add response.
         try {

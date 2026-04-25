@@ -5,7 +5,7 @@
  */
 
 import * as Registry from "../connections/registry"
-import { bqRegionFor, interpolateBqRegion, sanitizeBqRegion } from "./bq-utils"
+import { augmentBqError, bqRegionFor, interpolateBqRegion, sanitizeBqRegion } from "./bq-utils"
 import type { QueryHistoryParams, QueryHistoryResult } from "../types"
 
 // ---------------------------------------------------------------------------
@@ -214,6 +214,7 @@ export async function getQueryHistory(params: QueryHistoryParams): Promise<Query
   const days = params.days ?? 7
   const limit = params.limit ?? 100
   const bqRegion = whType === "bigquery" ? bqRegionFor(params.warehouse) : undefined
+  const sanitisedBqRegion = whType === "bigquery" ? sanitizeBqRegion(bqRegion) : undefined
 
   const built = buildHistoryQuery(whType, days, limit, params.user, params.warehouse_filter, bqRegion)
   if (!built) {
@@ -222,6 +223,7 @@ export async function getQueryHistory(params: QueryHistoryParams): Promise<Query
       queries: [],
       summary: {},
       error: `Query history is not available for ${whType} warehouses.`,
+      ...(sanitisedBqRegion && { bq_region: sanitisedBqRegion }),
     }
   }
 
@@ -255,13 +257,15 @@ export async function getQueryHistory(params: QueryHistoryParams): Promise<Query
       queries,
       summary,
       warehouse_type: whType,
+      ...(sanitisedBqRegion && { bq_region: sanitisedBqRegion }),
     }
   } catch (e) {
     return {
       success: false,
       queries: [],
       summary: {},
-      error: String(e),
+      error: sanitisedBqRegion ? augmentBqError(e, sanitisedBqRegion) : String(e),
+      ...(sanitisedBqRegion && { bq_region: sanitisedBqRegion }),
     }
   }
 }

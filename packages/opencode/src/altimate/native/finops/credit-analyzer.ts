@@ -5,7 +5,7 @@
  */
 
 import * as Registry from "../connections/registry"
-import { bqRegionFor, interpolateBqRegion } from "./bq-utils"
+import { augmentBqError, bqRegionFor, interpolateBqRegion, sanitizeBqRegion } from "./bq-utils"
 import type {
   CreditAnalysisParams,
   CreditAnalysisResult,
@@ -306,6 +306,7 @@ export async function analyzeCredits(params: CreditAnalysisParams): Promise<Cred
   const days = params.days ?? 30
   const limit = params.limit ?? 50
   const bqRegion = whType === "bigquery" ? bqRegionFor(params.warehouse) : undefined
+  const sanitisedBqRegion = whType === "bigquery" ? sanitizeBqRegion(bqRegion) : undefined
 
   const dailyBuilt = buildCreditUsageSql(whType, days, limit, params.warehouse_filter, bqRegion)
   const summaryBuilt = buildCreditSummarySql(whType, days, bqRegion)
@@ -319,6 +320,7 @@ export async function analyzeCredits(params: CreditAnalysisParams): Promise<Cred
       days_analyzed: days,
       recommendations: [],
       error: `Credit analysis is not available for ${whType} warehouses.`,
+      ...(sanitisedBqRegion && { bq_region: sanitisedBqRegion }),
     }
   }
 
@@ -339,6 +341,7 @@ export async function analyzeCredits(params: CreditAnalysisParams): Promise<Cred
       total_credits: Math.round(totalCredits * 10000) / 10000,
       days_analyzed: days,
       recommendations,
+      ...(sanitisedBqRegion && { bq_region: sanitisedBqRegion }),
     }
   } catch (e) {
     return {
@@ -348,7 +351,8 @@ export async function analyzeCredits(params: CreditAnalysisParams): Promise<Cred
       total_credits: 0,
       days_analyzed: days,
       recommendations: [],
-      error: String(e),
+      error: sanitisedBqRegion ? augmentBqError(e, sanitisedBqRegion) : String(e),
+      ...(sanitisedBqRegion && { bq_region: sanitisedBqRegion }),
     }
   }
 }
@@ -358,6 +362,7 @@ export async function getExpensiveQueries(params: ExpensiveQueriesParams): Promi
   const days = params.days ?? 7
   const limit = params.limit ?? 20
   const bqRegion = whType === "bigquery" ? bqRegionFor(params.warehouse) : undefined
+  const sanitisedBqRegion = whType === "bigquery" ? sanitizeBqRegion(bqRegion) : undefined
 
   const built = buildExpensiveSql(whType, days, limit, bqRegion)
   if (!built) {
@@ -367,6 +372,7 @@ export async function getExpensiveQueries(params: ExpensiveQueriesParams): Promi
       query_count: 0,
       days_analyzed: days,
       error: `Expensive query analysis is not available for ${whType} warehouses.`,
+      ...(sanitisedBqRegion && { bq_region: sanitisedBqRegion }),
     }
   }
 
@@ -380,6 +386,7 @@ export async function getExpensiveQueries(params: ExpensiveQueriesParams): Promi
       queries,
       query_count: queries.length,
       days_analyzed: days,
+      ...(sanitisedBqRegion && { bq_region: sanitisedBqRegion }),
     }
   } catch (e) {
     return {
@@ -387,7 +394,8 @@ export async function getExpensiveQueries(params: ExpensiveQueriesParams): Promi
       queries: [],
       query_count: 0,
       days_analyzed: days,
-      error: String(e),
+      error: sanitisedBqRegion ? augmentBqError(e, sanitisedBqRegion) : String(e),
+      ...(sanitisedBqRegion && { bq_region: sanitisedBqRegion }),
     }
   }
 }
