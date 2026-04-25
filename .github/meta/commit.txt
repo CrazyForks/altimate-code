@@ -1,39 +1,41 @@
-release: v0.6.1
+chore: bridge upstream v1.4.0 across history rewrite — DRAFT
 
-Patch release. User-facing: BigQuery finops tools were 100%-broken and are
-now fixed, and work in any BigQuery region (previously hardcoded to US).
+Upstream rewrote git history between v1.3.17 and v1.4.0 (2026-04-04),
+leaving zero common ancestor with our fork. The standard `merge.ts`
+tooling cannot bridge across this. This commit overlays v1.4.0's tree
+using a new `script/upstream/bridge-merge.ts` tool.
 
-Changes since v0.6.0:
+Bridge approach:
+- For files in v1.4.0 NOT in keepOurs/skipFiles: take v1.4.0's content
+- For files with `altimate_change` markers in main: KEEP main's version
+  entirely (no marker re-application — the markers don't carry
+  replace-vs-insert semantics, so re-application produces duplicates)
+- For files in main not in v1.4.0: keep by default; flag for review
+- Restore PR #18186 (anthropic legal requests) so we keep Anthropic
+  as a provider — the user asked for this exclusion.
 
-- fix: BigQuery finops SQL — correct INFORMATION_SCHEMA columns + multi-region
-  support (#739, closes #738). `error_message`/`error_code`/`total_rows` bugs
-  plus `state='SUCCESS'` vs BQ's actual `'DONE'` (every completed job was
-  being reported as FAILED). All 5 finops modules now read the BQ
-  connection's `location` via a sanitised `{region}` placeholder.
-- fix: make anti-slop workflow advisory instead of auto-closing legitimate
-  PRs (#741, closes #740).
-- fix: marker-guard hotfix for isValidDatabricksHost env-fallback path.
-- docs: 12 end-to-end showcase examples + `location` documented for BQ (#742).
+Bridge results:
+- 730 files overlaid from v1.4.0
+- 61 marker-bearing files preserved from main entirely
+- 65 keepOurs files left unchanged
+- 3676 skipFiles excluded
+- 243 files upstream removed but kept by default (see review list)
+- PR #18186 changes preserved via main-version retention of marker files
 
-Review: 5-persona review (CTO/PM/DE/Tech Lead/Chaos Gremlin) ran on main —
-no P0s, no HOLDs. 1 P1 (silent `us` fallback compliance concern — addressed
-via docs + changelog warnings; behaviour-change follow-ups tracked in #754).
-2 HIGH docs-accuracy items fixed pre-tag: `location` row in drivers.md and
-finops-tools.md.
+Verification:
+- bun install: clean (after removing packages/slack and packages/console
+  workspace entries we don't ship)
+- turbo typecheck: 5 packages clean, dbt-tools has 2 constructor-arity
+  errors (DBTCoreProjectIntegration / DBTCoreCommandProjectIntegration)
+  caused by upstream signature changes — needs followup fix
 
-Tests:
-- 47 new adversarial tests in test/skill/release-v0.6.1-adversarial.test.ts
-  (sanitizeBqRegion injection vectors, interpolateBqRegion idempotency,
-  bqRegionFor registry edge cases, BIGQUERY_HISTORY_SQL column-name
-  regression guards for all four #739 bugs, cross-module {region} guard,
-  buildHistoryQuery full-pipeline incl. Snowflake/Databricks no-regression).
-- 409/409 tests pass across finops + skill suites. Full altimate suite
-  previously green (2917/2917) on #739 merge.
-- Typecheck: 5/5 pass. Marker guard: clean. Pre-release sanity: all 4 green.
+NOT ready to merge. Followup work needed:
+1. Fix dbt-tools typecheck errors (constructor arity)
+2. Per the 61 preserved marker files, manually merge upstream's
+   improvements while keeping markers intact (see report)
+3. Triage 243 review-list files (add to keepOurs or skipFiles)
+4. Address marker hygiene gaps surfaced (e.g. agent.ts safetyDenials
+   const is altimate code without markers)
+5. Run full test suite
 
-Deferred: BQ finops UX + robustness follow-ups filed as #754 (surface
-queried region in responses, distinguish no-location vs invalid-location,
-warn at warehouse_add time, friendlier perms error, options-object
-refactor, e2e silent-skip warning).
-
-Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+See .bridge-merge-report.md for the full per-file breakdown.

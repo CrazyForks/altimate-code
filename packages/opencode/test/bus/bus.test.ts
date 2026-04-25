@@ -1,127 +1,219 @@
-import { describe, test, expect } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
 import z from "zod"
 import { Bus } from "../../src/bus"
 import { BusEvent } from "../../src/bus/bus-event"
 import { Instance } from "../../src/project/instance"
 import { tmpdir } from "../fixture/fixture"
 
-const TestEvent = BusEvent.define("__test_bus_pub_sub", z.object({ value: z.string() }))
-const OtherEvent = BusEvent.define("__test_bus_other_type", z.object({ n: z.number() }))
+const TestEvent = {
+  Ping: BusEvent.define("test.ping", z.object({ value: z.number() })),
+  Pong: BusEvent.define("test.pong", z.object({ message: z.string() })),
+}
 
-describe("Bus: publish and subscribe", () => {
-  test("subscriber receives published event", async () => {
-    await using tmp = await tmpdir({ git: true })
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
-        const received: any[] = []
-        const unsub = Bus.subscribe(TestEvent, (e) => received.push(e))
-        await Bus.publish(TestEvent, { value: "hello" })
-        expect(received).toHaveLength(1)
-        expect(received[0].properties.value).toBe("hello")
-        unsub()
-      },
-    })
-  })
+function withInstance(directory: string, fn: () => Promise<void>) {
+  return Instance.provide({ directory, fn })
+}
 
-  test("unsubscribe stops receiving events", async () => {
-    await using tmp = await tmpdir({ git: true })
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
-        const received: any[] = []
-        const unsub = Bus.subscribe(TestEvent, (e) => received.push(e))
-        await Bus.publish(TestEvent, { value: "first" })
-        unsub()
-        await Bus.publish(TestEvent, { value: "second" })
-        expect(received).toHaveLength(1)
-      },
-    })
-  })
+describe("Bus", () => {
+  afterEach(() => Instance.disposeAll())
 
-  test("multiple subscribers receive the same event", async () => {
-    await using tmp = await tmpdir({ git: true })
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
-        const a: any[] = []
-        const b: any[] = []
-        const unsub1 = Bus.subscribe(TestEvent, (e) => a.push(e))
-        const unsub2 = Bus.subscribe(TestEvent, (e) => b.push(e))
-        await Bus.publish(TestEvent, { value: "shared" })
-        expect(a).toHaveLength(1)
-        expect(b).toHaveLength(1)
-        unsub1()
-        unsub2()
-      },
-    })
-  })
+  describe("publish + subscribe", () => {
+    test("subscriber is live immediately after subscribe returns", async () => {
+      await using tmp = await tmpdir()
+      const received: number[] = []
 
-  test("subscriber only receives matching event type", async () => {
-    await using tmp = await tmpdir({ git: true })
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
-        const received: any[] = []
-        const unsub = Bus.subscribe(TestEvent, (e) => received.push(e))
-        await Bus.publish(OtherEvent, { n: 42 })
-        expect(received).toHaveLength(0)
-        unsub()
-      },
-    })
-  })
-})
-
-describe("Bus: subscribeAll wildcard", () => {
-  test("wildcard subscriber receives all event types", async () => {
-    await using tmp = await tmpdir({ git: true })
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
-        const received: any[] = []
-        const unsub = Bus.subscribeAll((e) => received.push(e))
-        await Bus.publish(TestEvent, { value: "a" })
-        await Bus.publish(OtherEvent, { n: 1 })
-        expect(received).toHaveLength(2)
-        unsub()
-      },
-    })
-  })
-})
-
-describe("Bus: once", () => {
-  test("once unsubscribes after callback returns 'done'", async () => {
-    await using tmp = await tmpdir({ git: true })
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
-        let count = 0
-        Bus.once(TestEvent, () => {
-          count++
-          return "done"
+      await withInstance(tmp.path, async () => {
+        Bus.subscribe(TestEvent.Ping, (evt) => {
+          received.push(evt.properties.value)
         })
-        await Bus.publish(TestEvent, { value: "first" })
-        await Bus.publish(TestEvent, { value: "second" })
-        expect(count).toBe(1)
-      },
+        await Bus.publish(TestEvent.Ping, { value: 42 })
+        await Bun.sleep(10)
+      })
+
+      expect(received).toEqual([42])
+    })
+
+    test("subscriber receives matching events", async () => {
+      await using tmp = await tmpdir()
+      const received: number[] = []
+
+      await withInstance(tmp.path, async () => {
+        Bus.subscribe(TestEvent.Ping, (evt) => {
+          received.push(evt.properties.value)
+        })
+        // Give the subscriber fiber time to start consuming
+        await Bun.sleep(10)
+        await Bus.publish(TestEvent.Ping, { value: 42 })
+        await Bus.publish(TestEvent.Ping, { value: 99 })
+        // Give subscriber time to process
+        await Bun.sleep(10)
+      })
+
+      expect(received).toEqual([42, 99])
+    })
+
+    test("subscriber does not receive events of other types", async () => {
+      await using tmp = await tmpdir()
+      const pings: number[] = []
+
+      await withInstance(tmp.path, async () => {
+        Bus.subscribe(TestEvent.Ping, (evt) => {
+          pings.push(evt.properties.value)
+        })
+        await Bun.sleep(10)
+        await Bus.publish(TestEvent.Pong, { message: "hello" })
+        await Bus.publish(TestEvent.Ping, { value: 1 })
+        await Bun.sleep(10)
+      })
+
+      expect(pings).toEqual([1])
+    })
+
+    test("publish with no subscribers does not throw", async () => {
+      await using tmp = await tmpdir()
+
+      await withInstance(tmp.path, async () => {
+        await Bus.publish(TestEvent.Ping, { value: 1 })
+      })
     })
   })
 
-  test("once continues if callback returns undefined", async () => {
-    await using tmp = await tmpdir({ git: true })
-    await Instance.provide({
-      directory: tmp.path,
-      fn: async () => {
-        let count = 0
-        Bus.once(TestEvent, () => {
-          count++
-          return count >= 2 ? "done" : undefined
+  describe("unsubscribe", () => {
+    test("unsubscribe stops delivery", async () => {
+      await using tmp = await tmpdir()
+      const received: number[] = []
+
+      await withInstance(tmp.path, async () => {
+        const unsub = Bus.subscribe(TestEvent.Ping, (evt) => {
+          received.push(evt.properties.value)
         })
-        await Bus.publish(TestEvent, { value: "1" })
-        await Bus.publish(TestEvent, { value: "2" })
-        await Bus.publish(TestEvent, { value: "3" })
-        expect(count).toBe(2)
-      },
+        await Bun.sleep(10)
+        await Bus.publish(TestEvent.Ping, { value: 1 })
+        await Bun.sleep(10)
+        unsub()
+        await Bun.sleep(10)
+        await Bus.publish(TestEvent.Ping, { value: 2 })
+        await Bun.sleep(10)
+      })
+
+      expect(received).toEqual([1])
+    })
+  })
+
+  describe("subscribeAll", () => {
+    test("subscribeAll is live immediately after subscribe returns", async () => {
+      await using tmp = await tmpdir()
+      const received: string[] = []
+
+      await withInstance(tmp.path, async () => {
+        Bus.subscribeAll((evt) => {
+          received.push(evt.type)
+        })
+        await Bus.publish(TestEvent.Ping, { value: 1 })
+        await Bun.sleep(10)
+      })
+
+      expect(received).toEqual(["test.ping"])
+    })
+
+    test("receives all event types", async () => {
+      await using tmp = await tmpdir()
+      const received: string[] = []
+
+      await withInstance(tmp.path, async () => {
+        Bus.subscribeAll((evt) => {
+          received.push(evt.type)
+        })
+        await Bun.sleep(10)
+        await Bus.publish(TestEvent.Ping, { value: 1 })
+        await Bus.publish(TestEvent.Pong, { message: "hi" })
+        await Bun.sleep(10)
+      })
+
+      expect(received).toContain("test.ping")
+      expect(received).toContain("test.pong")
+    })
+  })
+
+  describe("multiple subscribers", () => {
+    test("all subscribers for same event type are called", async () => {
+      await using tmp = await tmpdir()
+      const a: number[] = []
+      const b: number[] = []
+
+      await withInstance(tmp.path, async () => {
+        Bus.subscribe(TestEvent.Ping, (evt) => {
+          a.push(evt.properties.value)
+        })
+        Bus.subscribe(TestEvent.Ping, (evt) => {
+          b.push(evt.properties.value)
+        })
+        await Bun.sleep(10)
+        await Bus.publish(TestEvent.Ping, { value: 7 })
+        await Bun.sleep(10)
+      })
+
+      expect(a).toEqual([7])
+      expect(b).toEqual([7])
+    })
+  })
+
+  describe("instance isolation", () => {
+    test("events in one directory do not reach subscribers in another", async () => {
+      await using tmpA = await tmpdir()
+      await using tmpB = await tmpdir()
+      const receivedA: number[] = []
+      const receivedB: number[] = []
+
+      await withInstance(tmpA.path, async () => {
+        Bus.subscribe(TestEvent.Ping, (evt) => {
+          receivedA.push(evt.properties.value)
+        })
+        await Bun.sleep(10)
+      })
+
+      await withInstance(tmpB.path, async () => {
+        Bus.subscribe(TestEvent.Ping, (evt) => {
+          receivedB.push(evt.properties.value)
+        })
+        await Bun.sleep(10)
+      })
+
+      await withInstance(tmpA.path, async () => {
+        await Bus.publish(TestEvent.Ping, { value: 1 })
+        await Bun.sleep(10)
+      })
+
+      await withInstance(tmpB.path, async () => {
+        await Bus.publish(TestEvent.Ping, { value: 2 })
+        await Bun.sleep(10)
+      })
+
+      expect(receivedA).toEqual([1])
+      expect(receivedB).toEqual([2])
+    })
+  })
+
+  describe("instance disposal", () => {
+    test("InstanceDisposed is delivered to wildcard subscribers before stream ends", async () => {
+      await using tmp = await tmpdir()
+      const received: string[] = []
+
+      await withInstance(tmp.path, async () => {
+        Bus.subscribeAll((evt) => {
+          received.push(evt.type)
+        })
+        await Bun.sleep(10)
+        await Bus.publish(TestEvent.Ping, { value: 1 })
+        await Bun.sleep(10)
+      })
+
+      // Instance.disposeAll triggers the finalizer which publishes InstanceDisposed
+      await Instance.disposeAll()
+      await Bun.sleep(50)
+
+      expect(received).toContain("test.ping")
+      expect(received).toContain(Bus.InstanceDisposed.type)
     })
   })
 })

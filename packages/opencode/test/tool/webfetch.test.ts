@@ -17,6 +17,8 @@ const ctx = {
   ask: async () => {},
 }
 
+type TimerID = ReturnType<typeof setTimeout>
+
 async function withFetch(
   mockFetch: (input: string | URL | Request, init?: RequestInit) => Promise<Response>,
   fn: () => Promise<void>,
@@ -27,6 +29,32 @@ async function withFetch(
     await fn()
   } finally {
     globalThis.fetch = originalFetch
+  }
+}
+
+async function withTimers(fn: (state: { ids: TimerID[]; cleared: TimerID[] }) => Promise<void>) {
+  const set = globalThis.setTimeout
+  const clear = globalThis.clearTimeout
+  const ids: TimerID[] = []
+  const cleared: TimerID[] = []
+
+  globalThis.setTimeout = ((...args: Parameters<typeof setTimeout>) => {
+    const id = set(...args)
+    ids.push(id)
+    return id
+  }) as typeof setTimeout
+
+  globalThis.clearTimeout = ((id?: TimerID) => {
+    if (id !== undefined) cleared.push(id)
+    return clear(id)
+  }) as typeof clearTimeout
+
+  try {
+    await fn({ ids, cleared })
+  } finally {
+    ids.forEach(clear)
+    globalThis.setTimeout = set
+    globalThis.clearTimeout = clear
   }
 }
 
@@ -99,129 +127,28 @@ describe("tool.webfetch", () => {
     )
   })
 
-  test("uses honest UA first, retries with browser UA on 403", async () => {
-    const calls: string[] = []
-    await withFetch(
-      async (_input, init) => {
-        const ua = (init?.headers as Record<string, string>)?.["User-Agent"] ?? ""
-        calls.push(ua)
-        if (ua.includes("altimate-code")) {
-          return new Response("Forbidden", { status: 403 })
-        }
-        return new Response("ok", { status: 200, headers: { "content-type": "text/plain" } })
-      },
-      async () => {
-        await Instance.provide({
-          directory: projectRoot,
-          fn: async () => {
-            const webfetch = await WebFetchTool.init()
-            const result = await webfetch.execute({ url: "https://example.com/page", format: "text" }, ctx)
-            expect(result.output).toBe("ok")
-            expect(calls.length).toBe(2)
-            expect(calls[0]).toContain("altimate-code")
-            expect(calls[1]).toContain("Chrome")
-          },
-        })
-      },
-    )
-  })
+  test("clears timeout when fetch rejects", async () => {
+    await withTimers(async ({ ids, cleared }) => {
+      await withFetch(
+        async () => {
+          throw new Error("boom")
+        },
+        async () => {
+          await Instance.provide({
+            directory: projectRoot,
+            fn: async () => {
+              const webfetch = await WebFetchTool.init()
+              await expect(
+                webfetch.execute({ url: "https://example.com/file.txt", format: "text" }, ctx),
+              ).rejects.toThrow("boom")
+            },
+          })
+        },
+      )
 
-  test("uses honest UA first, retries with browser UA on 406", async () => {
-    const calls: string[] = []
-    await withFetch(
-      async (_input, init) => {
-        const ua = (init?.headers as Record<string, string>)?.["User-Agent"] ?? ""
-        calls.push(ua)
-        if (ua.includes("altimate-code")) {
-          return new Response("Not Acceptable", { status: 406 })
-        }
-        return new Response("ok", { status: 200, headers: { "content-type": "text/plain" } })
-      },
-      async () => {
-        await Instance.provide({
-          directory: projectRoot,
-          fn: async () => {
-            const webfetch = await WebFetchTool.init()
-            const result = await webfetch.execute({ url: "https://example.com/page", format: "text" }, ctx)
-            expect(result.output).toBe("ok")
-            expect(calls.length).toBe(2)
-            expect(calls[0]).toContain("altimate-code")
-            expect(calls[1]).toContain("Chrome")
-          },
-        })
-      },
-    )
-  })
-
-  test("does not retry on non-retryable status (500)", async () => {
-    const calls: string[] = []
-    await withFetch(
-      async (_input, init) => {
-        const ua = (init?.headers as Record<string, string>)?.["User-Agent"] ?? ""
-        calls.push(ua)
-        return new Response("Server Error", { status: 500 })
-      },
-      async () => {
-        await Instance.provide({
-          directory: projectRoot,
-          fn: async () => {
-            const webfetch = await WebFetchTool.init()
-            expect(webfetch.execute({ url: "https://example.com/page", format: "text" }, ctx)).rejects.toThrow(
-              "HTTP 500: Request to https://example.com/page failed. This may be transient — retry once if needed.",
-            )
-            expect(calls.length).toBe(1)
-            expect(calls[0]).toContain("altimate-code")
-          },
-        })
-      },
-    )
-  })
-
-  test("does not retry when honest UA succeeds", async () => {
-    const calls: string[] = []
-    await withFetch(
-      async (_input, init) => {
-        const ua = (init?.headers as Record<string, string>)?.["User-Agent"] ?? ""
-        calls.push(ua)
-        return new Response("hello", { status: 200, headers: { "content-type": "text/plain" } })
-      },
-      async () => {
-        await Instance.provide({
-          directory: projectRoot,
-          fn: async () => {
-            const webfetch = await WebFetchTool.init()
-            const result = await webfetch.execute({ url: "https://example.com/page", format: "text" }, ctx)
-            expect(result.output).toBe("hello")
-            expect(calls.length).toBe(1)
-            expect(calls[0]).toContain("altimate-code")
-          },
-        })
-      },
-    )
-  })
-
-  test("throws when both UAs fail", async () => {
-    const calls: string[] = []
-    await withFetch(
-      async (_input, init) => {
-        const ua = (init?.headers as Record<string, string>)?.["User-Agent"] ?? ""
-        calls.push(ua)
-        return new Response("Forbidden", { status: 403 })
-      },
-      async () => {
-        await Instance.provide({
-          directory: projectRoot,
-          fn: async () => {
-            const webfetch = await WebFetchTool.init()
-            expect(webfetch.execute({ url: "https://example.com/blocked", format: "text" }, ctx)).rejects.toThrow(
-              "HTTP 403: Access to https://example.com/blocked is forbidden. The server rejected both bot and browser User-Agents. Try a different source.",
-            )
-            expect(calls.length).toBe(2)
-            expect(calls[0]).toContain("altimate-code")
-            expect(calls[1]).toContain("Chrome")
-          },
-        })
-      },
-    )
+      expect(ids).toHaveLength(1)
+      expect(cleared).toHaveLength(1)
+      expect(cleared[0]).toBe(ids[0])
+    })
   })
 })

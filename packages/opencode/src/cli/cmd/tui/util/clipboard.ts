@@ -7,7 +7,6 @@ import fs from "fs/promises"
 import { Filesystem } from "../../../../util/filesystem"
 import { Process } from "../../../../util/process"
 import { which } from "../../../../util/which"
-import { Log } from "../../../../util/log"
 
 /**
  * Writes text to clipboard via OSC 52 escape sequence.
@@ -29,6 +28,14 @@ export namespace Clipboard {
     mime: string
   }
 
+  // Checks clipboard for images first, then falls back to text.
+  //
+  // On Windows prompt/ can call this from multiple paste signals because
+  // terminals surface image paste differently:
+  //   1. A forwarded Ctrl+V keypress
+  //   2. An empty bracketed-paste hint for image-only clipboard in Windows
+  //      Terminal <1.25
+  //   3. A kitty Ctrl+V key-release fallback for Windows Terminal 1.25+
   export async function read(): Promise<Content | undefined> {
     const os = platform()
 
@@ -59,6 +66,8 @@ export namespace Clipboard {
       }
     }
 
+    // Windows/WSL: probe clipboard for images via PowerShell.
+    // Bracketed paste can't carry image data so we read it directly.
     if (os === "win32" || release().includes("WSL")) {
       const script =
         "Add-Type -AssemblyName System.Windows.Forms; $img = [System.Windows.Forms.Clipboard]::GetImage(); if ($img) { $ms = New-Object System.IO.MemoryStream; $img.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png); [System.Convert]::ToBase64String($ms.ToArray()) }"
@@ -96,7 +105,7 @@ export namespace Clipboard {
     const os = platform()
 
     if (os === "darwin" && which("osascript")) {
-      Log.Default.debug("clipboard: using osascript")
+      console.log("clipboard: using osascript")
       return async (text: string) => {
         const escaped = text.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
         await Process.run(["osascript", "-e", `set the clipboard to "${escaped}"`], { nothrow: true })
@@ -105,7 +114,7 @@ export namespace Clipboard {
 
     if (os === "linux") {
       if (process.env["WAYLAND_DISPLAY"] && which("wl-copy")) {
-        Log.Default.debug("clipboard: using wl-copy")
+        console.log("clipboard: using wl-copy")
         return async (text: string) => {
           const proc = Process.spawn(["wl-copy"], { stdin: "pipe", stdout: "ignore", stderr: "ignore" })
           if (!proc.stdin) return
@@ -115,7 +124,7 @@ export namespace Clipboard {
         }
       }
       if (which("xclip")) {
-        Log.Default.debug("clipboard: using xclip")
+        console.log("clipboard: using xclip")
         return async (text: string) => {
           const proc = Process.spawn(["xclip", "-selection", "clipboard"], {
             stdin: "pipe",
@@ -129,7 +138,7 @@ export namespace Clipboard {
         }
       }
       if (which("xsel")) {
-        Log.Default.debug("clipboard: using xsel")
+        console.log("clipboard: using xsel")
         return async (text: string) => {
           const proc = Process.spawn(["xsel", "--clipboard", "--input"], {
             stdin: "pipe",
@@ -145,7 +154,7 @@ export namespace Clipboard {
     }
 
     if (os === "win32") {
-      Log.Default.debug("clipboard: using powershell")
+      console.log("clipboard: using powershell")
       return async (text: string) => {
         // Pipe via stdin to avoid PowerShell string interpolation ($env:FOO, $(), etc.)
         const proc = Process.spawn(
@@ -170,7 +179,7 @@ export namespace Clipboard {
       }
     }
 
-    Log.Default.debug("clipboard: no native support")
+    console.log("clipboard: no native support")
     return async (text: string) => {
       await clipboardy.write(text).catch(() => {})
     }

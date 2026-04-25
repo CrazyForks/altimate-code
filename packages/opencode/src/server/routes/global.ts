@@ -1,9 +1,11 @@
-import { Hono } from "hono"
+import { Hono, type Context } from "hono"
 import { describeRoute, resolver, validator } from "hono-openapi"
 import { streamSSE } from "hono/streaming"
 import z from "zod"
 import { BusEvent } from "@/bus/bus-event"
+import { SyncEvent } from "@/sync"
 import { GlobalBus } from "@/bus/global"
+import { AsyncQueue } from "@/util/queue"
 import { Instance } from "../../project/instance"
 import { Installation } from "@/installation"
 import { Log } from "../../util/log"
@@ -15,13 +17,63 @@ const log = Log.create({ service: "server" })
 
 export const GlobalDisposedEvent = BusEvent.define("global.disposed", z.object({}))
 
+async function streamEvents(c: Context, subscribe: (q: AsyncQueue<string | null>) => () => void) {
+  return streamSSE(c, async (stream) => {
+    const q = new AsyncQueue<string | null>()
+    let done = false
+
+    q.push(
+      JSON.stringify({
+        payload: {
+          type: "server.connected",
+          properties: {},
+        },
+      }),
+    )
+
+    // Send heartbeat every 10s to prevent stalled proxy streams.
+    const heartbeat = setInterval(() => {
+      q.push(
+        JSON.stringify({
+          payload: {
+            type: "server.heartbeat",
+            properties: {},
+          },
+        }),
+      )
+    }, 10_000)
+
+    const stop = () => {
+      if (done) return
+      done = true
+      clearInterval(heartbeat)
+      unsub()
+      q.push(null)
+      log.info("global event disconnected")
+    }
+
+    const unsub = subscribe(q)
+
+    stream.onAbort(stop)
+
+    try {
+      for await (const data of q) {
+        if (data === null) return
+        await stream.writeSSE({ data })
+      }
+    } finally {
+      stop()
+    }
+  })
+}
+
 export const GlobalRoutes = lazy(() =>
   new Hono()
     .get(
       "/health",
       describeRoute({
         summary: "Get health",
-        description: "Get health information about the Altimate Code server.",
+        description: "Get health information about the OpenCode server.",
         operationId: "global.health",
         responses: {
           200: {
@@ -42,7 +94,7 @@ export const GlobalRoutes = lazy(() =>
       "/event",
       describeRoute({
         summary: "Get global events",
-        description: "Subscribe to global events from the Altimate Code system using server-sent events.",
+        description: "Subscribe to global events from the OpenCode system using server-sent events.",
         operationId: "global.event",
         responses: {
           200: {
@@ -66,43 +118,61 @@ export const GlobalRoutes = lazy(() =>
       }),
       async (c) => {
         log.info("global event connected")
+        c.header("Cache-Control", "no-cache, no-transform")
         c.header("X-Accel-Buffering", "no")
         c.header("X-Content-Type-Options", "nosniff")
-        return streamSSE(c, async (stream) => {
-          stream.writeSSE({
-            data: JSON.stringify({
-              payload: {
-                type: "server.connected",
-                properties: {},
-              },
-            }),
-          })
+
+        return streamEvents(c, (q) => {
           async function handler(event: any) {
-            await stream.writeSSE({
-              data: JSON.stringify(event),
-            })
+            q.push(JSON.stringify(event))
           }
           GlobalBus.on("event", handler)
-
-          // Send heartbeat every 10s to prevent stalled proxy streams.
-          const heartbeat = setInterval(() => {
-            stream.writeSSE({
-              data: JSON.stringify({
+          return () => GlobalBus.off("event", handler)
+        })
+      },
+    )
+    .get(
+      "/sync-event",
+      describeRoute({
+        summary: "Subscribe to global sync events",
+        description: "Get global sync events",
+        operationId: "global.sync-event.subscribe",
+        responses: {
+          200: {
+            description: "Event stream",
+            content: {
+              "text/event-stream": {
+                schema: resolver(
+                  z
+                    .object({
+                      payload: SyncEvent.payloads(),
+                    })
+                    .meta({
+                      ref: "SyncEvent",
+                    }),
+                ),
+              },
+            },
+          },
+        },
+      }),
+      async (c) => {
+        log.info("global sync event connected")
+        c.header("Cache-Control", "no-cache, no-transform")
+        c.header("X-Accel-Buffering", "no")
+        c.header("X-Content-Type-Options", "nosniff")
+        return streamEvents(c, (q) => {
+          return SyncEvent.subscribeAll(({ def, event }) => {
+            // TODO: don't pass def, just pass the type (and it should
+            // be versioned)
+            q.push(
+              JSON.stringify({
                 payload: {
-                  type: "server.heartbeat",
-                  properties: {},
+                  ...event,
+                  type: SyncEvent.versionedType(def.type, def.version),
                 },
               }),
-            })
-          }, 10_000)
-
-          await new Promise<void>((resolve) => {
-            stream.onAbort(() => {
-              clearInterval(heartbeat)
-              GlobalBus.off("event", handler)
-              resolve()
-              log.info("global event disconnected")
-            })
+            )
           })
         })
       },
@@ -111,7 +181,7 @@ export const GlobalRoutes = lazy(() =>
       "/config",
       describeRoute({
         summary: "Get global configuration",
-        description: "Retrieve the current global Altimate Code configuration settings and preferences.",
+        description: "Retrieve the current global OpenCode configuration settings and preferences.",
         operationId: "global.config.get",
         responses: {
           200: {
@@ -132,7 +202,7 @@ export const GlobalRoutes = lazy(() =>
       "/config",
       describeRoute({
         summary: "Update global configuration",
-        description: "Update global Altimate Code configuration settings and preferences.",
+        description: "Update global OpenCode configuration settings and preferences.",
         operationId: "global.config.update",
         responses: {
           200: {
@@ -157,7 +227,7 @@ export const GlobalRoutes = lazy(() =>
       "/dispose",
       describeRoute({
         summary: "Dispose instance",
-        description: "Clean up and dispose all Altimate Code instances, releasing all resources.",
+        description: "Clean up and dispose all OpenCode instances, releasing all resources.",
         operationId: "global.dispose",
         responses: {
           200: {
@@ -180,6 +250,63 @@ export const GlobalRoutes = lazy(() =>
           },
         })
         return c.json(true)
+      },
+    )
+    .post(
+      "/upgrade",
+      describeRoute({
+        summary: "Upgrade opencode",
+        description: "Upgrade opencode to the specified version or latest if not specified.",
+        operationId: "global.upgrade",
+        responses: {
+          200: {
+            description: "Upgrade result",
+            content: {
+              "application/json": {
+                schema: resolver(
+                  z.union([
+                    z.object({
+                      success: z.literal(true),
+                      version: z.string(),
+                    }),
+                    z.object({
+                      success: z.literal(false),
+                      error: z.string(),
+                    }),
+                  ]),
+                ),
+              },
+            },
+          },
+          ...errors(400),
+        },
+      }),
+      validator(
+        "json",
+        z.object({
+          target: z.string().optional(),
+        }),
+      ),
+      async (c) => {
+        const method = await Installation.method()
+        if (method === "unknown") {
+          return c.json({ success: false, error: "Unknown installation method" }, 400)
+        }
+        const target = c.req.valid("json").target || (await Installation.latest(method))
+        const result = await Installation.upgrade(method, target)
+          .then(() => ({ success: true as const, version: target }))
+          .catch((e) => ({ success: false as const, error: e instanceof Error ? e.message : String(e) }))
+        if (result.success) {
+          GlobalBus.emit("event", {
+            directory: "global",
+            payload: {
+              type: Installation.Event.Updated.type,
+              properties: { version: target },
+            },
+          })
+          return c.json(result)
+        }
+        return c.json(result, 500)
       },
     ),
 )

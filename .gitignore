@@ -1,13 +1,11 @@
 .DS_Store
 node_modules
-__pycache__
 .worktrees
 .sst
 .env
 .idea
 .vscode
 .codex
-.claude
 *~
 playground
 tmp
@@ -25,12 +23,9 @@ target
 .scripts
 .direnv/
 
-# Commit message scratch files
-.github/meta/
-
 # Local dev files
 opencode-dev
+UPCOMING_CHANGELOG.md
 logs/
-docs/site/
 *.bun-build
 tsconfig.tsbuildinfo

@@ -1209,7 +1209,7 @@ export type Config = {
     diff_style?: "auto" | "stacked"
   }
   /**
-   * Command configuration, see https://docs.altimate.sh/configure/commands/
+   * Command configuration, see https://opencode.ai/docs/commands
    */
   command?: {
     [key: string]: {
@@ -1266,7 +1266,7 @@ export type Config = {
     [key: string]: AgentConfig | undefined
   }
   /**
-   * Agent configuration, see https://docs.altimate.sh/configure/agents/
+   * Agent configuration, see https://opencode.ai/docs/agent
    */
   agent?: {
     plan?: AgentConfig

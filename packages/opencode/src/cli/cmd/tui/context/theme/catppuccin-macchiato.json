@@ -1,5 +1,5 @@
 {
-  "$schema": "https://altimate.ai/theme.json",
+  "$schema": "https://opencode.ai/theme.json",
   "defs": {
     "macRosewater": "#f4dbd6",
     "macFlamingo": "#f0c6c6",
@@ -62,8 +62,8 @@
       "light": "macText"
     },
     "textMuted": {
-      "dark": "macSubtext1",
-      "light": "macSubtext1"
+      "dark": "macOverlay2",
+      "light": "macOverlay2"
     },
     "background": {
       "dark": "macBase",

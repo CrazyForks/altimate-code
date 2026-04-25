@@ -12,11 +12,12 @@ import DESCRIPTION from "./edit.txt"
 import { File } from "../file"
 import { FileWatcher } from "../file/watcher"
 import { Bus } from "../bus"
+import { Format } from "../format"
 import { FileTime } from "../file/time"
 import { Filesystem } from "../util/filesystem"
 import { Instance } from "../project/instance"
 import { Snapshot } from "@/snapshot"
-import { assertExternalDirectory, assertSensitiveWrite } from "./external-directory"
+import { assertExternalDirectory } from "./external-directory"
 
 const MAX_DIAGNOSTICS_PER_FILE = 20
 
@@ -52,7 +53,6 @@ export const EditTool = Tool.define("edit", {
 
     const filePath = path.isAbsolute(params.filePath) ? params.filePath : path.join(Instance.directory, params.filePath)
     await assertExternalDirectory(ctx, filePath)
-    await assertSensitiveWrite(ctx, filePath)
 
     let diff = ""
     let contentOld = ""
@@ -72,14 +72,13 @@ export const EditTool = Tool.define("edit", {
           },
         })
         await Filesystem.write(filePath, params.newString)
-        await Bus.publish(File.Event.Edited, {
-          file: filePath,
-        })
+        await Format.file(filePath)
+        Bus.publish(File.Event.Edited, { file: filePath })
         await Bus.publish(FileWatcher.Event.Updated, {
           file: filePath,
           event: existed ? "change" : "add",
         })
-        FileTime.read(ctx.sessionID, filePath)
+        await FileTime.read(ctx.sessionID, filePath)
         return
       }
 
@@ -109,9 +108,8 @@ export const EditTool = Tool.define("edit", {
       })
 
       await Filesystem.write(filePath, contentNew)
-      await Bus.publish(File.Event.Edited, {
-        file: filePath,
-      })
+      await Format.file(filePath)
+      Bus.publish(File.Event.Edited, { file: filePath })
       await Bus.publish(FileWatcher.Event.Updated, {
         file: filePath,
         event: "change",
@@ -120,13 +118,12 @@ export const EditTool = Tool.define("edit", {
       diff = trimDiff(
         createTwoFilesPatch(filePath, filePath, normalizeLineEndings(contentOld), normalizeLineEndings(contentNew)),
       )
-      FileTime.read(ctx.sessionID, filePath)
+      await FileTime.read(ctx.sessionID, filePath)
     })
 
     const filediff: Snapshot.FileDiff = {
       file: filePath,
-      before: contentOld,
-      after: contentNew,
+      patch: diff,
       additions: 0,
       deletions: 0,
     }
@@ -629,76 +626,6 @@ export function trimDiff(diff: string): string {
   return trimmedLines.join("\n")
 }
 
-/**
- * Build a helpful error message when oldString isn't found.
- * Includes a snippet of the closest-matching region so the model can self-correct.
- */
-export function buildNotFoundMessage(content: string, oldString: string): string {
-  const base = "Could not find oldString in the file."
-
-  // Find the first line of oldString and search for it in the file
-  const firstLine = oldString.split("\n")[0].trim()
-  if (!firstLine) return base + " The oldString appears to be empty or whitespace-only."
-
-  const contentLines = content.split("\n")
-  let bestLine = -1
-  let bestScore = 0
-
-  // Search for the line with highest similarity to the first line of oldString
-  for (let i = 0; i < contentLines.length; i++) {
-    const trimmed = contentLines[i].trim()
-    if (!trimmed) continue
-
-    // Skip very short lines — they produce false similarity matches
-    const minLen = Math.min(trimmed.length, firstLine.length)
-    if (minLen < 4) continue
-
-    // Exact equality is best — break immediately
-    if (trimmed === firstLine) {
-      bestLine = i
-      bestScore = 1
-      break
-    }
-
-    // Substring match — strong score but keep searching for exact match
-    if (trimmed.includes(firstLine) || firstLine.includes(trimmed)) {
-      if (bestScore < 0.99) {
-        bestLine = i
-        bestScore = 0.99
-      }
-      continue
-    }
-
-    // Skip if lengths are too different (>3x ratio) — not a meaningful comparison
-    const maxLen = Math.max(trimmed.length, firstLine.length)
-    if (minLen * 3 < maxLen) continue
-
-    // Levenshtein similarity for close matches
-    const score = 1 - levenshtein(trimmed, firstLine) / maxLen
-    if (score > bestScore && score > 0.6) {
-      bestScore = score
-      bestLine = i
-    }
-  }
-
-  if (bestLine === -1) {
-    return base + ` The first line of your oldString ("${firstLine.slice(0, 80)}") was not found anywhere in the file. Re-read the file before editing.`
-  }
-
-  // Show a small window around the best match
-  const start = Math.max(0, bestLine - 1)
-  const end = Math.min(contentLines.length, bestLine + 4)
-  const snippet = contentLines
-    .slice(start, end)
-    .map((l, i) => `  ${start + i + 1} | ${l}`)
-    .join("\n")
-
-  return (
-    base +
-    ` A similar line was found at line ${bestLine + 1}. The file may have changed since you last read it.\n\nNearest match:\n${snippet}\n\nRe-read the file and use the exact current content for oldString.`
-  )
-}
-
 export function replace(content: string, oldString: string, newString: string, replaceAll = false): string {
   if (oldString === newString) {
     throw new Error("No changes to apply: oldString and newString are identical.")
@@ -731,7 +658,9 @@ export function replace(content: string, oldString: string, newString: string, r
   }
 
   if (notFound) {
-    throw new Error(buildNotFoundMessage(content, oldString))
+    throw new Error(
+      "Could not find oldString in the file. It must match exactly, including whitespace, indentation, and line endings.",
+    )
   }
   throw new Error("Found multiple matches for oldString. Provide more surrounding context to make the match unique.")
 }
