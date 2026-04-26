@@ -1,8 +1,7 @@
 import path from "path"
-import { Effect } from "effect"
 import type { Tool } from "./tool"
 import { Instance } from "../project/instance"
-import { AppFileSystem } from "../filesystem"
+import { Protected } from "../file/protected"
 
 type Kind = "file" | "directory"
 
@@ -16,31 +15,47 @@ export async function assertExternalDirectory(ctx: Tool.Context, target?: string
 
   if (options?.bypass) return
 
-  const full = process.platform === "win32" ? AppFileSystem.normalizePath(target) : target
-  if (Instance.containsPath(full)) return
+  if (Instance.containsPath(target)) return
 
   const kind = options?.kind ?? "file"
-  const dir = kind === "directory" ? full : path.dirname(full)
-  const glob =
-    process.platform === "win32"
-      ? AppFileSystem.normalizePathPattern(path.join(dir, "*"))
-      : path.join(dir, "*").replaceAll("\\", "/")
+  const parentDir = kind === "directory" ? target : path.dirname(target)
+  const glob = path.join(parentDir, "*").replaceAll("\\", "/")
 
   await ctx.ask({
     permission: "external_directory",
     patterns: [glob],
     always: [glob],
     metadata: {
-      filepath: full,
-      parentDir: dir,
+      filepath: target,
+      parentDir,
     },
   })
 }
 
-export const assertExternalDirectoryEffect = Effect.fn("Tool.assertExternalDirectory")(function* (
-  ctx: Tool.Context,
-  target?: string,
-  options?: Options,
-) {
-  yield* Effect.promise(() => assertExternalDirectory(ctx, target, options))
-})
+/**
+ * Checks if a write target is a sensitive file or directory (e.g., .git/, .ssh/,
+ * .env, credentials). If so, prompts the user for explicit permission even if the
+ * path is inside the project boundary.
+ *
+ * Uses a dedicated "sensitive_write" permission (not "edit") so that agents with
+ * `edit: "allow"` don't silently bypass this check. The "sensitive_write" permission
+ * defaults to "ask" when not explicitly configured.
+ */
+export async function assertSensitiveWrite(ctx: Tool.Context, target?: string) {
+  if (!target) return
+
+  const relativePath = path.relative(Instance.directory, target)
+  const matched = Protected.isSensitiveWrite(relativePath)
+  if (!matched) return
+
+  await ctx.ask({
+    permission: "sensitive_write",
+    patterns: [relativePath],
+    always: [relativePath],
+    metadata: {
+      filepath: target,
+      sensitive: matched,
+      reason: `This file is in a sensitive location (${matched}). Modifications could affect credentials, version control, or security configuration.`,
+    },
+  })
+}

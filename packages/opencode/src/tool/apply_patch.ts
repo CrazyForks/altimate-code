@@ -1,4 +1,3 @@
-// @ts-nocheck — DRAFT bridge merge: boundary issues with v1.4.0; resolve in followup PR
 import z from "zod"
 import * as path from "path"
 import * as fs from "fs/promises"
@@ -8,13 +7,12 @@ import { FileWatcher } from "../file/watcher"
 import { Instance } from "../project/instance"
 import { Patch } from "../patch"
 import { createTwoFilesPatch, diffLines } from "diff"
-import { assertExternalDirectory } from "./external-directory"
+import { assertExternalDirectory, assertSensitiveWrite } from "./external-directory"
 import { trimDiff } from "./edit"
 import { LSP } from "../lsp"
 import { Filesystem } from "../util/filesystem"
 import DESCRIPTION from "./apply_patch.txt"
 import { File } from "../file"
-import { Format } from "../format"
 
 const PatchParams = z.object({
   patchText: z.string().describe("The full patch text that describes all changes to be made"),
@@ -62,6 +60,7 @@ export const ApplyPatchTool = Tool.define("apply_patch", {
     for (const hunk of hunks) {
       const filePath = path.resolve(Instance.directory, hunk.path)
       await assertExternalDirectory(ctx, filePath)
+      await assertSensitiveWrite(ctx, filePath)
 
       switch (hunk.type) {
         case "add": {
@@ -120,6 +119,7 @@ export const ApplyPatchTool = Tool.define("apply_patch", {
 
           const movePath = hunk.move_path ? path.resolve(Instance.directory, hunk.move_path) : undefined
           await assertExternalDirectory(ctx, movePath)
+          await assertSensitiveWrite(ctx, movePath)
 
           fileChanges.push({
             filePath,
@@ -165,7 +165,9 @@ export const ApplyPatchTool = Tool.define("apply_patch", {
       filePath: change.filePath,
       relativePath: path.relative(Instance.worktree, change.movePath ?? change.filePath).replaceAll("\\", "/"),
       type: change.type,
-      patch: change.diff,
+      diff: change.diff,
+      before: change.oldContent,
+      after: change.newContent,
       additions: change.additions,
       deletions: change.deletions,
       movePath: change.movePath,
@@ -220,8 +222,9 @@ export const ApplyPatchTool = Tool.define("apply_patch", {
       }
 
       if (edited) {
-        await Format.file(edited)
-        Bus.publish(File.Event.Edited, { file: edited })
+        await Bus.publish(File.Event.Edited, {
+          file: edited,
+        })
       }
     }
 
