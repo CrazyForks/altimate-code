@@ -1,47 +1,17 @@
-fix: knock down test failures — 82 → 62
+fix: more test fixes — 62 → 56
 
-Mechanical fixes to the bridge merge:
+- `Auth.Info` validator: pass `.zod` (zod schema) instead of Effect schema
+  to hono-openapi (`server.ts`).
+- `pty.ts`: reverted to main since v1.4.0 version requires
+  `upgradeWebSocket` argument not passed by overlaid server.ts.
+- `session.ts /diff` route: replaced `SessionSummary.DiffInput.shape.X`
+  references (non-existent in main's summary) with `SessionID.zod` /
+  `MessageID.zod` directly.
+- `script/index.ts`: strip leading `v` from `OPENCODE_VERSION` so
+  channel detection and version normalization tests pass.
+- `bun/registry.ts`, `npm/index.ts`: guard `semver.lt()` calls against
+  invalid prerelease versions like `0.0.0-branch/with/slashes-...`
+  by validating both inputs first.
 
-1. **OAuth callback HTML escaping** — added `escapeHtml()` to
-   `mcp/oauth-callback.ts` HTML_ERROR template; user-supplied error
-   strings were being interpolated raw, causing real XSS. Fixes 4 tests.
-
-2. **OAuth client_name + page titles** — replaced "OpenCode" with
-   "Altimate Code" in `mcp/oauth-provider.ts` (`client_name`) and
-   `mcp/oauth-callback.ts` HTML titles/body. Fixes 3 tests.
-
-3. **Branding leaks**:
-   - `cli/cmd/import.ts` — `opncd.ai` → `altimate.ai` in JSDoc
-   - Earlier commits already fixed `cli/cmd/github.ts`,
-     `cli/cmd/tui/component/error-component.tsx`,
-     `mcp/oauth-provider.ts`, `server/instance.ts`,
-     `config/tui-migrate.ts`
-
-4. **`fromError` regressions** in `session/message-v2.ts`:
-   - Added detection of "OAuth token refresh failed" error pattern,
-     now returns `MessageV2.AuthError` (named "ProviderAuthError")
-     instead of UnknownError. Fixes 2 tests.
-   - `errorMessage()` in `util/error.ts` now surfaces stack location
-     for empty-message Error instances instead of just "Error".
-     Fixes 1 test.
-
-5. **`provider/error.ts` — context overflow detection**: added
-   responseBody parse for `context_length_exceeded` code (e.g.,
-   OpenAI-style errors). Fixes 1 test.
-
-6. **`File.search()` — race in `file/index.ts`**: cache was empty when
-   tests called search before initial scan completed. Now `files()`
-   tracks the in-flight scan with a `pending` promise and awaits it
-   when called, ensuring callers get consistent results. Fixes 8 tests.
-
-Remaining 62 failures (need domain knowledge):
-- `session messages endpoint` (4) — hono-openapi validator Standard
-  Schema vendor mismatch (zod v3 vs v4)
-- `tui.selectSession endpoint` (3), `session.agent-resolution` (3)
-- `Tool.define`, `apply_patch freeform`, `prompt regression`,
-  `context-overflow`, `Script.version`, `project.initGit`, `lsp.spawn`,
-  `detectConfigFiles` (2 each)
-- `webfetch`, `Truncate.GLOB`, `Turbo Configuration`, etc. (1 each)
-
-Typecheck: 5/5 packages clean (0 errors)
-Tests: 7062 pass / 502 skip / 62 fail (99.1%)
+Tests: 7068 pass / 502 skip / 56 fail (99.2%)
+Typecheck: 5/5 packages clean

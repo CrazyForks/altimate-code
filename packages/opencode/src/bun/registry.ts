@@ -39,6 +39,9 @@ export namespace PackageRegistry {
     const isRange = /[\s^~*xX<>|=]/.test(cachedVersion)
     if (isRange) return !semver.satisfies(latestVersion, cachedVersion)
 
+    // Guard against non-semver cachedVersion (e.g., dev versions like
+    // "0.0.0-branch/with/slashes-..." that contain invalid prerelease chars).
+    if (!semver.valid(cachedVersion) || !semver.valid(latestVersion)) return false
     return semver.lt(cachedVersion, latestVersion)
   }
 }

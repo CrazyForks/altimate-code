@@ -437,13 +437,13 @@ export const SessionRoutes = lazy(() =>
       validator(
         "param",
         z.object({
-          sessionID: SessionSummary.DiffInput.shape.sessionID,
+          sessionID: SessionID.zod,
         }),
       ),
       validator(
         "query",
         z.object({
-          messageID: SessionSummary.DiffInput.shape.messageID,
+          messageID: MessageID.zod,
         }),
       ),
       async (c) => {
