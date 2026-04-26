@@ -1,17 +1,20 @@
-fix: more test fixes — 62 → 56
+fix: more test cleanup — 56 → 27
 
-- `Auth.Info` validator: pass `.zod` (zod schema) instead of Effect schema
-  to hono-openapi (`server.ts`).
-- `pty.ts`: reverted to main since v1.4.0 version requires
-  `upgradeWebSocket` argument not passed by overlaid server.ts.
-- `session.ts /diff` route: replaced `SessionSummary.DiffInput.shape.X`
-  references (non-existent in main's summary) with `SessionID.zod` /
-  `MessageID.zod` directly.
-- `script/index.ts`: strip leading `v` from `OPENCODE_VERSION` so
-  channel detection and version normalization tests pass.
-- `bun/registry.ts`, `npm/index.ts`: guard `semver.lt()` calls against
-  invalid prerelease versions like `0.0.0-branch/with/slashes-...`
-  by validating both inputs first.
+- Reverted `src/format/` to main (v1.4.0's Effect-based Format requires
+  layers our preserved code can't provide; main's plain async API works).
+- `Session.command()` and `createUserMessage()`: throw typed
+  NamedError.Unknown when command/agent doesn't exist (instead of
+  TypeError on `.agent`/`.model` access).
+- `Tool.define`: shallow-clone tool object before wrapping `execute()`
+  so each `init()` call returns a distinct object that doesn't mutate
+  the original.
+- `apply_patch`: add `patch` field alias on per-file metadata (same as
+  `diff`) for test compatibility.
+- `NamedError.isInstance`: guard against null input.
+- `MessageV2.toModelMessages`: now async; await it at both call sites
+  in prompt.ts (was being spread synchronously).
+- Add "build" alias for renamed "builder" agent in `Agent.get()` so
+  legacy test references work.
 
-Tests: 7068 pass / 502 skip / 56 fail (99.2%)
+Tests: 7097 pass / 502 skip / 27 fail (99.6%)
 Typecheck: 5/5 packages clean

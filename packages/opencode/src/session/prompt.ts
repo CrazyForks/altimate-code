@@ -878,7 +878,7 @@ export namespace SessionPrompt {
         sessionID,
         system,
         messages: [
-          ...MessageV2.toModelMessages(msgs, model),
+          ...(await MessageV2.toModelMessages(msgs, model)),
           ...(isLastStep
             ? [
                 {
@@ -1309,7 +1309,13 @@ export namespace SessionPrompt {
   }
 
   async function createUserMessage(input: PromptInput) {
-    const agent = await Agent.get(input.agent ?? (await Agent.defaultAgent()))
+    const agentName = input.agent ?? (await Agent.defaultAgent())
+    const agent = await Agent.get(agentName)
+    if (!agent) {
+      const available = await Agent.list().then((agents) => agents.filter((a: any) => !a.hidden).map((a: any) => a.name))
+      const hint = available.length ? ` Available agents: ${available.join(", ")}` : ""
+      throw new NamedError.Unknown({ message: `Agent not found: "${agentName}".${hint}` })
+    }
 
     const model = input.model ?? agent.model ?? (await lastModel(input.sessionID))
     const full =
@@ -2118,6 +2124,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
   export async function command(input: CommandInput) {
     log.info("command", input)
     const command = await Command.get(input.command)
+    if (!command) {
+      const all = await Command.list()
+      const names = all.map((c: any) => c.name).filter(Boolean).sort()
+      throw new NamedError.Unknown({
+        message: `Command not found: "${input.command}". Available: ${names.join(", ") || "(none)"}`,
+      })
+    }
     const agentName = command.agent ?? input.agent ?? (await Agent.defaultAgent())
 
     const raw = input.arguments.match(argsRegex) ?? []
@@ -2317,7 +2330,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         },
         ...(hasOnlySubtaskParts
           ? [{ role: "user" as const, content: subtaskParts.map((p) => p.prompt).join("\n") }]
-          : MessageV2.toModelMessages(contextMessages, model)),
+          : await MessageV2.toModelMessages(contextMessages, model)),
       ],
     })
     const text = await result.text.catch((err) => log.error("failed to generate title", { error: err }))

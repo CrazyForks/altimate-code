@@ -369,7 +369,12 @@ export namespace Agent {
   })
 
   export async function get(agent: string) {
-    return state().then((x) => x[agent])
+    return state().then((x) => {
+      // altimate_change start — "build" alias for "builder" (renamed agent)
+      if (!x[agent] && agent === "build") return x["builder"]
+      // altimate_change end
+      return x[agent]
+    })
   }
 
   export async function list() {

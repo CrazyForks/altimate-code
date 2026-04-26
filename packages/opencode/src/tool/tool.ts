@@ -62,7 +62,10 @@ export namespace Tool {
     return {
       id,
       init: async (initCtx) => {
-        const toolInfo = init instanceof Function ? await init(initCtx) : init
+        const original = init instanceof Function ? await init(initCtx) : init
+        // Shallow-clone so wrapping execute() doesn't mutate the original tool
+        // object across init() calls (each init must yield a distinct object).
+        const toolInfo = { ...original }
         const execute = toolInfo.execute
         toolInfo.execute = async (args, ctx) => {
           try {
