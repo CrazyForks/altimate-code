@@ -1184,10 +1184,12 @@ export namespace Telemetry {
       }
       appInsights = cfg
       try {
-        const account = Account.active()
-        if (account) {
+        // altimate_change start — bridge merge: Account.active() became async in v1.4.0
+        const account = await Account.active()
+        if (account?.email) {
           userEmail = createHash("sha256").update(account.email.toLowerCase().trim()).digest("hex")
         }
+        // altimate_change end
       } catch {
         // Account unavailable — proceed without user ID
       }

@@ -485,4 +485,11 @@ export namespace Account {
     const t = await runPromise((service) => service.token(accountID))
     return Option.getOrUndefined(t)
   }
+
+  // altimate_change start — bridge merge: re-export config() (used by Config.load)
+  export async function config(accountID: AccountID, orgID: OrgID): Promise<Record<string, unknown> | undefined> {
+    const c = await runPromise((service) => service.config(accountID, orgID))
+    return Option.getOrUndefined(c) as Record<string, unknown> | undefined
+  }
+  // altimate_change end
 }

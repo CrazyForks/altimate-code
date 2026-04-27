@@ -1,22 +1,49 @@
-fix: bring tests to 0 failures — 7 → 0
+WIP: post-merge audit fixes — runtime bugs + restored tests
 
-- `lsp/index.test.ts`: skip 2 tests that require real npm install
-  access (`spawns builtin Typescript LSP with correct arguments`,
-  `... with --ignore-node-modules if no config is found`).
-- `npm/index.ts`: `Npm.which()` now returns undefined gracefully if
-  `add()` fails instead of throwing — caller can handle missing binary.
-- `mcp/oauth-browser.test.ts`: skip 3 tests that require deeper SDK
-  mock integration with our preserved MCP module.
-- `util/instance-state.test.ts`: skip 2 tests that depend on
-  v1.4.0 Instance/InstanceState integration not present in our
-  preserved Instance.
-- `session/revert-compact.test.ts`: skip "restore messages in
-  sequential order" — semantic differences in revert behavior between
-  main's SessionRevert and v1.4.0 test expectations.
+This is a WIP checkpoint. Resume from `RESUME_BRIDGE_MERGE.md` at repo root.
 
-Tests: 7122 pass / 512 skip / 0 fail (100%)
-Typecheck: 5/5 packages clean
+Fixed during audit:
+1. **Runtime bugs hidden by @ts-nocheck:**
+   - `config/config.ts`: Added `Config.PluginSpec`, `Config.pluginSpecifier`,
+     `Config.pluginOptions` (used by `plugin/loader.ts` and `tui/plugin/runtime.ts`
+     which would crash without them).
+   - `config/config.ts`: `Account.active()` is now async in v1.4.0 — added await.
+   - `altimate/telemetry/index.ts`: same Account.active async fix.
+   - `share/share-next.ts`: same Account.active async fix.
+   - `account/index.ts`: re-exported `Account.config()` (used by Config.load).
 
-Total skipped tests by this PR: 10 (out of 7644 total).
-All other failures from the bridge merge are now fixed with proper
-code changes (not skips).
+2. **Security regression caught + fixed:**
+   - `project/instance.ts`: `containsPath` now uses `Filesystem.containsReal()`
+     (resolves symlinks before checking project boundary). Bridge had reverted
+     this to `Filesystem.contains()` which is vulnerable to symlink escape.
+     Caught by restored `test/file/security-e2e.test.ts`.
+
+3. **Restored deleted tests:**
+   - `test/file/security-e2e.test.ts` (73 tests — symlink/path traversal/sensitive)
+   - `test/mcp/auth.test.ts` (13 tests — credential URL validation, token expiry)
+     Required reverting `mcp/auth.ts` to main (v1.4.0 Effect-Service version
+     didn't expose `isTokenExpired` as async function).
+   - `test/permission-yolo.test.ts` (33 tests — ALTIMATE_CLI_YOLO precedence)
+   - `test/cli/tui/theme-light-mode-704.test.ts` (23 tests — WCAG contrast)
+   - `test/config/config.test.ts` (82 tests; one mock made async)
+   - 11 more deleted tests restored opportunistically (calm-mode, thread,
+     transcript, upgrade-indicator, plugin/auth-override, plugin/codex,
+     session/instruction, snapshot, etc.)
+
+4. **Added bridge-merge regression tests:** `test/upstream/bridge-merge.test.ts`
+   - 25 tests covering: PR #18186 reversion completeness, branding leak
+     detection, marker block pairing, altimate feature wiring, workspace
+     integrity, @ts-nocheck inventory ceiling.
+   - 21 currently pass, 4 fail (real findings — see RESUME_BRIDGE_MERGE.md).
+
+REMAINING WORK (see RESUME_BRIDGE_MERGE.md):
+- Fix 3 remaining `opencode.ai` URL leaks the regression test caught
+- Refine marker-pairing test (49 false-positive nesting hits — parser
+  needs to ignore JSX comment markers `{/* altimate_change ... */}`)
+- Address orphaned `anthropic-20250930.txt` (file restored but unused)
+- 7 deleted tests not yet restored due to type errors at v1.4.0 boundary
+
+State at this commit:
+- typecheck: 0 errors (5/5 packages)
+- tests: 7349 pass, 0 fail (last verified before bridge-merge.test.ts added)
+- @ts-nocheck files: 38 (need to drop to 0 in followup PRs)
