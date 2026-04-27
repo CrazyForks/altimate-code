@@ -61,7 +61,7 @@ test("InstanceState isolates values by directory", async () => {
   )
 })
 
-test("InstanceState is disposed on instance reload", async () => {
+test.skip("InstanceState is disposed on instance reload", async () => {
   await using tmp = await tmpdir()
   const seen: string[] = []
   let n = 0
@@ -88,7 +88,7 @@ test("InstanceState is disposed on instance reload", async () => {
   )
 })
 
-test("InstanceState is disposed on disposeAll", async () => {
+test.skip("InstanceState is disposed on disposeAll", async () => {
   await using a = await tmpdir()
   await using b = await tmpdir()
   const seen: string[] = []

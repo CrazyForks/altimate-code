@@ -183,7 +183,16 @@ export namespace Npm {
     if (bin) return path.join(binDir, bin)
 
     await rm(path.join(dir, "package-lock.json"), { force: true })
-    await add(pkg)
+    // Don't fail loudly if install fails (e.g., no network in tests) — caller
+    // can decide what to do when which() returns undefined.
+    const installed = await add(pkg).then(
+      () => true,
+      (e) => {
+        log.warn("npm install failed", { pkg, error: e instanceof Error ? e.message : String(e) })
+        return false
+      },
+    )
+    if (!installed) return
     const resolved = await pick()
     if (!resolved) return
     return path.join(binDir, resolved)

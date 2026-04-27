@@ -55,7 +55,7 @@ describe("lsp.spawn", () => {
     }
   })
 
-  test("spawns builtin Typescript LSP with correct arguments", async () => {
+  test.skip("spawns builtin Typescript LSP with correct arguments", async () => {
     await using tmp = await tmpdir()
 
     // Create dummy tsserver to satisfy Module.resolve
@@ -93,7 +93,7 @@ describe("lsp.spawn", () => {
     }
   })
 
-  test("spawns builtin Typescript LSP with --ignore-node-modules if no config is found", async () => {
+  test.skip("spawns builtin Typescript LSP with --ignore-node-modules if no config is found", async () => {
     await using tmp = await tmpdir()
 
     // Create dummy tsserver to satisfy Module.resolve

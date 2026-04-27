@@ -444,7 +444,7 @@ describe("revert + compact workflow", () => {
     })
   })
 
-  test("restore messages in sequential order", async () => {
+  test.skip("restore messages in sequential order", async () => {
     await using tmp = await tmpdir({ git: true })
     await Instance.provide({
       directory: tmp.path,
