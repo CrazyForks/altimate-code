@@ -34,6 +34,13 @@ export namespace LSPServer {
 
   const NearestRoot = (includePatterns: string[], excludePatterns?: string[]): RootFunction => {
     return async (file) => {
+      // altimate_change start - only spawn LSP for files inside the instance directory
+      const resolved = path.resolve(file)
+      const instanceDir = path.resolve(Instance.directory)
+      if (!resolved.startsWith(instanceDir + path.sep) && resolved !== instanceDir) {
+        return undefined
+      }
+      // altimate_change end
       if (excludePatterns) {
         const excludedFiles = Filesystem.up({
           targets: excludePatterns,

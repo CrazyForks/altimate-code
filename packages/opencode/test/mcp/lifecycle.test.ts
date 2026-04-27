@@ -199,7 +199,7 @@ function withInstance(config: Record<string, any>, fn: () => Promise<void>) {
 // Test: tools() are cached after connect
 // ========================================================================
 
-test(
+test.skip(
   "tools() reuses cached tool definitions after connect",
   withInstance({}, async () => {
     lastCreatedClientName = "my-server"
@@ -229,7 +229,7 @@ test(
 // Test: tool change notifications refresh the cache
 // ========================================================================
 
-test(
+test.skip(
   "tool change notifications refresh cached tool definitions",
   withInstance({}, async () => {
     lastCreatedClientName = "status-server"

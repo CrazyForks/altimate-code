@@ -481,6 +481,8 @@ export namespace MCP {
             url: mcp.url,
             error: lastError.message,
           })
+          // Close the failed transport to avoid leaked HTTP connections (#19168).
+          await transport.close().catch(() => {})
           Telemetry.track({
             type: "mcp_server_status",
             timestamp: Date.now(),
@@ -568,6 +570,8 @@ export namespace MCP {
           cwd,
           error: error instanceof Error ? error.message : String(error),
         })
+        // Close the failed transport to avoid leaked child processes (#19168).
+        await transport.close().catch(() => {})
         const errorMsg = error instanceof Error ? error.message : String(error)
         Telemetry.track({
           type: "mcp_server_status",

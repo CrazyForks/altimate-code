@@ -1320,11 +1320,20 @@ export namespace SessionPrompt {
     }
 
     const model = input.model ?? agent.model ?? (await lastModel(input.sessionID))
+    // Use agent.variant only when the user did not provide an explicit model
+    // override; if the user picked a different model, agent.variant doesn't apply.
+    const useAgentModel = !input.model
     const full =
-      !input.variant && agent.variant
+      !input.variant && agent.variant && useAgentModel
         ? await Provider.getModel(model.providerID, model.modelID).catch(() => undefined)
         : undefined
-    const variant = input.variant ?? (agent.variant && full?.variants?.[agent.variant] ? agent.variant : undefined)
+    const variant =
+      input.variant ??
+      (agent.variant && useAgentModel
+        ? full?.variants?.[agent.variant]
+          ? agent.variant
+          : agent.variant // accept agent variant even if model registry has no variants entry
+        : undefined)
 
     const info: MessageV2.Info = {
       id: input.messageID ?? MessageID.ascending(),
@@ -1335,7 +1344,7 @@ export namespace SessionPrompt {
       },
       tools: input.tools,
       agent: agent.name,
-      model,
+      model: variant ? { ...model, variant } : model,
       system: input.system,
       format: input.format,
       variant,
