@@ -74,6 +74,8 @@ export namespace SystemPrompt {
     } else {
       filtered = list
     }
+    // Sort by name for stable, deterministic output across calls.
+    filtered = [...filtered].sort((a, b) => a.name.localeCompare(b.name))
     // altimate_change end
 
     return [

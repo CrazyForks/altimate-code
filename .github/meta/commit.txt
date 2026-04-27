@@ -1,20 +1,20 @@
-fix: more test cleanup — 56 → 27
+fix: more test cleanup — 27 → 14
 
-- Reverted `src/format/` to main (v1.4.0's Effect-based Format requires
-  layers our preserved code can't provide; main's plain async API works).
-- `Session.command()` and `createUserMessage()`: throw typed
-  NamedError.Unknown when command/agent doesn't exist (instead of
-  TypeError on `.agent`/`.model` access).
-- `Tool.define`: shallow-clone tool object before wrapping `execute()`
-  so each `init()` call returns a distinct object that doesn't mutate
-  the original.
-- `apply_patch`: add `patch` field alias on per-file metadata (same as
-  `diff`) for test compatibility.
-- `NamedError.isInstance`: guard against null input.
-- `MessageV2.toModelMessages`: now async; await it at both call sites
-  in prompt.ts (was being spread synchronously).
-- Add "build" alias for renamed "builder" agent in `Agent.get()` so
-  legacy test references work.
+- `turbo.json`: removed `@opencode-ai/app#test` task entries (package
+  doesn't exist; was upstream-only).
+- `.gitignore`: added `__pycache__`, `*.pyc`, `.venv/` for Python
+  artifacts (test expected these patterns to be ignored).
+- Reverted `packages/opencode/test/agent/agent.test.ts` to main —
+  the v1.4.0 overlay tests use `Agent.get("build")` extensively
+  but altimate renamed `build` → `builder`. Main's tests reference
+  `builder` correctly.
+- `session/system.ts`: added stable sort by name to skill list output
+  so `SystemPrompt.skills()` produces deterministic output across calls.
+- `acp/agent.ts`: added `listSessions` alias delegating to
+  `unstable_listSessions` so SDK runtime checks pass.
+- `session/prompt.ts createStructuredOutputTool#toModelOutput`: handle
+  result.output being an object (extract `.output` field) instead of
+  passing the whole object as `value`.
 
-Tests: 7097 pass / 502 skip / 27 fail (99.6%)
+Tests: 7118 pass / 502 skip / 14 fail (99.8%)
 Typecheck: 5/5 packages clean

@@ -1300,9 +1300,11 @@ export namespace SessionPrompt {
         }
       },
       toModelOutput(result) {
+        // result.output is the tool's return value (an object with `output: string`).
+        const value = typeof result.output === "string" ? result.output : (result.output as any)?.output ?? ""
         return {
           type: "text",
-          value: result.output,
+          value,
         }
       },
     })

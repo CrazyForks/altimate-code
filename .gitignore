@@ -29,3 +29,8 @@ UPCOMING_CHANGELOG.md
 logs/
 *.bun-build
 tsconfig.tsbuildinfo
+
+# Python artifacts
+__pycache__
+*.pyc
+.venv/
