@@ -5,6 +5,109 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-04-24
+
+### Fixed
+
+- **BigQuery finops tools were broken — now work, in any region.** `finops_query_history` was failing 100% on BigQuery with `Unrecognized name: error_message at [11:5]`. Three separate bugs in the `INFORMATION_SCHEMA.JOBS` template: (a) `error_message` and `error_code` were read as top-level columns but they only exist inside the `error_result` struct — now reads `error_result.message` and `error_result.reason`; (b) `total_rows` is a `PARTITIONS` column, not `JOBS` — replaced with `CAST(NULL AS INT64) AS rows_produced`; (c) BigQuery's `state` returns `'DONE'`, not `'SUCCESS'`, so the summary loop was reporting every completed job as FAILED — now derives `execution_status` from `error_result IS NULL`. Every successful BQ job now reports as SUCCESS. (#739, closes #738)
+- **BigQuery finops unusable outside US region.** All five finops modules (`finops_query_history`, `finops_analyze_credits`, `finops_expensive_queries`, `finops_warehouse_advice`, `finops_unused_resources`, `finops_role_grants`) hardcoded `` `region-US.INFORMATION_SCHEMA.*` ``. Now reads the BigQuery connection's configured `location` (e.g. `us`, `eu`, `us-central1`, `asia-northeast1`), sanitised via an `[a-z0-9-]` allowlist with a 64-char cap and hyphen trim. If `location` is unset the tool defaults to `us` — **set `location` explicitly on the BigQuery connection for non-US projects** or you will query the wrong region. Snowflake and Databricks paths are unchanged. (#739)
+
+### Changed
+
+- **`@altimateai/altimate-core` 0.3.0 → 0.3.1** — upstream patch release of the native SQL type-checker used by `altimate_core_validate` and the cross-dialect data-parity engine.
+
+### Docs
+
+- **New showcase page** (`docs/examples/`) with 12 end-to-end workflow demos — dbt peer review, column-level lineage diff, MS SQL → Fabric migration, Fabric platform admin, upstream schema change, NYC Taxi, Olist, Spotify, and more. (#742)
+- **`location` field documented** on the BigQuery connection and called out on the finops tools page.
+
+### Data handling
+
+- `finops_query_history`, `finops_analyze_credits`, and `finops_warehouse_advice` read `user_email` (BigQuery), `user_name` (Snowflake / Databricks / ClickHouse), and raw `query_text` from warehouse system views. Results are returned to the agent and enter the LLM context window. No telemetry or backend upload. Review your tenant's data-handling policy before enabling finops tools in regulated (PII / PHI / PCI) environments.
+- `finops_unused_resources` on BigQuery reads `INFORMATION_SCHEMA.TABLE_STORAGE`, which is an org-level view. Project-scoped service accounts typically require `bigquery.resourceAdmin` at the org to avoid a permission error.
+
+### Internal
+
+- `anti-slop` CI workflow is now advisory — labels + comments still fire on blocked-term hits, but the workflow no longer auto-closes PRs. Root cause: the repo's pull-request template embeds an HTML comment instructing AI to insert "PINEAPPLE", which `anti-slop.yml` also blocklists — every AI-assisted team-member PR was auto-closing within two minutes. (#741, closes #740)
+- Marker-guard hotfix: the `isValidDatabricksHost` env-fallback path added in v0.6.0 straddled the post-push Marker Guard's `-U5` diff window; wrapped in an inline `altimate_change` marker pair to keep strict mode green.
+
+### Testing
+
+- New adversarial tests for v0.6.1 in `packages/opencode/test/skill/release-v0.6.1-adversarial.test.ts`: `sanitizeBqRegion` injection vectors (CRLF, null bytes, backticks, path traversal, Unicode homoglyphs, prototype-pollution-adjacent inputs), `interpolateBqRegion` idempotency and multi-placeholder safety, `bqRegionFor` registry edge cases, BIGQUERY_HISTORY_SQL column-name regression guards (all four #739 bugs), cross-module "every BQ template uses `{region}`" guard, and full-pipeline `buildHistoryQuery` behaviour including Snowflake / Databricks no-regression guards.
+
+## [0.6.0] - 2026-04-21
+
+### Added
+
+- **Data parity (`data_diff` tool + skill)** — compare tables or SQL-query results row-by-row across Postgres, Snowflake, BigQuery, Databricks, ClickHouse, MySQL, Redshift, SQL Server, Microsoft Fabric, DuckDB, SQLite, and Oracle. Five algorithms: `auto` (JoinDiff same-dialect, HashDiff cross-dialect), `joindiff` (FULL OUTER JOIN), `hashdiff` (bisecting checksums — works at any scale without pulling data out), `profile` (column-level statistics, no row values leave the database), and `cascade` (profile first, then HashDiff on diverging columns). Partitioning supports date (`day`/`week`/`month`/`year`), numeric (`bucket_size`), and categorical (distinct values) modes so 100M+ row tables diff in independent batches. Auto-discovers comparable columns from `information_schema`, excludes audit/timestamp columns by name pattern AND by catalog default (`NOW()`, `CURRENT_TIMESTAMP`, `GETDATE()`, `SYSDATE`, `SYSTIMESTAMP`), and confirms exclusions with the user before diffing. (#493)
+- **MSSQL and Microsoft Fabric support in data-parity** — dialect-aware date truncation (`DATETRUNC`), locale-safe date literals (`CONVERT(DATE, ..., 23)`), and seven Azure AD / Entra ID authentication flows (password, access-token, service-principal-secret, MSI-VM, MSI-app-service, default credential chain, token-credential) delegated to `tedious`. Upgrades `mssql` v11 → v12 with explicit `ConnectionPool` isolation and correct handling of unnamed-column result sets. (#705)
+- **Databricks AI Gateway provider** — connect to Databricks serving endpoints (Foundation Model APIs) via PAT auth (`workspace-host::token`), with fallback to `DATABRICKS_HOST` / `DATABRICKS_TOKEN` environment variables. Registers 11 foundation models — Meta Llama 3.1 (405B / 70B / 8B), Claude Sonnet / Opus 4.6, GPT-5.4 / GPT-5 Mini, Gemini 3.1 Pro, DBRX Instruct, and Mixtral 8x7B. Host regex restricts credentials to `*.cloud.databricks.com`, `*.azuredatabricks.net`, and `*.gcp.databricks.com`. (#649, closes #602)
+- **Amazon Bedrock custom-endpoints guide** — dedicated docs page covering bearer-token auth, AWS credential chain, `baseURL` configuration, cross-region model-ID prefixing, and troubleshooting. Provider key corrected from `bedrock` to `amazon-bedrock` across quickstart, providers, and models pages. (#706)
+- **User-facing docs for the new features** — Databricks AI Gateway section in `configure/providers.md` and a full `data-engineering/guides/data-parity.md` covering supported warehouse pairs, algorithms, partition modes, Azure AD auth matrix for Fabric, and compliance guidance.
+
+### Changed
+
+- **`@altimateai/altimate-core` 0.2.6 → 0.3.0** — enables the cross-dialect data-parity engine, T-SQL dialect support for MSSQL/Fabric, and refined hashdiff bisection. Rebuilt native binaries published for all five supported platforms. (#717, closes #716)
+- **Altimate connect dialog polish** — `/connect` now accepts `instance-name::api-key` directly (default URL `https://api.myaltimate.com`). The three-part `api-url::instance-name::api-key` form still works for custom and self-hosted instances. Provider display name "Altimate" → "Altimate AI"; default model display "Altimate AI" → "Altimate LLM Gateway". The internal provider ID (`altimate-backend`) and model ID (`altimate-default`) are preserved — existing `model.json` favorites, recents, and pinned `model:` entries in `opencode.json` continue to work without migration. (#724)
+
+### Fixed
+
+- **Text contrast on light terminal backgrounds** — dark foreground (`#1a1a1a` or `palette[0]` when available) replaces the near-invisible `palette[7]` on light-mode system themes, and inline code blocks now render on an opaque background instead of transparent. Eager `COLORFGBG` env-var detection narrowed to `bg === 7 || bg === 15` skips the 1-second OSC 11 query altogether on light terminals that don't support it (urxvt, gnome-terminal). (#712, closes #704)
+- **Historical `tool_use` blocks after agent switches or MCP disconnects** — the LiteLLM-only `_noop` workaround is replaced by a general fix: tool names are extracted from both `tool-call` and `tool-result` blocks in message history (using `Object.hasOwn()` for prototype-pollution safety), validated against `/^[a-zA-Z0-9_-]{1,64}$/`, and registered as stubs that return "tool no longer available" if the model attempts to call them. Eliminates the Anthropic API 400 error "Requests with 'tool_use' and 'tool_result' blocks must include tool definition." (#703, closes [AI-678])
+- **`/docs` command and config links point to `docs.altimate.sh`** — the TUI "Open docs" action, Cloudflare AI Gateway help text, Anthropic system prompt, and `Config.command` / `Config.agent` schema descriptions previously linked to the wrong domain. Also updates paths to the `/configure/` prefix that matches the actual mkdocs site. (#715, closes #714)
+
+### Security
+
+- **Databricks host validation hardened** — new `isValidDatabricksHost` helper rejects CRLF/whitespace (JS regex `$` matches before `\n` by default), and the env-fallback path now validates host before constructing the `baseURL`.
+- **Tool-name validation** — stub registration ignores names with shell metacharacters, ANSI escapes, control characters, or lengths > 64, guarding against tampered session-file replays.
+- **Restricted `az` inherited env** — `az account get-access-token` is invoked with a whitelisted environment (`PATH`, `HOME`, `AZURE_*`, locale) so unrelated secrets (`DATABRICKS_TOKEN`, cloud provider keys) are not inherited by `az` or any `az` extension.
+
+### Testing
+
+- 38 new adversarial tests covering Databricks host validation (CRLF, anchoring, attacker suffixes), PAT parsing edge cases, body transform, tool-name tainted-input guards, and `data_diff` tool-description release contract.
+- 139-test consolidation across dbt helpers, file status, project-scan, session/llm, and MCP discovery — symlink cache round-trips, seed/test node exclusion, JSON array edge cases, sessionId sanitization, pagination boundary math, and connection-string masking. Two broken `${VAR}`-in-MCP-`command` tests removed (resolution was always restricted to `env` and `headers`). (#709)
+
+### Compliance note
+
+`data_diff` includes up to 5 sample diff rows in its tool output, which becomes part of the LLM conversation. For PII / PHI / PCI data, use `algorithm: "profile"` — column statistics compare without sending row values. The `data-parity` skill asks for explicit confirmation before running row-level diffs against tables whose names match common regulated patterns (`customers`, `patients`, `orders`, `payments`, `accounts`, `users`). A hard env-var opt-out for sample values is tracked in [#729](https://github.com/AltimateAI/altimate-code/issues/729).
+
+### Breaking
+
+- **`mssql` upgraded to v12**. Users with `mssql@^11` pinned at the application level will see "mssql.ConnectionPool is not available" on first SQL Server connection. Pin to `^12` or let altimate resolve.
+- **SQL Server result sets now expose `_`-prefixed columns**. The internal `startsWith("_")` column filter (introduced for partition-discovery noise suppression) was removed because it also stripped legitimate aliases like `_p` used by the partition engine. Queries that relied on this implicit filtering will see the extra columns in results.
+
+## [0.5.21] - 2026-04-13
+
+### Added
+
+- **Automated dbt unit test generation** — generate dbt unit tests (v1.8+) from your terminal with `/dbt-unit-tests` or the `dbt_unit_test_gen` tool. Detects testable SQL constructs (CASE/WHEN, JOINs, NULLs, window functions, division, incremental models) and assembles complete YAML with type-correct mock data across 7 dialects. Includes `input: this` mocks for incremental models, `format: sql` for ephemeral deps, and handles seeds/snapshots as first-class `ref()` deps. Five-phase skill workflow: Analyze → Generate → Refine → Validate → Write. Requires dbt-core 1.8+. (#673)
+- **Manifest parse cache** — `loadRawManifest()` caches by path+mtime so large manifests (100MB+) are parsed once per session, not once per tool call.
+- **Model/source descriptions in manifest** — `DbtModelInfo` and `DbtSourceInfo` now surface descriptions from `schema.yml`, giving downstream tools richer semantic context.
+- **`adapter_type` on `DbtManifestResult`** — exposes the dbt adapter type (snowflake, bigquery, etc.) from manifest metadata for dialect auto-detection.
+
+### Fixed
+
+- **MCP env-var `$${VAR}` escape and chain-injection vulnerability** — the two-layer env-var resolution design allowed `$${VAR}` escapes to be re-resolved (breaking literal `${VAR}` passthrough) and enabled variable-chain injection where `EVIL_VAR="${SECRET}"` could exfiltrate secrets the config never referenced. Collapsed to a single resolution pass scoped to `env` and `headers` fields only. (#697, relates to #656)
+- **MCP server environment variables passed as literals** — `${VAR}`, `${VAR:-default}`, and `{env:VAR}` patterns in MCP server `env` blocks were passed as literal strings to child processes, causing auth failures for tools like `gitlab-mcp-server`. (#666, closes #656)
+- **`sql_explain` and `altimate_core_validate` input hardening** — reject empty/placeholder SQL and warehouse names before hitting the warehouse. `sql_explain` now generates dialect-aware EXPLAIN statements for 12+ warehouse types. Driver errors are translated into actionable guidance (e.g., "No warehouses configured — run `warehouse_add`"). `altimate_core_validate` now runs even without a schema (previously hard-failed), with a `(no schema)` indicator and clear instructions for providing schema context. (#693, closes #691)
+- **`sql_explain` alternatives for unsupported warehouses** — BigQuery, Oracle, and SQL Server now return specific guidance (dry-run API, `DBMS_XPLAN`, `SET SHOWPLAN_TEXT ON`) instead of a generic "not supported" message.
+
+## [0.5.20] - 2026-04-09
+
+### Added
+
+- **Altimate model auto-selection** — when Altimate credentials are configured and no model is explicitly chosen, `altimate-backend/altimate-default` is selected automatically. Respects the `provider` filter in config if set. No manual `/model` selection needed for first-time Altimate users. (#665)
+
+### Fixed
+
+- **Connection string passwords with special characters** — passwords containing `@`, `#`, `:`, `/`, or other URI-reserved characters are now automatically percent-encoded in `connection_string` configs. Previously these caused cryptic authentication failures because the URI parser split on the wrong delimiter. Already-encoded passwords (`%XX`) are left untouched. Affects all URI-based drivers (PostgreSQL, MongoDB, ClickHouse). (#597, closes #589)
+- **`trace list` pagination** — `trace list` now supports `--offset` for navigating large trace histories, displays "Showing X-Y of N" with a next-page hint, and caps the TUI trace dialog at 500 items (up from 50) with an overflow message pointing to the CLI for the full set. (#596, closes #418)
+- **ClickHouse edge-case hardening** — added tests for `LowCardinality(Nullable(...))` nullability detection, `Map`/`Tuple` wrapper handling, undefined type fallback, and SQL comment/string-escape edge cases in the LIMIT injection guard. (#599, closes #592)
+
+### Testing
+
+- 31 new adversarial tests covering connection string sanitization (injection, encoding edge cases, ReDoS, Unicode, null bytes), pagination boundary math (Infinity, NaN, fractional, negative inputs), and `Provider.parseModel` edge cases.
+
 ## [0.5.19] - 2026-04-04
 
 ### Added

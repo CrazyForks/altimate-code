@@ -1,1 +1,39 @@
-feat: add ClickHouse warehouse driver
+release: v0.6.1
+
+Patch release. User-facing: BigQuery finops tools were 100%-broken and are
+now fixed, and work in any BigQuery region (previously hardcoded to US).
+
+Changes since v0.6.0:
+
+- fix: BigQuery finops SQL — correct INFORMATION_SCHEMA columns + multi-region
+  support (#739, closes #738). `error_message`/`error_code`/`total_rows` bugs
+  plus `state='SUCCESS'` vs BQ's actual `'DONE'` (every completed job was
+  being reported as FAILED). All 5 finops modules now read the BQ
+  connection's `location` via a sanitised `{region}` placeholder.
+- fix: make anti-slop workflow advisory instead of auto-closing legitimate
+  PRs (#741, closes #740).
+- fix: marker-guard hotfix for isValidDatabricksHost env-fallback path.
+- docs: 12 end-to-end showcase examples + `location` documented for BQ (#742).
+
+Review: 5-persona review (CTO/PM/DE/Tech Lead/Chaos Gremlin) ran on main —
+no P0s, no HOLDs. 1 P1 (silent `us` fallback compliance concern — addressed
+via docs + changelog warnings; behaviour-change follow-ups tracked in #754).
+2 HIGH docs-accuracy items fixed pre-tag: `location` row in drivers.md and
+finops-tools.md.
+
+Tests:
+- 47 new adversarial tests in test/skill/release-v0.6.1-adversarial.test.ts
+  (sanitizeBqRegion injection vectors, interpolateBqRegion idempotency,
+  bqRegionFor registry edge cases, BIGQUERY_HISTORY_SQL column-name
+  regression guards for all four #739 bugs, cross-module {region} guard,
+  buildHistoryQuery full-pipeline incl. Snowflake/Databricks no-regression).
+- 409/409 tests pass across finops + skill suites. Full altimate suite
+  previously green (2917/2917) on #739 merge.
+- Typecheck: 5/5 pass. Marker guard: clean. Pre-release sanity: all 4 green.
+
+Deferred: BQ finops UX + robustness follow-ups filed as #754 (surface
+queried region in responses, distinguish no-location vs invalid-location,
+warn at warehouse_add time, friendlier perms error, options-object
+refactor, e2e silent-skip warning).
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>

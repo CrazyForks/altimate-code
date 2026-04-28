@@ -65,6 +65,12 @@ const SQLSERVER_ALIASES: AliasMap = {
   ...COMMON_ALIASES,
   host: ["server", "serverName", "server_name"],
   trust_server_certificate: ["trustServerCertificate"],
+  authentication: ["authenticationType", "auth_type", "authentication_type"],
+  azure_tenant_id: ["tenantId", "tenant_id", "azureTenantId"],
+  azure_client_id: ["clientId", "client_id", "azureClientId"],
+  azure_client_secret: ["clientSecret", "client_secret", "azureClientSecret"],
+  access_token: ["token", "accessToken"],
+  azure_resource_url: ["azureResourceUrl", "resourceUrl", "resource_url"],
 }
 
 const ORACLE_ALIASES: AliasMap = {
@@ -104,6 +110,7 @@ const DRIVER_ALIASES: Record<string, AliasMap> = {
   mariadb: MYSQL_ALIASES,
   sqlserver: SQLSERVER_ALIASES,
   mssql: SQLSERVER_ALIASES,
+  fabric: SQLSERVER_ALIASES,
   oracle: ORACLE_ALIASES,
   mongodb: MONGODB_ALIASES,
   mongo: MONGODB_ALIASES,
@@ -167,6 +174,9 @@ export function sanitizeConnectionString(connectionString: string): string {
   const afterAtHasDelim = /[/?#]/.test(afterAt)
   const beforeAtHasDelim = /[/?#]/.test(beforeAt)
   if (!afterAtHasDelim && beforeAtHasDelim) {
+    // Ambiguous '@' — likely in query/path/fragment, not userinfo separator.
+    // Return unchanged; caller should pre-encode the password if auth fails.
+    console.debug?.("sanitizeConnectionString: ambiguous '@' detected, skipping encoding")
     return connectionString
   }
 

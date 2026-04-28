@@ -38,6 +38,9 @@ Managed LLM access with dynamic routing across Sonnet 4.6, Opus 4.6, GPT-5.4, GP
 
 For pricing, security, and data handling details, see the [Altimate LLM Gateway guide](https://datamates-docs.myaltimate.com/user-guide/components/llm-gateway/).
 
+!!! tip "Automatic model selection"
+    When Altimate credentials are configured and no model is explicitly chosen, the Altimate LLM Gateway is selected automatically. You can override this by setting `model` in your config or by restricting the `provider` section to specific providers only.
+
 ## Anthropic
 
 ```json
@@ -66,25 +69,45 @@ Available models: `claude-opus-4-6`, `claude-sonnet-4-6`, `claude-haiku-4-5-2025
 }
 ```
 
-## AWS Bedrock
+## Amazon Bedrock
 
 ```json
 {
   "provider": {
-    "bedrock": {
-      "region": "us-east-1",
-      "accessKeyId": "{env:AWS_ACCESS_KEY_ID}",
-      "secretAccessKey": "{env:AWS_SECRET_ACCESS_KEY}"
+    "amazon-bedrock": {
+      "options": {
+        "region": "us-east-1"
+      }
     }
   },
-  "model": "bedrock/anthropic.claude-sonnet-4-6-v1"
+  "model": "amazon-bedrock/anthropic.claude-sonnet-4-6-v1"
 }
 ```
 
-Uses the standard AWS credential chain. Set `AWS_PROFILE` or provide credentials directly.
+Uses the standard AWS credential chain: environment variables (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`), named profiles (`AWS_PROFILE`), SSO sessions, IAM roles, and container credentials.
 
 !!! note
-    If you have AWS SSO or IAM roles configured, Bedrock will use your default credential chain automatically, so no explicit keys are needed.
+    If you have AWS SSO, IAM roles, or environment credentials (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`) configured, Bedrock will use your default credential chain automatically.
+
+### Custom Endpoints (API Gateways)
+
+If your organization routes Bedrock traffic through a custom API gateway or proxy, set the `baseURL` in the provider options:
+
+```json
+{
+  "provider": {
+    "amazon-bedrock": {
+      "options": {
+        "baseURL": "https://your-gateway.example.com/v1",
+        "region": "us-east-1"
+      }
+    }
+  },
+  "model": "amazon-bedrock/anthropic.claude-sonnet-4-6-v1"
+}
+```
+
+For a complete walkthrough — including bearer token authentication, cross-region model IDs, and troubleshooting — see the [Amazon Bedrock Custom Endpoints guide](bedrock-custom-endpoints.md).
 
 ## Azure OpenAI
 
@@ -266,6 +289,50 @@ Billing flows through your Snowflake credits — no per-token costs.
 !!! note
     Model availability depends on your Snowflake region. Enable cross-region inference with `ALTER ACCOUNT SET CORTEX_ENABLED_CROSS_REGION = 'ANY_REGION'` for full model access.
 
+## Databricks AI Gateway
+
+Connect to Databricks serving endpoints (Foundation Model APIs) via your workspace PAT. Use Databricks-hosted Llama, Claude, GPT, Gemini, DBRX, or Mixtral for agent reasoning — billing flows through your Databricks account.
+
+```json
+{
+  "provider": {
+    "databricks": {}
+  },
+  "model": "databricks/databricks-claude-sonnet-4-6"
+}
+```
+
+Authenticate with `altimate auth databricks` and enter credentials as `workspace-host::pat-token`:
+
+```text
+myworkspace.cloud.databricks.com::dapi1234567890abcdef
+```
+
+Or set environment variables:
+
+```bash
+export DATABRICKS_HOST=myworkspace.cloud.databricks.com
+export DATABRICKS_TOKEN=dapi1234567890abcdef
+```
+
+Create a PAT in Databricks: **Settings → Developer → Access Tokens → Generate New Token**.
+
+**Supported workspace domains:** `*.cloud.databricks.com` (AWS), `*.azuredatabricks.net` (Azure), `*.gcp.databricks.com` (GCP).
+
+**Available models:**
+
+| Provider | Models |
+|----------|--------|
+| Meta Llama | `databricks-meta-llama-3-1-405b-instruct`, `databricks-meta-llama-3-1-70b-instruct`, `databricks-meta-llama-3-1-8b-instruct` |
+| Anthropic via Databricks | `databricks-claude-sonnet-4-6`, `databricks-claude-opus-4-6` |
+| OpenAI via Databricks | `databricks-gpt-5-4`, `databricks-gpt-5-mini` |
+| Google via Databricks | `databricks-gemini-3-1-pro` |
+| Databricks native | `databricks-dbrx-instruct` |
+| Mistral (tool calls unsupported) | `databricks-mixtral-8x7b-instruct` |
+
+!!! note
+    Databricks bills directly for these models — altimate-code reports `$0` cost for Databricks-routed requests since pricing depends on your Databricks contract.
+
 ## Custom / OpenAI-Compatible
 
 Any OpenAI-compatible endpoint can be used as a provider:
@@ -307,8 +374,8 @@ The `small_model` is used for lightweight tasks like summarization and context c
 | `baseURL` | `string` | Custom API endpoint URL |
 | `api` | `string` | API type (e.g., `"openai"` for compatible endpoints) |
 | `headers` | `object` | Custom HTTP headers to include with requests |
-| `region` | `string` | AWS region (Bedrock only) |
-| `accessKeyId` | `string` | AWS access key (Bedrock only) |
-| `secretAccessKey` | `string` | AWS secret key (Bedrock only) |
+| `options.region` | `string` | AWS region (Amazon Bedrock only, default: `us-east-1`) |
+| `options.profile` | `string` | AWS named profile (Amazon Bedrock only) |
+| `options.baseURL` | `string` | Custom endpoint URL for Bedrock gateway/proxy (Amazon Bedrock only) |
 | `project` | `string` | GCP project ID (Google Vertex AI only) |
 | `location` | `string` | GCP region (Google Vertex AI only, default: `us-central1`) |

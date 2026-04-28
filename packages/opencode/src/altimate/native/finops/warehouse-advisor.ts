@@ -5,6 +5,7 @@
  */
 
 import * as Registry from "../connections/registry"
+import { bqRegionFor, interpolateBqRegion } from "./bq-utils"
 import type {
   WarehouseAdvisorParams,
   WarehouseAdvisorResult,
@@ -58,7 +59,7 @@ SELECT
     0 as avg_queue_load,
     MAX(period_slot_ms / 1000.0) as peak_queue_load,
     COUNT(*) as sample_count
-FROM \`region-US.INFORMATION_SCHEMA.JOBS_TIMELINE\`
+FROM \`region-{region}.INFORMATION_SCHEMA.JOBS_TIMELINE\`
 WHERE period_start >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL {days} DAY)
 GROUP BY reservation_id
 ORDER BY avg_concurrency DESC
@@ -73,7 +74,7 @@ SELECT
     APPROX_QUANTILES(TIMESTAMP_DIFF(end_time, start_time, MILLISECOND), 100)[OFFSET(95)] / 1000.0 as p95_time_sec,
     AVG(total_bytes_billed) as avg_bytes_scanned,
     SUM(total_bytes_billed) / 1099511627776.0 * 5.0 as total_credits
-FROM \`region-US.INFORMATION_SCHEMA.JOBS\`
+FROM \`region-{region}.INFORMATION_SCHEMA.JOBS\`
 WHERE creation_time >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL {days} DAY)
   AND job_type = 'QUERY'
   AND state = 'DONE'
@@ -127,16 +128,20 @@ function getWhType(warehouse: string): string {
   return wh?.type || "unknown"
 }
 
-function buildLoadSql(whType: string, days: number): string | null {
+function buildLoadSql(whType: string, days: number, bqRegion?: unknown): string | null {
   if (whType === "snowflake") return SNOWFLAKE_LOAD_SQL.replace("{days}", String(days))
-  if (whType === "bigquery") return BIGQUERY_LOAD_SQL.replace("{days}", String(days))
+  if (whType === "bigquery") {
+    return interpolateBqRegion(BIGQUERY_LOAD_SQL.replace("{days}", String(days)), bqRegion)
+  }
   if (whType === "databricks") return DATABRICKS_LOAD_SQL.replace(/{days}/g, String(days))
   return null
 }
 
-function buildSizingSql(whType: string, days: number): string | null {
+function buildSizingSql(whType: string, days: number, bqRegion?: unknown): string | null {
   if (whType === "snowflake") return SNOWFLAKE_SIZING_SQL.replace("{days}", String(days))
-  if (whType === "bigquery") return BIGQUERY_SIZING_SQL.replace("{days}", String(days))
+  if (whType === "bigquery") {
+    return interpolateBqRegion(BIGQUERY_SIZING_SQL.replace("{days}", String(days)), bqRegion)
+  }
   if (whType === "databricks") return DATABRICKS_SIZING_SQL.replace(/{days}/g, String(days))
   return null
 }
@@ -217,9 +222,10 @@ function generateSizingRecommendations(
 export async function adviseWarehouse(params: WarehouseAdvisorParams): Promise<WarehouseAdvisorResult> {
   const whType = getWhType(params.warehouse)
   const days = params.days ?? 14
+  const bqRegion = whType === "bigquery" ? bqRegionFor(params.warehouse) : undefined
 
-  const loadSql = buildLoadSql(whType, days)
-  const sizingSql = buildSizingSql(whType, days)
+  const loadSql = buildLoadSql(whType, days, bqRegion)
+  const sizingSql = buildSizingSql(whType, days, bqRegion)
 
   if (!loadSql || !sizingSql) {
     return {

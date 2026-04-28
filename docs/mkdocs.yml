@@ -110,6 +110,7 @@ nav:
       - Guides:
           - Cost Optimization: data-engineering/guides/cost-optimization.md
           - Migration: data-engineering/guides/migration.md
+          - Data Parity: data-engineering/guides/data-parity.md
           - Using with Claude Code: data-engineering/guides/using-with-claude-code.md
           - Using with Codex: data-engineering/guides/using-with-codex.md
           - ClickHouse: data-engineering/guides/clickhouse.md
@@ -119,6 +120,7 @@ nav:
       - LLMs:
           - Providers: configure/providers.md
           - Models: configure/models.md
+          - Bedrock Custom Endpoints: configure/bedrock-custom-endpoints.md
       - MCPs & ACPs:
           - MCP Servers: configure/mcp-servers.md
           - ACP Support: configure/acp.md
