@@ -372,6 +372,15 @@ export namespace MessageV2 {
     // altimate_change - true when the prompt was sent from a non-interactive
     // caller (e.g. the `run` CLI command). Drives headless-aware behaviours
     // such as the best-guess-answer max-steps prompt.
+    //
+    // Layer rationale: stored on the User message (not Session.Info) so that
+    // (a) resumed sessions whose last user message was sent headlessly retain
+    // the behaviour, and (b) sessions reused by both interactive and headless
+    // callers (e.g. a TUI session continued from a `run -p` invocation) reflect
+    // the *most recent* invocation mode rather than the original session origin.
+    // Every synthetic-user-message constructor (task-summary, compaction
+    // replay/continue) MUST propagate this flag from the prior `lastUser`
+    // explicitly — a missing copy silently flips the mode back to interactive.
     headless: z.boolean().optional(),
   }).meta({
     ref: "UserMessage",

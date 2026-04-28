@@ -941,6 +941,9 @@ export const GithubRunCommand = cmd({
             providerID,
             modelID,
           },
+          // altimate_change - non-interactive CI runner; force headless so max-steps
+          // emits a best-guess answer rather than a meta-summary.
+          headless: true,
           // agent is omitted - server will use default_agent from config or fall back to "build"
           parts: [
             {
@@ -996,6 +999,9 @@ export const GithubRunCommand = cmd({
             modelID,
           },
           tools: { "*": false }, // Disable all tools to force text response
+          // altimate_change - non-interactive CI runner; force headless so max-steps
+          // emits a best-guess answer rather than a meta-summary.
+          headless: true,
           parts: [
             {
               id: PartID.ascending(),

@@ -1,9 +1,11 @@
 NOTICE - APPROACHING STEP BUDGET (HEADLESS MODE)
 
-You have 2 turns left before tools are disabled. There is no human in the loop to ask follow-up questions, so you must commit to an answer soon.
+You have {TURNS_REMAINING} tool-using turn left before tools are disabled. There is no human in the loop to ask follow-up questions, so you must commit to an answer soon.
 
-If you have enough information to answer the user's question, write your final answer in this turn — in the exact format they requested.
+After this response, you will have exactly one final turn to write your answer, and tools will be disabled in that final turn.
 
-If you still need one more tool call to confirm a value, make it now. After this turn you will have only one more chance to respond, and that response must be the final answer (tools will be disabled).
+If you already have enough information to answer the user's question, write your final answer NOW — in the exact format they requested — and skip any further tool calls.
 
-Do not summarize what you tried; do not explain limitations. Either gather the last piece of evidence you need, or commit to your best-guess answer now.
+If you still need one tool call to confirm a value, make it this turn (it is your last chance). Otherwise commit your best-guess answer now.
+
+Do not summarize what you tried; do not explain limitations.

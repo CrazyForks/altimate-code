@@ -210,3 +210,126 @@ describe("session.prompt agent variant", () => {
     }
   })
 })
+
+// altimate_change start - regression tests for headless flag propagation.
+// These guard against the silent drops the consensus review caught on PR #763.
+describe("session.prompt headless flag propagation", () => {
+  test("persists headless: true on the user message and survives a roundtrip", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+      config: {
+        agent: {
+          build: {
+            model: "openai/gpt-5.2",
+          },
+        },
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        const msg = await SessionPrompt.prompt({
+          sessionID: session.id,
+          agent: "build",
+          noReply: true,
+          headless: true,
+          parts: [{ type: "text", text: "headless run" }],
+        })
+        if (msg.info.role !== "user") throw new Error("expected user message")
+        expect(msg.info.headless).toBe(true)
+
+        const reloaded = await MessageV2.get({ sessionID: session.id, messageID: msg.info.id })
+        if (reloaded.info.role !== "user") throw new Error("expected user message after reload")
+        expect(reloaded.info.headless).toBe(true)
+
+        await Session.remove(session.id)
+      },
+    })
+  })
+
+  test("absence of headless leaves the field undefined (interactive default)", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+      config: {
+        agent: {
+          build: {
+            model: "openai/gpt-5.2",
+          },
+        },
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.create({})
+        const msg = await SessionPrompt.prompt({
+          sessionID: session.id,
+          agent: "build",
+          noReply: true,
+          parts: [{ type: "text", text: "interactive run" }],
+        })
+        if (msg.info.role !== "user") throw new Error("expected user message")
+        // explicit absence — !!undefined is false, which is the interactive branch.
+        expect(msg.info.headless).toBeUndefined()
+
+        await Session.remove(session.id)
+      },
+    })
+  })
+
+  test("CommandInput zod schema accepts the headless flag", () => {
+    // C1 regression: `run --command` was dropping headless because CommandInput
+    // didn't have the field. Verify the schema both accepts headless: true and
+    // tolerates its absence.
+    const withFlag = SessionPrompt.CommandInput.safeParse({
+      sessionID: "ses_" + "0".repeat(20),
+      arguments: "",
+      command: "doit",
+      headless: true,
+    })
+    expect(withFlag.success).toBe(true)
+    if (withFlag.success) expect(withFlag.data.headless).toBe(true)
+
+    const withoutFlag = SessionPrompt.CommandInput.safeParse({
+      sessionID: "ses_" + "0".repeat(20),
+      arguments: "",
+      command: "doit",
+    })
+    expect(withoutFlag.success).toBe(true)
+    if (withoutFlag.success) expect(withoutFlag.data.headless).toBeUndefined()
+  })
+
+  test("PromptInput zod schema accepts the headless flag", () => {
+    const parsed = SessionPrompt.PromptInput.safeParse({
+      sessionID: "ses_" + "0".repeat(20),
+      headless: true,
+      parts: [{ type: "text", text: "x" }],
+    })
+    expect(parsed.success).toBe(true)
+    if (parsed.success) expect(parsed.data.headless).toBe(true)
+  })
+})
+
+// C2 regression: synthetic user-message constructors must propagate the
+// headless flag from the prior `lastUser`. We can't easily run the full loop,
+// but we can assert that the User schema accepts headless and that the shape
+// the loop builds (a copy from `lastUser`) round-trips through MessageV2.
+describe("MessageV2.User headless flag", () => {
+  test("schema accepts headless on the user message", () => {
+    const parsed = MessageV2.User.safeParse({
+      id: "msg_" + "0".repeat(20),
+      sessionID: "ses_" + "0".repeat(20),
+      role: "user",
+      time: { created: Date.now() },
+      agent: "build",
+      model: { providerID: "openai", modelID: "gpt-5.2" },
+      headless: true,
+    })
+    expect(parsed.success).toBe(true)
+    if (parsed.success) expect(parsed.data.headless).toBe(true)
+  })
+})
+// altimate_change end

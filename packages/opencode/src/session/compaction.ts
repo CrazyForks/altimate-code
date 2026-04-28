@@ -342,6 +342,9 @@ When constructing the summary, try to stick to this template:
           tools: original.tools,
           system: original.system,
           variant: original.variant,
+          // altimate_change - retain headless flag on replayed user msg so the
+          // max-steps prompt selection stays consistent after compaction.
+          headless: original.headless,
         })
         for (const part of replay.parts) {
           if (part.type === "compaction") continue
@@ -364,6 +367,9 @@ When constructing the summary, try to stick to this template:
           time: { created: Date.now() },
           agent: userMessage.agent,
           model: userMessage.model,
+          // altimate_change - retain headless flag on continuation user msg so
+          // the max-steps prompt selection stays consistent after compaction.
+          headless: userMessage.headless,
         })
         const text =
           (input.overflow

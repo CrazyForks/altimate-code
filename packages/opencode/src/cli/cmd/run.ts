@@ -805,6 +805,10 @@ You are speaking to a non-technical business executive. Follow these rules stric
           command: args.command,
           arguments: message,
           variant: args.variant,
+          // altimate_change - the `run --command` path is also non-interactive
+          // (no human in the loop). Propagate headless so the max-steps prompt
+          // commits a best-guess answer instead of writing a meta-summary.
+          headless: true,
         })
       } else {
         const model = args.model ? Provider.parseModel(args.model) : undefined
