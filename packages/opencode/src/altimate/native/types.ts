@@ -982,6 +982,26 @@ export interface AltimateCoreIsSafeParams {
   sql: string
 }
 
+// altimate_change start — cross-DB join key inference
+/**
+ * Parameters for `altimate_core.detect_join_candidates`.
+ *
+ * Pulls a small bag of string sample values from each (warehouse, schema, table,
+ * column), then looks across DBs for value-prefix patterns that suggest a join
+ * relationship (e.g. `businessid_42` ↔ `businessref_42`).
+ */
+export interface AltimateCoreDetectJoinCandidatesParams {
+  /** Warehouse connection names to compare. At least two are required. */
+  connections: string[]
+  /** Optional restriction to a single schema per warehouse. */
+  schema_name?: string
+  /** Number of sample values per column. Default 50. */
+  sample_size?: number
+  /** Maximum number of tables to scan per connection. Default 50. */
+  max_tables_per_connection?: number
+}
+// altimate_change end
+
 // --- dbt Lineage ---
 
 export interface DbtLineageParams {
@@ -1212,6 +1232,12 @@ export const BridgeMethods = {
   "altimate_core.introspection_sql": {} as { params: AltimateCoreIntrospectionSqlParams; result: AltimateCoreResult },
   "altimate_core.parse_dbt": {} as { params: AltimateCoreParseDbtParams; result: AltimateCoreResult },
   "altimate_core.is_safe": {} as { params: AltimateCoreIsSafeParams; result: AltimateCoreResult },
+  // altimate_change start — cross-DB join key inference
+  "altimate_core.detect_join_candidates": {} as {
+    params: AltimateCoreDetectJoinCandidatesParams
+    result: AltimateCoreResult
+  },
+  // altimate_change end
   ping: {} as { params: Record<string, never>; result: { status: string } },
 } as const
 

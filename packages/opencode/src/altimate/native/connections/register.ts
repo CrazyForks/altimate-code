@@ -11,6 +11,9 @@ import * as Registry from "./registry"
 import { discoverContainers } from "./docker-discovery"
 import { parseDbtProfiles } from "./dbt-profiles"
 import { runDataDiff } from "./data-diff"
+// altimate_change start — cross-DB join key inference
+import { detectJoinCandidates } from "./detect-join-candidates"
+// altimate_change end
 import type {
   SqlExecuteParams,
   SqlExecuteResult,
@@ -625,6 +628,13 @@ register("dbt.profiles", async (params: DbtProfilesParams): Promise<DbtProfilesR
 register("data.diff", async (params: DataDiffParams): Promise<DataDiffResult> => {
   return runDataDiff(params)
 })
+
+// altimate_change start — cross-DB join key inference
+// --- altimate_core.detect_join_candidates ---
+register("altimate_core.detect_join_candidates", async (params) => {
+  return detectJoinCandidates(params)
+})
+// altimate_change end
 
 } // end registerAll
 
