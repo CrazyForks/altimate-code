@@ -98,6 +98,9 @@ import { AltimateCoreFingerprintTool } from "../altimate/tools/altimate-core-fin
 import { AltimateCoreIntrospectionSqlTool } from "../altimate/tools/altimate-core-introspection-sql"
 import { AltimateCoreParseDbtTool } from "../altimate/tools/altimate-core-parse-dbt"
 import { AltimateCoreRewriteTool } from "../altimate/tools/altimate-core-rewrite"
+// altimate_change start — cross-DB join key inference
+import { AltimateCoreDetectJoinCandidatesTool } from "../altimate/tools/altimate-core-detect-join-candidates"
+// altimate_change end
 import { ToolLookupTool } from "../altimate/tools/tool-lookup"
 import { ProjectScanTool } from "../altimate/tools/project-scan"
 import { DatamateManagerTool } from "../altimate/tools/datamate"
@@ -283,6 +286,9 @@ export namespace ToolRegistry {
       AltimateCoreFingerprintTool,
       AltimateCoreIntrospectionSqlTool,
       AltimateCoreParseDbtTool,
+      // altimate_change start — cross-DB join key inference
+      AltimateCoreDetectJoinCandidatesTool,
+      // altimate_change end
       ToolLookupTool,
       ProjectScanTool,
       DatamateManagerTool,
