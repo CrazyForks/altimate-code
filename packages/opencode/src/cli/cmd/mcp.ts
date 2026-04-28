@@ -615,7 +615,8 @@ export const McpRemoveCommand = cmd({
             console.log(`MCP server "${args.name}" removed from ${globalPath}`)
           } else {
             console.error(`MCP server "${args.name}" not found in any config`)
-            process.exit(1)
+            process.exitCode = 1
+            return
           }
         } else if (args.global && Instance.project.vcs === "git") {
           const localPath = await resolveConfigPath(Instance.worktree, false)
@@ -624,7 +625,8 @@ export const McpRemoveCommand = cmd({
             console.log(`MCP server "${args.name}" removed from ${localPath}`)
           } else {
             console.error(`MCP server "${args.name}" not found in any config`)
-            process.exit(1)
+            process.exitCode = 1
+            return
           }
         } else {
           console.error(`MCP server "${args.name}" not found in any config`)

@@ -1,36 +1,47 @@
-fix: bridge merge audit cycle 3 — drop all @ts-nocheck + bridge SDK schema
+fix: bridge merge audit cycle 4 — async drift, plan safety, idempotent registry
 
-Audit cycle 3 eliminates remaining technical debt from cycles 1 and 2:
-- `@ts-nocheck "DRAFT bridge merge"` count: 8 → 0
-- SDK gen no longer needs revert after build (now stable)
-- Surfaced and fixed 3 hidden runtime bugs that @ts-nocheck was masking
+Audit cycle 4 deployed 4 agents with distinct methodologies (diff forensics,
+end-to-end behavior verification, test gap analysis, data integrity) to find
+what cycles 1-3 missed. Three runtime-correctness regressions surfaced and
+were fixed in this PR.
 
-@ts-nocheck cleanup (8 files)
-- `npm/index.ts`: add `arborist.d.ts` minimal module declaration for `@npmcli/arborist` (no published types).
-- `provider/transform.ts`: replace @ts-nocheck with localized `(part as { type?: string })` casts at v3-only `tool-approval-*` discriminator checks. Runtime behavior preserved.
-- `share-next.ts`: @ts-nocheck was stale (no actual errors), dropped.
-- `session/projectors.ts`: bridge BusEvent→SyncEvent.project shape mismatch with localized `as any` cast. Bug fix: `data.sessionID` was always undefined on BusEvent payloads (which are `{ info }` only), replaced with `data.info.id`.
-- `server/projectors.ts`: same fix as session/projectors.ts.
-- `tui/context/sync.tsx`: @ts-nocheck was stale, dropped.
-- `tui/plugin/api.tsx` and `tui/plugin/runtime.ts`: deleted (dead code, no consumers, referenced missing `./slots` module from incomplete v1.4.0 plugin migration).
+Runtime correctness fixes
+- `SessionStatus.set()` became async in v1.4.0 but **6 callers were unawaited**
+  (data race / state drop on shutdown). Fixed all 6: `prompt.ts` cancel() (×2)
+  and main loop, `processor.ts` stream-start/retry/error-exit. Cancel() itself
+  became async; updated `tool/task.ts` to log unhandled rejections, and changed
+  `prompt.ts` `using _ = defer(...)` to `await using _ = defer(...)` for proper
+  async dispose.
+- `tool/plan.ts PlanExitTool`: v1.4.0 changed reject from `answer !== "Yes"` to
+  `answer === "No"`. Cancel/dismiss/network-drop now silently confirmed the
+  agent transition (unsafe). Reverted to "reject on anything but explicit Yes".
+- `bus/bus-event.ts BusEvent.define`: made idempotent. Cycle 3 made
+  `SyncEvent.define` register into BusEvent registry; if `SyncEvent.init` runs
+  later, it would re-register. Now first registration wins, preventing schema
+  shadowing surprises.
 
-SDK versioned-event schema bridge
-- `sync/index.ts SyncEvent.define()` now also registers into `BusEvent.registry` so SyncEvent-defined events (e.g. `MessageV2.Event.Updated`) appear in `BusEvent.payloads()` (the `Event` union consumers import from `@opencode-ai/sdk/v2`).
-- Net effect: `bun dev generate` now produces an SDK whose `Event` union includes `EventMessageUpdated`/`EventSessionUpdated`/etc. with `{type, properties}` shape matching consumer expectations.
-- **No more revert-after-build needed** — SDK gen is now stable across rebuilds.
-- Regenerated SDK gen committed (matches main's shapes for all events).
+UX fix
+- `mcp remove <not-found>` exited 0 because `process.exit(1)` inside async
+  Effect chain gets swallowed. Replaced with `process.exitCode = 1; return` so
+  the global `process.exit()` in `index.ts:295` finally honors it. Verified
+  exit code is now 1.
 
-Hidden bugs surfaced and fixed
-- `server/routes/session.ts diff route`: required `messageID` query param, but `SessionSummary.diff` impl has it optional and `sync.tsx` bulk-sync callers don't pass it. Route validator made optional to match impl.
-- `session/projectors.ts` Session.Event.Updated/Deleted projectors: `data.sessionID` was always undefined (BusEvent.define payload is `{ info }` only). Fixed to `data.info.id`.
-- `test/acp/event-subscription.test.ts`: outdated `EventMessagePartUpdated` shape; updated to include `sessionID` and `time`.
+Tests added (`test/upstream/bridge-merge-v3.test.ts`)
+- `SessionStatus.set` is async (signature lock)
+- All `SessionStatus.set` callers in src use `await` (static scan)
+- `SessionPrompt.cancel` is async
+- `SessionPrompt.prompt` uses `await using` for cancel disposer
+- `PlanExitTool` rejects on anything other than explicit Yes (with comment-strip
+  to avoid false positive on commented-out PlanEnterTool)
+- `BusEvent.define` returns existing definition on repeat call (runtime test)
+- `McpRemoveCommand` uses `process.exitCode` not bare `process.exit(1)`
 
-Test ceiling
-- `bridge-merge.test.ts NOCHECK_LIMIT`: 8 → 0.
+Updated `test/bus/bus-event.test.ts`: the existing "last define() wins" test now
+asserts "first define() wins (idempotent)" matching the new semantic.
 
 Verification
 - Typecheck: 0 errors across 5 packages
-- Build: all 4 build targets succeed
-- Tests: 7659 pass / 503 skip / 5 fail (all 5 pre-existing environment timeouts)
-- Bridge regression suite: 115 tests across `test/upstream/`, all pass
-- SDK regenerated and confirmed stable
+- Tests: 7705 pass / 503 skip / 4 fail (all 4 pre-existing env timeouts)
+- Bridge regression suite: 172 tests across `test/upstream/`, all pass
+- Manual smoke: `mcp --help`, `mcp remove nonexistent` (now exits 1), `--version`
+- Build: SDK regen confirmed stable

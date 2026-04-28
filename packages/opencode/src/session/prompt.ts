@@ -264,19 +264,21 @@ export namespace SessionPrompt {
     return s[sessionID].abort.signal
   }
 
-  export function cancel(sessionID: SessionID) {
+  // altimate_change start — SessionStatus.set became async in v1.4.0; await so idle state actually flushes
+  export async function cancel(sessionID: SessionID) {
     log.info("cancel", { sessionID })
     const s = state()
     const match = s[sessionID]
     if (!match) {
-      SessionStatus.set(sessionID, { type: "idle" })
+      await SessionStatus.set(sessionID, { type: "idle" })
       return
     }
     match.abort.abort()
     delete s[sessionID]
-    SessionStatus.set(sessionID, { type: "idle" })
+    await SessionStatus.set(sessionID, { type: "idle" })
     return
   }
+  // altimate_change end
 
   export const LoopInput = z.object({
     sessionID: SessionID.zod,
@@ -293,7 +295,9 @@ export namespace SessionPrompt {
       })
     }
 
-    using _ = defer(() => cancel(sessionID))
+    // altimate_change start — cancel() became async (SessionStatus.set is async); use `await using` for async dispose
+    await using _ = defer(() => cancel(sessionID))
+    // altimate_change end
 
     // Structured output state
     // Note: On session resumption, state is reset but outputFormat is preserved
@@ -353,7 +357,9 @@ export namespace SessionPrompt {
     process.once("exit", emergencySessionEnd)
     // altimate_change end
     while (true) {
-      SessionStatus.set(sessionID, { type: "busy" })
+      // altimate_change start — SessionStatus.set became async in v1.4.0; await so busy state flushes before LLM call
+      await SessionStatus.set(sessionID, { type: "busy" })
+      // altimate_change end
       log.info("loop", { step, sessionID })
       if (abort.aborted) break
       let msgs = await MessageV2.filterCompacted(MessageV2.stream(sessionID))
