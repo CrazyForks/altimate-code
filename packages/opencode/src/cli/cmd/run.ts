@@ -815,6 +815,10 @@ You are speaking to a non-technical business executive. Follow these rules stric
           variant: args.variant,
           parts: [...files, { type: "text", text: message }],
           ...(audienceSystem ? { system: audienceSystem } : {}),
+          // altimate_change - the `run` command is the headless / non-interactive
+          // entry point. Tell the session loop so the max-steps prompt commits a
+          // best-guess answer instead of writing a meta-summary.
+          headless: true,
         })
       }
 

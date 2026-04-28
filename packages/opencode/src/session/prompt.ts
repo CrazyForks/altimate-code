@@ -24,6 +24,10 @@ import { Plugin } from "../plugin"
 import PROMPT_PLAN from "../session/prompt/plan.txt"
 import BUILD_SWITCH from "../session/prompt/build-switch.txt"
 import MAX_STEPS from "../session/prompt/max-steps.txt"
+// altimate_change start - headless-mode max-steps prompt commits a best-guess answer
+import MAX_STEPS_HEADLESS from "../session/prompt/max-steps-headless.txt"
+import MAX_STEPS_HEADLESS_PREWARN from "../session/prompt/max-steps-headless-prewarn.txt"
+// altimate_change end
 import { defer } from "../util/defer"
 import { ToolRegistry } from "../tool/registry"
 import { MCP } from "../mcp"
@@ -99,6 +103,25 @@ export namespace SessionPrompt {
     if (match) throw new Session.BusyError(sessionID)
   }
 
+  // altimate_change start - exposed for unit testing the prompt-selection logic.
+  // Picks which max-steps prompt (if any) to inject at the start of a step.
+  // - Final step in headless mode: ask for a best-guess answer NOW, since there
+  //   is no human to follow up.
+  // - Final step in interactive mode: existing summarize-what-you-tried wording.
+  // - One step before the final step in headless mode: a softer pre-warning that
+  //   nudges the model to start writing its answer.
+  export function selectMaxStepsPrompt(input: {
+    step: number
+    maxSteps: number
+    headless: boolean
+  }): string | undefined {
+    const { step, maxSteps, headless } = input
+    if (step >= maxSteps) return headless ? MAX_STEPS_HEADLESS : MAX_STEPS
+    if (headless && Number.isFinite(maxSteps) && step === maxSteps - 1) return MAX_STEPS_HEADLESS_PREWARN
+    return undefined
+  }
+  // altimate_change end
+
   export const PromptInput = z.object({
     sessionID: SessionID.zod,
     messageID: MessageID.zod.optional(),
@@ -119,6 +142,12 @@ export namespace SessionPrompt {
     format: MessageV2.Format.optional(),
     system: z.string().optional(),
     variant: z.string().optional(),
+    // altimate_change start - mark sessions invoked from non-interactive callers
+    // (e.g. the `run` CLI command). When true, the max-steps prompt switches to a
+    // best-guess-answer wording instead of the interactive "summarize what you
+    // tried" wording, since there is no human to follow up.
+    headless: z.boolean().optional(),
+    // altimate_change end
     parts: z.array(
       z.discriminatedUnion("type", [
         MessageV2.TextPart.omit({
@@ -624,7 +653,11 @@ export namespace SessionPrompt {
       // normal processing
       const agent = await Agent.get(lastUser.agent)
       const maxSteps = agent.steps ?? Infinity
-      const isLastStep = step >= maxSteps
+      // altimate_change start - select max-steps injection text (if any). In
+      // headless mode the final-step prompt asks for a best-guess answer; one
+      // step earlier, a softer pre-warning nudges the model to start writing.
+      const maxStepsInjection = selectMaxStepsPrompt({ step, maxSteps, headless: !!lastUser.headless })
+      // altimate_change end
       msgs = await insertReminders({
         messages: msgs,
         agent,
@@ -878,11 +911,12 @@ export namespace SessionPrompt {
         system,
         messages: [
           ...MessageV2.toModelMessages(msgs, model),
-          ...(isLastStep
+          // altimate_change - inject the max-steps text chosen above (if any)
+          ...(maxStepsInjection
             ? [
                 {
                   role: "assistant" as const,
-                  content: MAX_STEPS,
+                  content: maxStepsInjection,
                 },
               ]
             : []),
@@ -1330,6 +1364,8 @@ export namespace SessionPrompt {
       system: input.system,
       format: input.format,
       variant,
+      // altimate_change - persist headless flag for downstream prompt selection
+      headless: input.headless,
     }
     using _ = defer(() => InstructionPrompt.clear(info.id))
 

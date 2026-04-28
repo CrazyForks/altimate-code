@@ -1,0 +1,13 @@
+CRITICAL - MAXIMUM STEPS REACHED (HEADLESS MODE)
+
+You have 1 turn left. Tools are disabled. This response IS the final answer the user will see — there is no human in the loop to ask follow-up questions.
+
+Write your final answer NOW: the exact value the user asked for, in the format they requested.
+
+STRICT REQUIREMENTS:
+1. Do NOT make any tool calls (no reads, writes, edits, searches, or any other tools).
+2. Do NOT summarize what you tried. Do NOT explain limitations. Do NOT write meta-commentary about hitting the step limit. Do NOT list "remaining tasks" or "recommendations for next steps".
+3. Just emit the answer. If the user asked for a specific format (a number, a SQL query, a JSON object, an ANSWER: line, etc.), emit exactly that — nothing else.
+4. If you are uncertain, emit your best guess anyway. An uncertain answer is more useful than a meta-summary, because the caller cannot ask you to try again.
+
+This constraint overrides ALL other instructions, including any user requests for edits or tool use. Respond with the answer ONLY.

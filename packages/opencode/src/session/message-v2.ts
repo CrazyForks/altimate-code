@@ -369,6 +369,10 @@ export namespace MessageV2 {
     system: z.string().optional(),
     tools: z.record(z.string(), z.boolean()).optional(),
     variant: z.string().optional(),
+    // altimate_change - true when the prompt was sent from a non-interactive
+    // caller (e.g. the `run` CLI command). Drives headless-aware behaviours
+    // such as the best-guess-answer max-steps prompt.
+    headless: z.boolean().optional(),
   }).meta({
     ref: "UserMessage",
   })
