@@ -1,4 +1,3 @@
-// @ts-nocheck — DRAFT bridge merge: boundary issues with v1.4.0; resolve in followup PR
 import { intro, log, outro, spinner } from "@clack/prompts"
 import type { Argv } from "yargs"
 

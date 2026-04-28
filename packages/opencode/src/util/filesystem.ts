@@ -25,6 +25,18 @@ export namespace Filesystem {
     return statSync(p, { throwIfNoEntry: false }) ?? undefined
   }
 
+  // altimate_change start — bridge merge: async stat for v1.4.0 callers
+  // (plugin/{meta,shared}.ts, tui/plugin/runtime.ts).
+  export async function statAsync(p: string): Promise<Awaited<ReturnType<typeof import("fs").promises.stat>> | undefined> {
+    const { stat: fsStat } = await import("fs/promises")
+    try {
+      return await fsStat(p)
+    } catch {
+      return undefined
+    }
+  }
+  // altimate_change end
+
   export async function size(p: string): Promise<number> {
     const s = stat(p)?.size ?? 0
     return typeof s === "bigint" ? Number(s) : s

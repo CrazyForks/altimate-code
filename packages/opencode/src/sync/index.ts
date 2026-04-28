@@ -1,4 +1,3 @@
-// @ts-nocheck — DRAFT bridge merge: boundary issues with v1.4.0; resolve in followup PR
 import z from "zod"
 import type { ZodObject } from "zod"
 import { EventEmitter } from "events"
@@ -208,23 +207,18 @@ export namespace SyncEvent {
     // Note that this is an "immediate" transaction which is critical.
     // We need to make sure we can safely read and write with nothing
     // else changing the data from under us
-    Database.transaction(
-      (tx) => {
-        const id = EventID.ascending()
-        const row = tx
-          .select({ seq: EventSequenceTable.seq })
-          .from(EventSequenceTable)
-          .where(eq(EventSequenceTable.aggregate_id, agg))
-          .get()
-        const seq = row?.seq != null ? row.seq + 1 : 0
+    Database.transaction((tx) => {
+      const id = EventID.ascending()
+      const row = tx
+        .select({ seq: EventSequenceTable.seq })
+        .from(EventSequenceTable)
+        .where(eq(EventSequenceTable.aggregate_id, agg))
+        .get()
+      const seq = row?.seq != null ? row.seq + 1 : 0
 
-        const event = { id, seq, aggregateID: agg, data }
-        process(def, event, { publish: true })
-      },
-      {
-        behavior: "immediate",
-      },
-    )
+      const event = { id, seq, aggregateID: agg, data }
+      process(def, event, { publish: true })
+    })
   }
 
   export function remove(aggregateID: string) {

@@ -1,4 +1,3 @@
-// @ts-nocheck — DRAFT bridge merge: boundary issues with v1.4.0; resolve in followup PR
 import { render, useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { Clipboard } from "@tui/util/clipboard"
 import { Selection } from "@tui/util/selection"
@@ -281,7 +280,10 @@ function App() {
   const route = useRoute()
   const dimensions = useTerminalDimensions()
   const renderer = useRenderer()
-  renderer.disableStdoutInterception()
+  // altimate_change start — bridge merge: disableStdoutInterception was removed in opentui 0.1.97;
+  // call removed (no-op in current renderer version).
+  ;(renderer as any).disableStdoutInterception?.()
+  // altimate_change end
   const dialog = useDialog()
   const local = useLocal()
   const kv = useKV()

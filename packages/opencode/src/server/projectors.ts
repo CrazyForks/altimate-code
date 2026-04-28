@@ -1,4 +1,4 @@
-// @ts-nocheck — DRAFT bridge merge: boundary issues with v1.4.0; resolve in followup PR
+// @ts-nocheck — DRAFT bridge merge: v1.4.0 projector pattern needs full BusEvent integration with main; see RESUME_BRIDGE_MERGE.md
 import z from "zod"
 import sessionProjectors from "../session/projectors"
 import { SyncEvent } from "@/sync"

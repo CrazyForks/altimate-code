@@ -1,4 +1,4 @@
-// @ts-nocheck — DRAFT bridge merge: boundary issues with v1.4.0; resolve in followup PR
+// @ts-nocheck — DRAFT bridge merge: deep v1.4.0 API drift (plugin slots, Theme.has, SDK.FileDiff, store types); needs ecosystem upgrade
 import type { ParsedKey } from "@opentui/core"
 import type { TuiDialogSelectOption, TuiPluginApi, TuiRouteDefinition, TuiSlotProps } from "@opencode-ai/plugin/tui"
 import type { useCommandDialog } from "@tui/component/dialog-command"

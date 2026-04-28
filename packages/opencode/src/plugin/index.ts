@@ -1,4 +1,3 @@
-// @ts-nocheck — DRAFT bridge merge: boundary issues with v1.4.0; resolve in followup PR
 import type { Hooks, PluginInput, Plugin as PluginInstance } from "@opencode-ai/plugin"
 import { Config } from "../config/config"
 import { Bus } from "../bus"
@@ -126,8 +125,10 @@ export namespace Plugin {
 
   export async function trigger<
     Name extends Exclude<keyof Required<Hooks>, "auth" | "event" | "tool">,
-    Input = Parameters<Required<Hooks>[Name]>[0],
-    Output = Parameters<Required<Hooks>[Name]>[1],
+    // altimate_change start — bridge merge: extract param types via fallback to (...args:any)=>any
+    Input = Required<Hooks>[Name] extends (...args: any) => any ? Parameters<Required<Hooks>[Name]>[0] : never,
+    Output = Required<Hooks>[Name] extends (...args: any) => any ? Parameters<Required<Hooks>[Name]>[1] : never,
+    // altimate_change end
   >(name: Name, input: Input, output: Output): Promise<Output> {
     if (!name) return output
     for (const hook of await state().then((x) => x.hooks)) {

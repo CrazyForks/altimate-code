@@ -1,4 +1,3 @@
-// @ts-nocheck — DRAFT bridge merge: boundary issues with v1.4.0; resolve in followup PR
 import { BusEvent } from "@/bus/bus-event"
 import path from "path"
 import z from "zod"

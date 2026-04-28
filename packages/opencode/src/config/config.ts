@@ -1,4 +1,3 @@
-// @ts-nocheck — DRAFT bridge merge: boundary issues with v1.4.0; resolve in followup PR
 import { Log } from "../util/log"
 import path from "path"
 import { pathToFileURL, fileURLToPath } from "url"
@@ -561,6 +560,12 @@ export namespace Config {
   // in main; added here so these v1.4.0 files don't crash at runtime.
   export type PluginOptions = Record<string, unknown>
   export type PluginSpec = string | [string, PluginOptions]
+  export type PluginScope = "global" | "local"
+  export type PluginOrigin = {
+    spec: PluginSpec
+    source: string
+    scope: PluginScope
+  }
 
   export function pluginSpecifier(plugin: PluginSpec): string {
     return Array.isArray(plugin) ? plugin[0] : plugin

@@ -22,6 +22,14 @@ export namespace Flag {
   // altimate_change start - ALTIMATE_CLI_CLIENT flag with OPENCODE_CLIENT fallback
   export declare const ALTIMATE_CLI_CLIENT: string
   // altimate_change end
+  // altimate_change start — bridge merge: declare flags installed via Object.defineProperty at file bottom
+  export declare const OTEL_EXPORTER_OTLP_ENDPOINT: string | undefined
+  export declare const OTEL_EXPORTER_OTLP_HEADERS: string | undefined
+  export declare const OPENCODE_AUTO_HEAP_SNAPSHOT: boolean
+  export declare const OPENCODE_PLUGIN_META_FILE: string | undefined
+  export declare const OPENCODE_DISABLE_EMBEDDED_WEB_UI: boolean
+  export declare const OPENCODE_PURE: boolean
+  // altimate_change end
   export const OPENCODE_AUTO_SHARE = truthy("OPENCODE_AUTO_SHARE")
   export const OPENCODE_GIT_BASH_PATH = process.env["OPENCODE_GIT_BASH_PATH"]
   export const OPENCODE_CONFIG = process.env["OPENCODE_CONFIG"]
@@ -182,5 +190,44 @@ Object.defineProperty(Flag, "ALTIMATE_CLI_CLIENT", {
   },
   enumerable: true,
   configurable: false,
+})
+// altimate_change end
+
+// altimate_change start — bridge merge: flags referenced by v1.4.0 modules we kept
+// (oltp.ts, heap.ts, plugin/meta.ts, server/instance.ts, tui/plugin/runtime.ts).
+// All are env-driven booleans/strings with sensible defaults so missing env =
+// off behavior matches what those callers expect.
+Object.defineProperty(Flag, "OTEL_EXPORTER_OTLP_ENDPOINT", {
+  get() { return process.env["OTEL_EXPORTER_OTLP_ENDPOINT"] },
+  enumerable: true, configurable: false,
+})
+Object.defineProperty(Flag, "OTEL_EXPORTER_OTLP_HEADERS", {
+  get() { return process.env["OTEL_EXPORTER_OTLP_HEADERS"] },
+  enumerable: true, configurable: false,
+})
+Object.defineProperty(Flag, "OPENCODE_AUTO_HEAP_SNAPSHOT", {
+  get() {
+    const v = process.env["OPENCODE_AUTO_HEAP_SNAPSHOT"]?.toLowerCase()
+    return v === "true" || v === "1"
+  },
+  enumerable: true, configurable: false,
+})
+Object.defineProperty(Flag, "OPENCODE_PLUGIN_META_FILE", {
+  get() { return process.env["OPENCODE_PLUGIN_META_FILE"] },
+  enumerable: true, configurable: false,
+})
+Object.defineProperty(Flag, "OPENCODE_DISABLE_EMBEDDED_WEB_UI", {
+  get() {
+    const v = process.env["OPENCODE_DISABLE_EMBEDDED_WEB_UI"]?.toLowerCase()
+    return v === "true" || v === "1"
+  },
+  enumerable: true, configurable: false,
+})
+Object.defineProperty(Flag, "OPENCODE_PURE", {
+  get() {
+    const v = process.env["OPENCODE_PURE"]?.toLowerCase()
+    return v === "true" || v === "1"
+  },
+  enumerable: true, configurable: false,
 })
 // altimate_change end

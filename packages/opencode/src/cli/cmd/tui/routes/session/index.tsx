@@ -1,4 +1,3 @@
-// @ts-nocheck — DRAFT bridge merge: boundary issues with v1.4.0; resolve in followup PR
 import {
   batch,
   createContext,
@@ -1501,7 +1500,6 @@ function TextPart(props: { last: boolean; part: TextPart; message: AssistantMess
               streaming={!props.message.time.completed}
               content={trimmed()}
               conceal={ctx.conceal()}
-              // @ts-expect-error — fg works at runtime (opentui commit 157193a) but MarkdownOptions types not yet updated
               fg={theme.text}
             />
             {/* altimate_change end */}

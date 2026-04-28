@@ -1,4 +1,3 @@
-// @ts-nocheck — DRAFT bridge merge: boundary issues with v1.4.0; resolve in followup PR
 import { BoxRenderable, TextareaRenderable, MouseEvent, PasteEvent, t, dim, fg } from "@opentui/core"
 import { createEffect, createMemo, type JSX, onMount, createSignal, onCleanup, on, Show, Switch, Match } from "solid-js"
 import "opentui-spinner/solid"
@@ -170,7 +169,7 @@ export function Prompt(props: PromptProps) {
       if (msg.agent && isPrimaryAgent) {
         local.agent.set(msg.agent)
         if (msg.model) local.model.set(msg.model)
-        if (msg.variant) local.model.variant.set(msg.variant)
+        if (msg.model?.variant) local.model.variant.set(msg.model.variant)
       }
     }
   })
@@ -1025,7 +1024,8 @@ export function Prompt(props: PromptProps) {
                 // Normalize line endings at the boundary
                 // Windows ConPTY/Terminal often sends CR-only newlines in bracketed paste
                 // Replace CRLF first, then any remaining CR
-                const normalizedText = event.text.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
+                const pastedText = new TextDecoder().decode(event.bytes)
+                const normalizedText = pastedText.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
                 const pastedContent = normalizedText.trim()
                 if (!pastedContent) {
                   command.trigger("prompt.paste")

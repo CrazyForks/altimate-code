@@ -1,4 +1,3 @@
-// @ts-nocheck — DRAFT bridge merge: boundary issues with v1.4.0; resolve in followup PR
 import { BusEvent } from "@/bus/bus-event"
 import { Bus } from "@/bus"
 import { Session } from "."
@@ -304,7 +303,7 @@ When constructing the summary, try to stick to this template:
       tools: {},
       system: [],
       messages: [
-        ...MessageV2.toModelMessages(messages, model, { stripMedia: true }),
+        ...(await MessageV2.toModelMessages(messages, model, { stripMedia: true })),
         {
           role: "user",
           content: [

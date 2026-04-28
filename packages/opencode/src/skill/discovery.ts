@@ -3,6 +3,7 @@ import { Effect, Layer, Path, Schema, ServiceMap } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { withTransientReadRetry } from "@/util/effect-http-client"
 import { AppFileSystem } from "@/filesystem"
+import { makeRuntime } from "@/effect/run-service"
 import { Global } from "../global"
 import { Log } from "../util/log"
 
@@ -113,4 +114,11 @@ export namespace Discovery {
     Layer.provide(AppFileSystem.defaultLayer),
     Layer.provide(NodePath.layer),
   )
+
+  // altimate_change start — bridge merge: top-level async wrapper for skill loader
+  const { runPromise } = makeRuntime(Service, defaultLayer)
+  export async function pull(url: string): Promise<string[]> {
+    return runPromise((service) => service.pull(url))
+  }
+  // altimate_change end
 }

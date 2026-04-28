@@ -1,4 +1,3 @@
-// @ts-nocheck — DRAFT bridge merge: boundary issues with v1.4.0; resolve in followup PR
 import { describeRoute, resolver, validator } from "hono-openapi"
 import { Hono } from "hono"
 import { proxy } from "hono/proxy"
@@ -47,7 +46,7 @@ export const InstanceRoutes = (upgrade: UpgradeWebSocket, app: Hono = new Hono()
   app
     .onError(errorHandler(log))
     .route("/project", ProjectRoutes())
-    .route("/pty", PtyRoutes(upgrade))
+    .route("/pty", PtyRoutes())
     .route("/config", ConfigRoutes())
     .route("/experimental", ExperimentalRoutes())
     .route("/session", SessionRoutes())

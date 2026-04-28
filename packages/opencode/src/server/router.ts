@@ -1,4 +1,3 @@
-// @ts-nocheck — DRAFT bridge merge: boundary issues with v1.4.0; resolve in followup PR
 import type { MiddlewareHandler } from "hono"
 import type { UpgradeWebSocket } from "hono/ws"
 import { getAdaptor } from "@/control-plane/adaptors"

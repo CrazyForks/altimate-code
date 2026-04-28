@@ -1,4 +1,3 @@
-// @ts-nocheck — DRAFT bridge merge: boundary issues with v1.4.0; resolve in followup PR
 import type { MiddlewareHandler } from "hono"
 import { Flag } from "../flag/flag"
 import { getAdaptor } from "./adaptors"
@@ -28,7 +27,10 @@ async function routeRequest(req: Request) {
 
   const adaptor = await getAdaptor(workspace.type)
 
-  return adaptor.fetch(workspace, `${new URL(req.url).pathname}${new URL(req.url).search}`, {
+  // altimate_change start — bridge merge: Adaptor.fetch is a v1.4.0-only API
+  // not in main's Adaptor type; cast to bypass until we add fetch() to Adaptor.
+  return (adaptor as any).fetch(workspace, `${new URL(req.url).pathname}${new URL(req.url).search}`, {
+  // altimate_change end
     method: req.method,
     body: req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer(),
     signal: req.signal,
