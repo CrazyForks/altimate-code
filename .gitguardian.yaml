@@ -1,0 +1,7 @@
+version: 2
+
+# Files explicitly listing credential/secret file *names* for defensive purposes
+# (so the agent's protected-file checks know not to read/write them). These
+# string literals are file paths, not secrets — false positives.
+paths-ignore:
+  - packages/opencode/src/file/protected.ts
