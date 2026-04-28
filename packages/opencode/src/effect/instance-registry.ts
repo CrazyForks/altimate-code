@@ -1,4 +1,4 @@
-const disposers = new Set<(directory: string) => Promise<void>>()
+export const disposers = new Set<(directory: string) => Promise<void>>()
 
 export function registerDisposer(disposer: (directory: string) => Promise<void>) {
   disposers.add(disposer)

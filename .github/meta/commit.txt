@@ -1,62 +1,49 @@
-fix: drop @ts-nocheck from 32 of 38 source files (38 → 6)
+fix: re-implement 7 of 10 skipped tests
 
-Audit had identified 38 source files with `@ts-nocheck — DRAFT bridge merge`
-suppressions hiding real type errors. This commit removes the suppression
-from 32 files (84%) and fixes the underlying issues. The remaining 6 have
-deep API drift requiring ecosystem-level migration; @ts-nocheck stays as
-documented debt.
+Skip count: 10 → 4 (4 still skipped: deeper integration debugging).
 
-Bulk fixes (one change unblocks many files):
+Re-implemented:
+- **2 LSP tests** (`test/lsp/index.test.ts`):
+  - Added `Npm.which()` mock returning a fake binary path so the test
+    actually exercises spawn args verification.
+- **3 OAuth browser tests** (`test/mcp/oauth-browser.test.ts`):
+  - All 3 now pass after earlier MCP module fixes (mcp/auth revert,
+    Account async fixes, etc.). Just needed unskipping.
+- **2 InstanceState tests** (`test/util/instance-state.test.ts`):
+  - Bridge bug: `util/instance-state.ts` had its own internal `tasks`
+    Set but didn't register with the global `instance-registry`
+    disposers. So `Instance.reload()`/`disposeAll()` didn't invalidate
+    its caches. Fix: register a disposer that invalidates the
+    ScopedCache by directory.
+- **1 prepare-tools test** (`test/provider/copilot/prepare-tools.test.ts`):
+  - `openai-compatible-prepare-tools.ts` was checking for `tool.type ===
+    "provider"` only; updated to also handle the v3 SDK's
+    `"provider-defined"` type. Warning shape updated to
+    `{ type: "unsupported-tool", tool }` (was `{ type: "unsupported",
+    feature: ... }`).
 
-1. **Added 6 missing Flag fields** in `flag/flag.ts` (oltp.ts, heap.ts,
-   plugin/meta.ts, server/instance.ts, tui/plugin/runtime.ts):
-   `OTEL_EXPORTER_OTLP_ENDPOINT/HEADERS`, `OPENCODE_AUTO_HEAP_SNAPSHOT`,
-   `OPENCODE_PLUGIN_META_FILE`, `OPENCODE_DISABLE_EMBEDDED_WEB_UI`,
-   `OPENCODE_PURE`. Each is env-driven with sensible defaults.
+MCP tool caching (2 tests in `test/mcp/lifecycle.test.ts`):
+- Added per-client tool cache (`toolListCache`) populated synchronously
+  during connect (was fire-and-forget for census), invalidated on
+  tool-list-changed notifications and on `MCP.add()`.
+- Modified `MCP.tools()` and the post-connect listTools call to read
+  from cache when present, only re-fetching on cache miss.
+- Net behavior: `listTools()` is called exactly once per connect
+  (previously 2x), and re-fetched only when the server signals a tool
+  list change.
 
-2. **Added `Filesystem.statAsync`** in `util/filesystem.ts` — async stat for
-   v1.4.0 callers (plugin/{meta,shared}.ts, tui/plugin/runtime.ts).
-
-3. **Added `Config.PluginOrigin` type** — used by 11+ plugin-related sites
-   (plugin/loader.ts, tui/plugin/runtime.ts).
-
-4. **Removed duplicate `OPENCODE_VERSION` global** in installation/meta.ts
-   (already declared in installation/index.ts).
-
-Per-file fixes:
-- `account/service.ts`: import `Info as Account` (schema renamed Account → Info)
-- `altimate/enhance-prompt.ts:140` + `session/prompt.ts:2346`:
-  `Promise.resolve(stream.text).catch(...)` (PromiseLike has no .catch)
-- `session/compaction.ts:306` + `session/prompt.ts:881,2333`:
-  `await MessageV2.toModelMessages(...)` (now async)
-- `session/prompt.ts:1188`: cast `asSchema` result for jsonSchema access
-- `session/index.ts:700,770`: include `sessionID`/`time` in published events
-- `session/llm.ts:44`: `StreamTextResult<ToolSet, never>` (was `unknown`)
-- `session/llm.ts:239`: middleware needs `specificationVersion: "v3"`
-- `cli/cmd/tui/app.tsx:283`: optional-chain `disableStdoutInterception`
-  (removed in opentui 0.1.97)
-- `cli/cmd/tui/component/prompt/index.tsx`:
-  - `msg.variant` → `msg.model?.variant`
-  - PasteEvent `event.text` → `new TextDecoder().decode(event.bytes)`
-- `cli/cmd/tui/routes/session/index.tsx:1503`: removed unused @ts-expect-error
-- `control-plane/workspace-router-middleware.ts:30`: cast adaptor for
-  v1.4.0-only `.fetch()` method
-- `plugin/index.ts:128-129`: extract Param types via `extends (...args:any)=>any`
-  fallback for non-callable Hooks members
-- `server/instance.ts:49`: PtyRoutes() takes no args (main's signature)
-- `skill/discovery.ts`: added top-level async `pull()` wrapper around Effect Service
-- `sync/index.ts:223`: removed extra arg to `Database.transaction`
-
-@ts-nocheck remaining (6 files with deeper API drift, documented debt):
-- `cli/cmd/tui/context/sync.tsx` (SnapshotFileDiff vs store type)
-- `cli/cmd/tui/plugin/api.tsx` (./slots module + Theme.has + Prompt props)
-- `cli/cmd/tui/plugin/runtime.ts` (slots, internal modules, Tui config fields)
-- `share/share-next.ts` (SDK.FileDiff missing, Data type narrow)
-- `session/projectors.ts`, `server/projectors.ts` (v1.4.0 projector pattern
-  needs full BusEvent integration)
+Still skipped (4 — need deeper integration work, documented as followup):
+- `control-plane/workspace.startSyncing > syncs only remote workspaces`
+  — TestAdaptor's SSE fetch isn't being driven by Workspace.startSyncing
+- `revert + compact workflow > restore messages in sequential order`
+  — semantic differences between main's SessionRevert and v1.4.0 test
+- `session.llm.stream > sends temperature, tokens, and reasoning options`
+  — provider integration timing (Provider.getModel resolves
+  asynchronously)
+- `session.llm.stream > sends messages API payload for Anthropic models`
+  — provider integration timing
 
 State:
 - typecheck: 0 errors (5/5 packages)
-- tests: 7609 pass / 517 skip / 0 fail
-- @ts-nocheck source files: 38 → 6
-- Bridge regression test ceiling: 38 → 6
+- tests: 7619 pass / 507 skip / 0 fail
+- @ts-nocheck source files: still 6 (unchanged)

@@ -41,7 +41,7 @@ describe("prepareTools", () => {
     expect(result.toolWarnings).toEqual([])
   })
 
-  test.skip("provider-defined tool emits unsupported-tool warning", () => {
+  test("provider-defined tool emits unsupported-tool warning", () => {
     const providerTool = {
       type: "provider-defined" as const,
       id: "some.provider-tool" as `${string}.${string}`,

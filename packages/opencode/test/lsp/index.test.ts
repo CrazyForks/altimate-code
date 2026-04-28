@@ -55,13 +55,19 @@ describe("lsp.spawn", () => {
     }
   })
 
-  test.skip("spawns builtin Typescript LSP with correct arguments", async () => {
+  test("spawns builtin Typescript LSP with correct arguments", async () => {
     await using tmp = await tmpdir()
 
     // Create dummy tsserver to satisfy Module.resolve
     const tsdk = path.join(tmp.path, "node_modules", "typescript", "lib")
     await fs.mkdir(tsdk, { recursive: true })
     await fs.writeFile(path.join(tsdk, "tsserver.js"), "")
+
+    // Mock Npm.which to return a fake binary path so spawn() actually runs
+    const npmModule = await import("../../src/npm")
+    const whichSpy = spyOn(npmModule.Npm, "which").mockResolvedValue(
+      "/fake/path/typescript-language-server",
+    )
 
     const spawnSpy = spyOn(launch, "spawn").mockImplementation(
       () =>
@@ -90,10 +96,11 @@ describe("lsp.spawn", () => {
       expect(args).toContain("off")
     } finally {
       spawnSpy.mockRestore()
+      whichSpy.mockRestore()
     }
   })
 
-  test.skip("spawns builtin Typescript LSP with --ignore-node-modules if no config is found", async () => {
+  test("spawns builtin Typescript LSP with --ignore-node-modules if no config is found", async () => {
     await using tmp = await tmpdir()
 
     // Create dummy tsserver to satisfy Module.resolve
@@ -102,6 +109,11 @@ describe("lsp.spawn", () => {
     await fs.writeFile(path.join(tsdk, "tsserver.js"), "")
 
     // NO tsconfig.json or jsconfig.json created here
+
+    const npmModule = await import("../../src/npm")
+    const whichSpy = spyOn(npmModule.Npm, "which").mockResolvedValue(
+      "/fake/path/typescript-language-server",
+    )
 
     const spawnSpy = spyOn(launch, "spawn").mockImplementation(
       () =>
@@ -128,6 +140,7 @@ describe("lsp.spawn", () => {
       expect(args).toContain("--ignore-node-modules")
     } finally {
       spawnSpy.mockRestore()
+      whichSpy.mockRestore()
     }
   })
 })
