@@ -138,6 +138,7 @@ export type UserMessage = {
     [key: string]: boolean
   }
   variant?: string
+  headless?: boolean
 }
 
 export type ProviderAuthError = {
@@ -3284,6 +3285,7 @@ export type SessionPromptData = {
     format?: OutputFormat
     system?: string
     variant?: string
+    headless?: boolean
     parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
   }
   path: {
@@ -3484,6 +3486,7 @@ export type SessionPromptAsyncData = {
     format?: OutputFormat
     system?: string
     variant?: string
+    headless?: boolean
     parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
   }
   path: {
