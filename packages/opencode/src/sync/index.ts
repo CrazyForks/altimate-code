@@ -92,6 +92,12 @@ export namespace SyncEvent {
 
     registry.set(versionedType(def.type, def.version), def)
 
+    // altimate_change start — also register in BusEvent registry so events appear in
+    // BusEvent.payloads() (used by /global/event SDK schema). Without this, SDK consumers
+    // cannot match SyncEvent-defined events like "message.updated" by name.
+    BusEvent.define(def.type, def.properties || def.schema)
+    // altimate_change end
+
     return def
   }
 

@@ -1,4 +1,3 @@
-// @ts-nocheck — DRAFT bridge merge: tool-approval-* parts require v3 @ai-sdk; runtime behavior preserved via discriminator checks
 import type { ModelMessage } from "ai"
 import { mergeDeep, unique } from "remeda"
 import type { JSONSchema7 } from "@ai-sdk/provider"
@@ -221,15 +220,18 @@ export namespace ProviderTransform {
 
       if (shouldUseContentOptions) {
         const lastContent = msg.content[msg.content.length - 1]
+        // altimate_change start — guard against v3-only tool-approval-* parts; runtime check, no v2 type union match
+        const lastType = (lastContent as { type?: string } | undefined)?.type
         if (
           lastContent &&
           typeof lastContent === "object" &&
-          lastContent.type !== "tool-approval-request" &&
-          lastContent.type !== "tool-approval-response"
+          lastType !== "tool-approval-request" &&
+          lastType !== "tool-approval-response"
         ) {
           lastContent.providerOptions = mergeDeep(lastContent.providerOptions ?? {}, providerOptions)
           continue
         }
+        // altimate_change end
       }
 
       msg.providerOptions = mergeDeep(msg.providerOptions ?? {}, providerOptions)
@@ -310,9 +312,12 @@ export namespace ProviderTransform {
           ...msg,
           providerOptions: remap(msg.providerOptions),
           content: msg.content.map((part) => {
-            if (part.type === "tool-approval-request" || part.type === "tool-approval-response") {
+            // altimate_change start — guard against v3-only tool-approval-* parts; runtime check, no v2 type union match
+            const partType = (part as { type?: string }).type
+            if (partType === "tool-approval-request" || partType === "tool-approval-response") {
               return { ...part }
             }
+            // altimate_change end
             return { ...part, providerOptions: remap(part.providerOptions) }
           }),
         } as typeof msg

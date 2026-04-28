@@ -1,4 +1,3 @@
-// @ts-nocheck — DRAFT bridge merge: v1.4.0 projector pattern needs full BusEvent integration with main; see RESUME_BRIDGE_MERGE.md
 import { NotFoundError, eq, and } from "../storage/db"
 import { SyncEvent } from "@/sync"
 import { Session } from "./index"
@@ -63,24 +62,28 @@ export function toPartialRow(info: DeepPartial<Session.Info>) {
 }
 
 export default [
-  SyncEvent.project(Session.Event.Created, (db, data) => {
+  // altimate_change start — Session.Event.* are BusEvent.define (not SyncEvent), so these projectors are dead code.
+  // Kept for future migration to event-sourcing; cast as any to bypass SyncEvent.Definition shape mismatch.
+  // Bug fix: data.sessionID was always undefined (BusEvent payload is just { info }) — use data.info.id.
+  SyncEvent.project(Session.Event.Created as any, (db, data: { info: Session.Info }) => {
     db.insert(SessionTable).values(Session.toRow(data.info)).run()
   }),
 
-  SyncEvent.project(Session.Event.Updated, (db, data) => {
+  SyncEvent.project(Session.Event.Updated as any, (db, data: { info: Session.Info }) => {
     const info = data.info
     const row = db
       .update(SessionTable)
       .set(toPartialRow(info))
-      .where(eq(SessionTable.id, data.sessionID))
+      .where(eq(SessionTable.id, info.id))
       .returning()
       .get()
-    if (!row) throw new NotFoundError({ message: `Session not found: ${data.sessionID}` })
+    if (!row) throw new NotFoundError({ message: `Session not found: ${info.id}` })
   }),
 
-  SyncEvent.project(Session.Event.Deleted, (db, data) => {
-    db.delete(SessionTable).where(eq(SessionTable.id, data.sessionID)).run()
+  SyncEvent.project(Session.Event.Deleted as any, (db, data: { info: Session.Info }) => {
+    db.delete(SessionTable).where(eq(SessionTable.id, data.info.id)).run()
   }),
+  // altimate_change end
 
   SyncEvent.project(MessageV2.Event.Updated, (db, data) => {
     const time_created = data.info.time.created

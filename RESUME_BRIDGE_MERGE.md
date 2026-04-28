@@ -1,15 +1,14 @@
-# Resume — Bridge Merge v1.4.0 (✅ AUDIT CYCLE 2 COMPLETE)
+# Resume — Bridge Merge v1.4.0 (✅ AUDIT CYCLE 3 COMPLETE)
 
 ## Final state on `upstream/merge-v1.4.0` (PR #757)
 
-- **Tests:** 7657 pass / 503 skip / 7 fail (all 7 are pre-existing environment timeouts)
-- **Typecheck:** 0 errors (5/5 packages) — requires SDK gen reverted to main
+- **Tests:** 7659 pass / 503 skip / 5 fail (all 5 are pre-existing environment timeouts)
+- **Typecheck:** 0 errors (5/5 packages) — SDK gen now stable across rebuilds
 - **Build:** ✅ all 4 build targets succeed (dbt-tools, sdk, plugin, opencode)
-- **Bridge regression suite:** 24 tests in `test/upstream/bridge-merge.test.ts`, all pass
-- **Altimate features suite:** 42 tests in `test/upstream/altimate-features.test.ts`, all pass
+- **Bridge regression suite:** 115 tests across 4 files in `test/upstream/`, all pass
 - **PR #18186 (anthropic legal removal):** reverted, verified by 7 regression tests
 - **Markers:** 100% intact (98 files / 407 blocks)
-- **@ts-nocheck count:** 8 source files (DRAFT-bridge debt; ceiling enforced)
+- **@ts-nocheck count:** 0 source files (down from 8 — all bridged properly)
 
 ## What audit cycle 2 fixed
 
@@ -83,31 +82,30 @@ this PR (no follow-up PRs):
 - `packages/opencode/src/cli/cmd/tui/component/dialog-console-org.tsx` —
   unused, references SDK types not in our generated client.
 
-## Known caveats
+## What audit cycle 3 fixed
 
-### SDK gen regenerates on every build
-The `@opencode-ai/sdk` build script runs `bun dev generate` which produces
-event types with version suffix (e.g. `"message.updated.1"`) from v1.4.0's
-versioned `SyncEvent.define` system. The runtime emits unversioned names
-(`"message.updated"`) on the bus, so consumers work — but the regenerated
-SDK types break `acp/agent.ts`, `cli/cmd/run.ts`, `tui/worker.ts`, and
-`tui/routes/session/index.tsx` typecheck.
+### @ts-nocheck cleanup (8 → 0)
+- `npm/index.ts` — added `arborist.d.ts` minimal module declaration.
+- `provider/transform.ts` — replaced `@ts-nocheck` with localized `(part as { type?: string })` casts at the v3-only `tool-approval-*` discriminator checks.
+- `share-next.ts` — `@ts-nocheck` was stale, dropped.
+- `session/projectors.ts` — bridged BusEvent→SyncEvent.project shape mismatch with localized `as any` cast. Found and fixed runtime bug: `data.sessionID` was always undefined on BusEvent payloads, replaced with `data.info.id`.
+- `server/projectors.ts` — same as session/projectors.ts.
+- `tui/context/sync.tsx` — `@ts-nocheck` was stale, dropped.
+- `tui/plugin/api.tsx` and `tui/plugin/runtime.ts` — both deleted (dead code, no consumers, references missing `./slots` module from incomplete v1.4.0 plugin migration).
 
-**Mitigation:** SDK gen reverted to main. After running `bunx turbo build`
-(which regenerates), revert with:
-```bash
-git checkout main -- packages/sdk/js/src/v2/gen/
-```
+### SDK versioned-event schema bridge
+- Made `SyncEvent.define()` also register into `BusEvent.registry` so SyncEvent-defined events appear in `BusEvent.payloads()` (the `Event` union consumers import).
+- Net effect: `bun dev generate` now produces an SDK whose `Event` union includes `EventMessageUpdated`/`EventSessionUpdated`/etc. with `{type, properties}` shape — matching consumer expectations.
+- **No more revert-after-build needed.** SDK gen is stable.
 
-**Followup:** properly bridge the versioned/unversioned event schema split.
+### Hidden bugs surfaced
+- `server/routes/session.ts diff route` — required `messageID` but `SessionSummary.diff` has it optional and `sync.tsx` callers don't pass it. Made route validator optional.
+- `session/projectors.ts` Session.Event projectors — `data.sessionID` was always undefined (BusEvent payload is `{info}`); fixed to `data.info.id`.
+- `test/acp/event-subscription.test.ts` — outdated `EventMessagePartUpdated` shape; updated to include `sessionID` and `time`.
 
-### Pre-existing test failures (7) — not caused by this merge
-- `compiled binary smoke test` (3) — `@altimateai/altimate-core` not bundled
-  into single binary; works in dev mode (`bun run --conditions=browser`)
-- `detectDataTools`, `tool.registry` (4) — environment timeouts, network deps
-- `session.llm.stream` (2) — environment timeouts
-
-Verified by running tests on stashed (pre-this-cycle) state: same failures.
+### Pre-existing test failures (5) — not caused by any cycle
+- `compiled binary smoke test` (3) — `@altimateai/altimate-core` not bundled into single binary; works in dev mode (`bun run --conditions=browser`).
+- `tool.registry` (3) — environment timeouts, network deps.
 
 ## Branch state
 

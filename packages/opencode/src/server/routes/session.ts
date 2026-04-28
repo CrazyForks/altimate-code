@@ -442,7 +442,9 @@ export const SessionRoutes = lazy(() =>
       validator(
         "query",
         z.object({
-          messageID: MessageID.zod,
+          // altimate_change start — messageID optional matches SessionSummary.diff impl + sync.tsx callers
+          messageID: MessageID.zod.optional(),
+          // altimate_change end
         }),
       ),
       async (c) => {
