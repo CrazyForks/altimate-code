@@ -194,15 +194,23 @@ export namespace Database {
     }
   }
 
-  export function transaction<T>(callback: (tx: TxOrDb) => T): T {
+  // altimate_change start — pass-through `behavior` option (deferred|immediate|exclusive).
+  // SyncEvent.run requires "immediate" to safely read-then-write the event sequence.
+  export type TransactionConfig = { behavior?: "deferred" | "immediate" | "exclusive" }
+  // altimate_change end
+
+  export function transaction<T>(callback: (tx: TxOrDb) => T, config?: TransactionConfig): T {
     try {
       return callback(ctx.use().tx)
     } catch (err) {
       if (err instanceof Context.NotFound) {
         const effects: (() => void | Promise<void>)[] = []
-        const result = (Client().transaction as any)((tx: TxOrDb) => {
-          return ctx.provide({ tx, effects }, () => callback(tx))
-        })
+        const result = (Client().transaction as any)(
+          (tx: TxOrDb) => {
+            return ctx.provide({ tx, effects }, () => callback(tx))
+          },
+          config,
+        )
         for (const effect of effects) effect()
         return result
       }

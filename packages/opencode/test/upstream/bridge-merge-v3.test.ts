@@ -792,3 +792,46 @@ describe("bridge merge cycle 4: error path exit codes", () => {
     expect(removeBlockMatch![0]).not.toMatch(/process\.exit\(\s*1\s*\)/)
   })
 })
+
+describe("bridge merge cycle 5: SyncEvent immediate transaction", () => {
+  test("Database.transaction accepts behavior option", async () => {
+    const content = await readText(path.join(srcDir, "storage", "db.ts"))
+    // Cycle 5 added the TransactionConfig pass-through so SyncEvent.run can request
+    // SQLite IMMEDIATE mode. Without this, the comment "this is an immediate transaction
+    // which is critical" in sync/index.ts would be a lie — race condition on concurrent
+    // event sequence reads/writes.
+    expect(content).toMatch(/TransactionConfig\s*=\s*\{\s*behavior\?:/)
+    expect(content).toMatch(/transaction<T>\(callback:.*config\?:\s*TransactionConfig/)
+  })
+
+  test("SyncEvent.run requests behavior:immediate transaction", async () => {
+    const content = await readText(path.join(srcDir, "sync", "index.ts"))
+    // Strip block comments to ensure the assertion targets active code
+    const active = content.replace(/\/\*[\s\S]*?\*\//g, "")
+    expect(active).toMatch(/Database\.transaction\(\s*\([\s\S]{50,800}\{\s*behavior:\s*"immediate"\s*\},?\s*\)/)
+  })
+})
+
+describe("bridge merge cycle 5: Account/Auth Service identifier deduplication", () => {
+  test("account/service.ts is deleted (was duplicate Service registration)", async () => {
+    // service.ts duplicated `@opencode/Account` identifier with index.ts's Service.
+    // Its only consumer was effect/runtime.ts (also dead code). Both removed in cycle 5.
+    const exists = await Bun.file(path.join(srcDir, "account", "service.ts")).exists()
+    expect(exists).toBe(false)
+  })
+
+  test("effect/runtime.ts is deleted (was orphaned)", async () => {
+    const exists = await Bun.file(path.join(srcDir, "effect", "runtime.ts")).exists()
+    expect(exists).toBe(false)
+  })
+
+  test("auth/index.ts uses distinct Service identifier from auth/service.ts", async () => {
+    // Both files have a Service definition; cycle 5 renamed the index.ts one to
+    // `@opencode/Auth.cli` so a future Layer.mergeAll cannot silently overwrite.
+    const content = await readText(path.join(srcDir, "auth", "index.ts"))
+    expect(content).toMatch(/ServiceMap\.Service<Service, Interface>\(\)\("@opencode\/Auth\.cli"\)/)
+    // auth/service.ts keeps `@opencode/Auth`
+    const serviceContent = await readText(path.join(srcDir, "auth", "service.ts"))
+    expect(serviceContent).toMatch(/ServiceMap\.Service<AuthService[^)]+\)\("@opencode\/Auth"\)/)
+  })
+})

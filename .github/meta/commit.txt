@@ -1,47 +1,57 @@
-fix: bridge merge audit cycle 4 — async drift, plan safety, idempotent registry
+fix: bridge merge audit cycle 5 — sync transaction + service identifier collision
 
-Audit cycle 4 deployed 4 agents with distinct methodologies (diff forensics,
-end-to-end behavior verification, test gap analysis, data integrity) to find
-what cycles 1-3 missed. Three runtime-correctness regressions surfaced and
-were fixed in this PR.
+Surfaced two real bugs by walking the v1.3.17→v1.4.0 diff file-by-file
+(after Part 1 commit-by-commit pass). Cycles 1-4 didn't catch them.
 
-Runtime correctness fixes
-- `SessionStatus.set()` became async in v1.4.0 but **6 callers were unawaited**
-  (data race / state drop on shutdown). Fixed all 6: `prompt.ts` cancel() (×2)
-  and main loop, `processor.ts` stream-start/retry/error-exit. Cancel() itself
-  became async; updated `tool/task.ts` to log unhandled rejections, and changed
-  `prompt.ts` `using _ = defer(...)` to `await using _ = defer(...)` for proper
-  async dispose.
-- `tool/plan.ts PlanExitTool`: v1.4.0 changed reject from `answer !== "Yes"` to
-  `answer === "No"`. Cancel/dismiss/network-drop now silently confirmed the
-  agent transition (unsafe). Reverted to "reject on anything but explicit Yes".
-- `bus/bus-event.ts BusEvent.define`: made idempotent. Cycle 3 made
-  `SyncEvent.define` register into BusEvent registry; if `SyncEvent.init` runs
-  later, it would re-register. Now first registration wins, preventing schema
-  shadowing surprises.
+Bug 1 — sync immediate transaction was silently DEFERRED
+- `Database.transaction()` wrapper in `storage/db.ts` didn't accept any
+  options. Upstream's `SyncEvent.run` calls `Database.transaction(fn,
+  { behavior: "immediate" })` to get SQLite IMMEDIATE locking — needed for
+  the read-then-write event sequence to not race.
+- The comment in `sync/index.ts` even says "this is an 'immediate'
+  transaction which is critical" — but the code never enforced it.
+  Concurrent SyncEvent.run() calls could interleave and produce duplicate
+  sequence numbers / corrupt event log.
+- Added `TransactionConfig` type pass-through to `Database.transaction()`
+  and updated `SyncEvent.run` to actually pass `behavior: "immediate"`.
 
-UX fix
-- `mcp remove <not-found>` exited 0 because `process.exit(1)` inside async
-  Effect chain gets swallowed. Replaced with `process.exitCode = 1; return` so
-  the global `process.exit()` in `index.ts:295` finally honors it. Verified
-  exit code is now 1.
+Bug 2 — duplicate Effect Service identifier `"@opencode/Account"`
+- `account/index.ts` and `account/service.ts` both registered a Service
+  class with id `"@opencode/Account"`. Two parallel ManagedRuntimes ran
+  with the same identifier — undefined merge behavior if anyone ever
+  combined the layers.
+- `account/service.ts`'s only consumer was `effect/runtime.ts`, which
+  itself had zero consumers — pure dead code.
+- Deleted `effect/runtime.ts` and `account/service.ts`. Same shape exists
+  for Auth (`auth/index.ts` + `auth/service.ts` both register
+  `"@opencode/Auth"`) but both are live; renamed `auth/index.ts`'s
+  identifier to `"@opencode/Auth.cli"` to disambiguate.
 
 Tests added (`test/upstream/bridge-merge-v3.test.ts`)
-- `SessionStatus.set` is async (signature lock)
-- All `SessionStatus.set` callers in src use `await` (static scan)
-- `SessionPrompt.cancel` is async
-- `SessionPrompt.prompt` uses `await using` for cancel disposer
-- `PlanExitTool` rejects on anything other than explicit Yes (with comment-strip
-  to avoid false positive on commented-out PlanEnterTool)
-- `BusEvent.define` returns existing definition on repeat call (runtime test)
-- `McpRemoveCommand` uses `process.exitCode` not bare `process.exit(1)`
-
-Updated `test/bus/bus-event.test.ts`: the existing "last define() wins" test now
-asserts "first define() wins (idempotent)" matching the new semantic.
+- `Database.transaction` accepts behavior config (signature lock)
+- `SyncEvent.run` requests `behavior: "immediate"` (regex-asserted)
+- `account/service.ts` and `effect/runtime.ts` stay deleted
+- `auth/index.ts` uses distinct identifier from `auth/service.ts`
 
 Verification
 - Typecheck: 0 errors across 5 packages
-- Tests: 7705 pass / 503 skip / 4 fail (all 4 pre-existing env timeouts)
-- Bridge regression suite: 172 tests across `test/upstream/`, all pass
-- Manual smoke: `mcp --help`, `mcp remove nonexistent` (now exits 1), `--version`
-- Build: SDK regen confirmed stable
+- Tests: 7719 pass / 503 skip / 7 fail (all pre-existing env timeouts)
+- Bridge regression suite: 177 tests across `test/upstream/`, all pass
+
+Coverage of this cycle
+- Part 1 (44 upstream commits): commit-by-commit; 5 real feature gaps,
+  4 intentional skips documented (PDF DnD, alibaba retry, variant_list
+  keybind, tool system refactor #21052, snapshot unified patches #21244)
+- Part 2 (high-risk file dirs): session/, provider/, bus/, sync/,
+  account/, effect/, permission/, mcp/, server/, control-plane/, tool/,
+  plugin/, acp/, agent/, npm/, skill/, storage/, question/, altimate/,
+  cli/cmd/ top-level + spot-checked tui/ (84 files)
+- Skipped: 87 test files, 11 SDK gen, util/lsp/ide/pty (low-risk)
+
+Pre-existing gaps surfaced (NOT this PR's scope)
+- `Format.file()` doesn't exist on altimate main — long-standing gap.
+- `mcp/index.ts` kept main version, didn't migrate to upstream's Effect
+  refactor (1771 lines diff vs upstream).
+- `server/server.ts` still on Bun.serve, Hono refactor #18335 skipped.
+- `@ai-sdk/*`, `@openrouter/ai-sdk-provider`, `@opentui/*` versions held
+  back from upstream bumps (cycle 2 documentation).

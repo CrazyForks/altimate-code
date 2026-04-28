@@ -212,19 +212,25 @@ export namespace SyncEvent {
 
     // Note that this is an "immediate" transaction which is critical.
     // We need to make sure we can safely read and write with nothing
-    // else changing the data from under us
-    Database.transaction((tx) => {
-      const id = EventID.ascending()
-      const row = tx
-        .select({ seq: EventSequenceTable.seq })
-        .from(EventSequenceTable)
-        .where(eq(EventSequenceTable.aggregate_id, agg))
-        .get()
-      const seq = row?.seq != null ? row.seq + 1 : 0
+    // else changing the data from under us.
+    // altimate_change start — pass behavior:"immediate" to actually enforce what the comment claims;
+    // upstream's call passed it but our Database.transaction wrapper had been dropping the option.
+    Database.transaction(
+      (tx) => {
+        const id = EventID.ascending()
+        const row = tx
+          .select({ seq: EventSequenceTable.seq })
+          .from(EventSequenceTable)
+          .where(eq(EventSequenceTable.aggregate_id, agg))
+          .get()
+        const seq = row?.seq != null ? row.seq + 1 : 0
 
-      const event = { id, seq, aggregateID: agg, data }
-      process(def, event, { publish: true })
-    })
+        const event = { id, seq, aggregateID: agg, data }
+        process(def, event, { publish: true })
+      },
+      { behavior: "immediate" },
+    )
+    // altimate_change end
   }
 
   export function remove(aggregateID: string) {

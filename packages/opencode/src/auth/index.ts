@@ -49,7 +49,13 @@ export namespace Auth {
     readonly remove: (key: string) => Effect.Effect<void, AuthError>
   }
 
-  export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/Auth") {}
+  // altimate_change start — disambiguate from `auth/service.ts` AuthService which uses
+  // "@opencode/Auth". Both run in independent ManagedRuntimes today (CLI auth ops vs
+  // provider auth pipeline) but share the same Effect Service identifier — if anyone
+  // ever merges these layers, the duplicate id would silently overwrite. Use a distinct
+  // suffix here so the two services can never collide.
+  export class Service extends ServiceMap.Service<Service, Interface>()("@opencode/Auth.cli") {}
+  // altimate_change end
 
   export const layer = Layer.effect(
     Service,
