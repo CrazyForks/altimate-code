@@ -35,9 +35,11 @@ export function warehouseTypeToDialect(warehouseType: string): string {
 /**
  * Quote a SQL identifier using the correct delimiter for the dialect.
  * Used both for partition column/value quoting and for plain-table-name
- * wrapping inside CTEs (via `resolveTableSources`).
+ * wrapping inside CTEs (via `resolveTableSources`). Exported so other
+ * native handlers (e.g. `detect-join-candidates`) reuse the same
+ * dialect-aware logic instead of hardcoding ANSI quoting.
  */
-function quoteIdentForDialect(identifier: string, dialect: string): string {
+export function quoteIdentForDialect(identifier: string, dialect: string): string {
   switch (dialect) {
     case "mysql":
     case "mariadb":

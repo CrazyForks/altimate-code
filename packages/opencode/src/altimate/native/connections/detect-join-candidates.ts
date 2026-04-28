@@ -12,12 +12,10 @@
  * like `businessref_42`. The inference is purely value-based — it does not
  * inspect column names — so it survives schemas that disagree on naming
  * conventions.
- *
- * The algorithm here is a TypeScript port of `_detect_join_candidates` /
- * `_common_prefix` from dab_bench's preindexer.
  */
 
 import * as Registry from "./registry"
+import { quoteIdentForDialect, warehouseTypeToDialect } from "./data-diff"
 import type { Connector } from "@altimateai/drivers"
 import type {
   AltimateCoreDetectJoinCandidatesParams,
@@ -27,6 +25,8 @@ import type {
 const DEFAULT_SAMPLE_SIZE = 50
 const DEFAULT_MAX_TABLES_PER_CONNECTION = 50
 const SEPARATORS = ["_", "-", ":"] as const
+/** Cap on the number of per-table sampling errors retained per connection. */
+const MAX_PARTIAL_ERRORS_PER_CONNECTION = 20
 
 /**
  * Longest common prefix across `values`, trimmed back to the last separator.
@@ -86,10 +86,13 @@ export interface JoinCandidate {
   prefix_rule: { left: string; right: string }
   suffix_overlap: number
   /**
-   * Confidence proxy in [0, 1]: overlap normalized by the smaller suffix bag.
-   * Cheap and monotonic — not a probability.
+   * Heuristic match score in [0, 1]: `overlap / min(|left_suffixes|, |right_suffixes|)`.
+   * Cheap and monotonic — NOT a probability. Two columns whose handful of
+   * sampled values happen to share a suffix will score 1.0 even if the
+   * underlying tables are mostly disjoint. Treat this as a ranking signal,
+   * not a confidence interval.
    */
-  confidence: number
+  match_score: number
 }
 
 /**
@@ -121,7 +124,7 @@ export function detectJoinCandidatesFromBags(bags: ColumnSampleBag[]): JoinCandi
       if (overlap === 0) continue
 
       const denom = Math.min(lsuf.size, rsuf.size)
-      const confidence = denom > 0 ? overlap / denom : 0
+      const matchScore = denom > 0 ? overlap / denom : 0
 
       candidates.push({
         left_db: left.db,
@@ -132,14 +135,14 @@ export function detectJoinCandidatesFromBags(bags: ColumnSampleBag[]): JoinCandi
         right_col: right.column,
         prefix_rule: { left: lp, right: rp },
         suffix_overlap: overlap,
-        confidence,
+        match_score: matchScore,
       })
     }
   }
 
   candidates.sort((a, b) => {
     if (b.suffix_overlap !== a.suffix_overlap) return b.suffix_overlap - a.suffix_overlap
-    return b.confidence - a.confidence
+    return b.match_score - a.match_score
   })
   return candidates
 }
@@ -169,120 +172,200 @@ function isStringLike(dataType: string | undefined): boolean {
 }
 
 /**
- * Quote a SQL identifier with double quotes — safe for every dialect we ship
- * a driver for. Embedded double-quotes are doubled per ANSI rules.
+ * Build the per-column sampling SQL for a given dialect. Identifier quoting is
+ * dialect-aware (delegates to `quoteIdentForDialect`), and the row cap is
+ * delegated to the driver via `connector.execute(sql, sampleSize)` so each
+ * driver applies its native limit syntax (`LIMIT`, `TOP`, `FETCH FIRST`, ...).
+ *
+ * Extracted into a pure helper so tests can snapshot the SQL per dialect
+ * without going through I/O.
  */
-function quoteIdent(name: string): string {
-  return '"' + name.replace(/"/g, '""') + '"'
+export function buildSampleSql(
+  dialect: string,
+  schema: string | undefined,
+  table: string,
+  column: string,
+): string {
+  const quotedCol = quoteIdentForDialect(column, dialect)
+  const quotedTarget = schema
+    ? `${quoteIdentForDialect(schema, dialect)}.${quoteIdentForDialect(table, dialect)}`
+    : quoteIdentForDialect(table, dialect)
+  return `SELECT ${quotedCol} FROM ${quotedTarget} WHERE ${quotedCol} IS NOT NULL`
+}
+
+/**
+ * Resolve the SQL dialect for a configured warehouse connection. Falls back to
+ * `"generic"` if the connection isn't registered — `quoteIdentForDialect` then
+ * uses ANSI double-quote rules.
+ */
+function resolveDialectForConnection(name: string): string {
+  const cfg = Registry.getConfig(name)
+  return warehouseTypeToDialect(cfg?.type ?? "generic")
 }
 
 /**
  * Fetch up to `sampleSize` non-null string sample values for one column.
- * Returns `[]` on any error so a single bad table never aborts the scan.
+ *
+ * Lets exceptions propagate so callers can attach a (table, column) breadcrumb
+ * to the per-connection partial-error list, rather than silently dropping
+ * permission errors.
  */
 async function fetchColumnSamples(
   connector: Connector,
+  dialect: string,
   schema: string | undefined,
   table: string,
   column: string,
   sampleSize: number,
 ): Promise<string[]> {
-  const target = schema ? `${quoteIdent(schema)}.${quoteIdent(table)}` : quoteIdent(table)
-  const col = quoteIdent(column)
-  const sql = `SELECT ${col} FROM ${target} WHERE ${col} IS NOT NULL LIMIT ${sampleSize}`
-  try {
-    const result = await connector.execute(sql, sampleSize)
-    const out: string[] = []
-    for (const row of result.rows) {
-      const v = row[0]
-      if (typeof v === "string" && v.length > 0) out.push(v)
-    }
-    return out
-  } catch {
-    return []
+  const sql = buildSampleSql(dialect, schema, table, column)
+  const result = await connector.execute(sql, sampleSize)
+  const out: string[] = []
+  for (const row of result.rows) {
+    const v = row[0]
+    if (typeof v === "string" && v.length > 0) out.push(v)
   }
+  return out
+}
+
+interface ConnectionResult {
+  bags: ColumnSampleBag[]
+  /** One entry when the whole connection failed (auth, registry lookup, etc.). */
+  connectionError?: string
+  /** Bounded list of per-(table, column) sampling errors. */
+  partialErrors: string[]
+}
+
+/**
+ * Sample one connection independently. Surfaces three classes of failure:
+ *   1. Connection-level (resolving the connector, listing schemas) → `connectionError`.
+ *   2. Per-table (listTables/describeTable) → recorded in `partialErrors`.
+ *   3. Per-column (the SELECT sample) → recorded in `partialErrors`.
+ */
+async function sampleConnection(
+  name: string,
+  params: AltimateCoreDetectJoinCandidatesParams,
+): Promise<ConnectionResult> {
+  const sampleSize = params.sample_size ?? DEFAULT_SAMPLE_SIZE
+  const maxTables = params.max_tables_per_connection ?? DEFAULT_MAX_TABLES_PER_CONNECTION
+  const bags: ColumnSampleBag[] = []
+  const partialErrors: string[] = []
+  const recordPartialError = (msg: string) => {
+    if (partialErrors.length < MAX_PARTIAL_ERRORS_PER_CONNECTION) partialErrors.push(msg)
+  }
+
+  let connector: Connector
+  try {
+    connector = await Registry.get(name)
+  } catch (e) {
+    return { bags: [], partialErrors: [], connectionError: String(e) }
+  }
+
+  const dialect = resolveDialectForConnection(name)
+
+  let schemas: string[]
+  try {
+    schemas = params.schema_name
+      ? [params.schema_name]
+      : await connector.listSchemas()
+  } catch (e) {
+    return {
+      bags: [],
+      partialErrors: [],
+      connectionError: `Failed to list schemas: ${String(e)}`,
+    }
+  }
+
+  let tablesScanned = 0
+  for (const schema of schemas) {
+    if (tablesScanned >= maxTables) break
+
+    let tables: Array<{ name: string; type: string }>
+    try {
+      tables = await connector.listTables(schema)
+    } catch (e) {
+      recordPartialError(`listTables(${schema}): ${String(e)}`)
+      continue
+    }
+
+    for (const t of tables) {
+      if (tablesScanned >= maxTables) break
+      tablesScanned++
+
+      let columns: Array<{ name: string; data_type: string }>
+      try {
+        const cols = await connector.describeTable(schema, t.name)
+        columns = cols.map((c) => ({ name: c.name, data_type: c.data_type }))
+      } catch (e) {
+        recordPartialError(`describeTable(${schema}.${t.name}): ${String(e)}`)
+        continue
+      }
+
+      for (const c of columns) {
+        if (!isStringLike(c.data_type)) continue
+        try {
+          const values = await fetchColumnSamples(
+            connector,
+            dialect,
+            schema,
+            t.name,
+            c.name,
+            sampleSize,
+          )
+          if (values.length === 0) continue
+          bags.push({
+            db: name,
+            table: `${schema}.${t.name}`,
+            column: c.name,
+            values,
+          })
+        } catch (e) {
+          recordPartialError(`sample(${schema}.${t.name}.${c.name}): ${String(e)}`)
+        }
+      }
+    }
+  }
+
+  return { bags, partialErrors }
 }
 
 /**
  * Build the per-(db,table,column) sample bag list across all `connections`.
  *
- * Errors connecting to or describing one warehouse must not abort the whole
- * run — the caller still wants candidates from the surviving connections.
+ * Connections are sampled in parallel — each connection is independent and the
+ * default 50-tables-per-connection cap keeps the per-connection blast radius
+ * bounded. Connection-level failures are recorded in `errors`; per-table /
+ * per-column failures are surfaced in `partialErrors`.
  */
 export async function collectSampleBags(
   params: AltimateCoreDetectJoinCandidatesParams,
-): Promise<{ bags: ColumnSampleBag[]; errors: Record<string, string> }> {
-  const sampleSize = params.sample_size ?? DEFAULT_SAMPLE_SIZE
-  const maxTables = params.max_tables_per_connection ?? DEFAULT_MAX_TABLES_PER_CONNECTION
+): Promise<{
+  bags: ColumnSampleBag[]
+  errors: Record<string, string>
+  partialErrors: Record<string, string[]>
+}> {
+  const results = await Promise.all(
+    params.connections.map((name) => sampleConnection(name, params)),
+  )
+
   const bags: ColumnSampleBag[] = []
   const errors: Record<string, string> = {}
+  const partialErrors: Record<string, string[]> = {}
 
-  for (const name of params.connections) {
-    try {
-      const connector = await Registry.get(name)
-      const schemas = params.schema_name
-        ? [params.schema_name]
-        : await safeListSchemas(connector)
-      let tablesScanned = 0
-      for (const schema of schemas) {
-        if (tablesScanned >= maxTables) break
-        const tables = await safeListTables(connector, schema)
-        for (const t of tables) {
-          if (tablesScanned >= maxTables) break
-          tablesScanned++
-          const columns = await safeDescribeTable(connector, schema, t.name)
-          for (const c of columns) {
-            if (!isStringLike(c.data_type)) continue
-            const values = await fetchColumnSamples(
-              connector,
-              schema,
-              t.name,
-              c.name,
-              sampleSize,
-            )
-            if (values.length === 0) continue
-            bags.push({ db: name, table: `${schema}.${t.name}`, column: c.name, values })
-          }
-        }
-      }
-    } catch (e) {
-      errors[name] = String(e)
+  for (let i = 0; i < params.connections.length; i++) {
+    const name = params.connections[i]
+    const r = results[i]
+    if (r.connectionError) {
+      errors[name] = r.connectionError
+    } else {
+      bags.push(...r.bags)
+    }
+    if (r.partialErrors.length > 0) {
+      partialErrors[name] = r.partialErrors
     }
   }
 
-  return { bags, errors }
-}
-
-async function safeListSchemas(connector: Connector): Promise<string[]> {
-  try {
-    return await connector.listSchemas()
-  } catch {
-    return ["public"]
-  }
-}
-
-async function safeListTables(
-  connector: Connector,
-  schema: string,
-): Promise<Array<{ name: string; type: string }>> {
-  try {
-    return await connector.listTables(schema)
-  } catch {
-    return []
-  }
-}
-
-async function safeDescribeTable(
-  connector: Connector,
-  schema: string,
-  table: string,
-): Promise<Array<{ name: string; data_type: string }>> {
-  try {
-    const cols = await connector.describeTable(schema, table)
-    return cols.map((c) => ({ name: c.name, data_type: c.data_type }))
-  } catch {
-    return []
-  }
+  return { bags, errors, partialErrors }
 }
 
 // ---------------------------------------------------------------------------
@@ -300,7 +383,7 @@ export async function detectJoinCandidates(
     }
   }
   try {
-    const { bags, errors } = await collectSampleBags(params)
+    const { bags, errors, partialErrors } = await collectSampleBags(params)
     const candidates = detectJoinCandidatesFromBags(bags)
     return {
       success: true,
@@ -308,6 +391,7 @@ export async function detectJoinCandidates(
         candidates,
         bags_scanned: bags.length,
         connection_errors: errors,
+        partial_errors: partialErrors,
       },
     }
   } catch (e) {

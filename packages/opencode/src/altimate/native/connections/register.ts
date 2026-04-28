@@ -35,6 +35,10 @@ import type {
   DbtProfilesResult,
   DataDiffParams,
   DataDiffResult,
+  // altimate_change start — cross-DB join key inference
+  AltimateCoreDetectJoinCandidatesParams,
+  AltimateCoreResult,
+  // altimate_change end
 } from "../types"
 import type { ConnectionConfig } from "@altimateai/drivers"
 import { Telemetry } from "../../../telemetry"
@@ -631,9 +635,12 @@ register("data.diff", async (params: DataDiffParams): Promise<DataDiffResult> =>
 
 // altimate_change start — cross-DB join key inference
 // --- altimate_core.detect_join_candidates ---
-register("altimate_core.detect_join_candidates", async (params) => {
-  return detectJoinCandidates(params)
-})
+register(
+  "altimate_core.detect_join_candidates",
+  async (
+    params: AltimateCoreDetectJoinCandidatesParams,
+  ): Promise<AltimateCoreResult> => detectJoinCandidates(params),
+)
 // altimate_change end
 
 } // end registerAll

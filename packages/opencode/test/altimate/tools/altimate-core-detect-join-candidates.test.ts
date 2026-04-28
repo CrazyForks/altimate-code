@@ -1,13 +1,17 @@
 /**
  * Tests for AltimateCoreDetectJoinCandidatesTool — cross-DB join key inference.
  *
- * Three layers of coverage:
+ * Four layers of coverage:
  *   1. Pure algorithm (commonPrefix): catches the prefix-overlap edge cases.
  *   2. Pure algorithm (detectJoinCandidatesFromBags): catches the suffix-overlap
  *      and ranking semantics.
- *   3. Integration: a real bun:sqlite Connector pair holding the canonical
+ *   3. Dialect-aware SQL emission (buildSampleSql): proves the detector emits
+ *      portable SQL for MySQL, T-SQL, ClickHouse, and ANSI dialects.
+ *   4. Integration: a real bun:sqlite Connector pair holding the canonical
  *      `businessid_X` ↔ `businessref_X` pattern, driven through the native
  *      handler with `Registry.get` stubbed to return our test connectors.
+ *   5. Tool surface: title/output formatting, permission-gating, dispatcher
+ *      contract, and the success=false envelope.
  */
 
 import { describe, test, expect, spyOn, beforeEach, afterEach } from "bun:test"
@@ -15,6 +19,7 @@ import { Database } from "bun:sqlite"
 import * as Dispatcher from "../../../src/altimate/native/dispatcher"
 import * as Registry from "../../../src/altimate/native/connections/registry"
 import {
+  buildSampleSql,
   commonPrefix,
   detectJoinCandidatesFromBags,
   detectJoinCandidates,
@@ -113,7 +118,7 @@ describe("detectJoinCandidatesFromBags", () => {
     expect(out[0].prefix_rule).toEqual({ left: "businessid_", right: "businessref_" })
     // Suffixes 1, 2, 3 overlap; 4 vs 5 does not.
     expect(out[0].suffix_overlap).toBe(3)
-    expect(out[0].confidence).toBeCloseTo(0.75, 5)
+    expect(out[0].match_score).toBeCloseTo(0.75, 5)
   })
 
   test("rejects same-DB pairs (cross-DB only)", () => {
@@ -148,7 +153,7 @@ describe("detectJoinCandidatesFromBags", () => {
     expect(detectJoinCandidatesFromBags(bags)).toEqual([])
   })
 
-  test("ranks by suffix_overlap descending, then by confidence", () => {
+  test("ranks by suffix_overlap descending, then by match_score", () => {
     const bags: ColumnSampleBag[] = [
       // pair A: 1 overlap
       { db: "a1", table: "t", column: "k", values: ["aa_1", "aa_99"] },
@@ -176,7 +181,68 @@ describe("detectJoinCandidatesFromBags", () => {
 })
 
 // ---------------------------------------------------------------------------
-// 3. Integration: SQLite-backed Connectors driven through the native handler
+// 3. Pure: buildSampleSql — dialect-aware identifier quoting
+// ---------------------------------------------------------------------------
+
+describe("buildSampleSql (dialect-aware quoting)", () => {
+  test("uses backticks on MySQL/MariaDB/ClickHouse", () => {
+    expect(buildSampleSql("mysql", "ops", "invoices", "business_id")).toBe(
+      "SELECT `business_id` FROM `ops`.`invoices` WHERE `business_id` IS NOT NULL",
+    )
+    expect(buildSampleSql("clickhouse", undefined, "events", "user_id")).toBe(
+      "SELECT `user_id` FROM `events` WHERE `user_id` IS NOT NULL",
+    )
+  })
+
+  test("uses square brackets on T-SQL / Fabric / SQL Server", () => {
+    expect(buildSampleSql("tsql", "dbo", "Orders", "CustomerKey")).toBe(
+      "SELECT [CustomerKey] FROM [dbo].[Orders] WHERE [CustomerKey] IS NOT NULL",
+    )
+    expect(buildSampleSql("fabric", undefined, "DimUser", "id")).toBe(
+      "SELECT [id] FROM [DimUser] WHERE [id] IS NOT NULL",
+    )
+  })
+
+  test("uses ANSI double quotes on Postgres / Snowflake / BigQuery / unknown", () => {
+    expect(buildSampleSql("postgres", "public", "orders", "user_id")).toBe(
+      'SELECT "user_id" FROM "public"."orders" WHERE "user_id" IS NOT NULL',
+    )
+    expect(buildSampleSql("snowflake", "ANALYTICS", "EVENTS", "ACCOUNT_ID")).toBe(
+      'SELECT "ACCOUNT_ID" FROM "ANALYTICS"."EVENTS" WHERE "ACCOUNT_ID" IS NOT NULL',
+    )
+    expect(buildSampleSql("generic", undefined, "t", "c")).toBe(
+      'SELECT "c" FROM "t" WHERE "c" IS NOT NULL',
+    )
+  })
+
+  test("does NOT include a LIMIT clause — drivers handle row capping", () => {
+    // Hardcoded LIMIT breaks SQL Server / pre-12c Oracle. The detector relies
+    // on `Connector.execute(sql, sampleSize)` instead so each driver can use
+    // its own dialect-specific limit syntax (TOP, FETCH FIRST, LIMIT, etc).
+    const sql = buildSampleSql("postgres", "public", "t", "c")
+    expect(sql).not.toMatch(/\bLIMIT\b/i)
+    expect(sql).not.toMatch(/\bTOP\b/i)
+    expect(sql).not.toMatch(/\bFETCH\s+FIRST\b/i)
+  })
+
+  test("escapes embedded delimiter characters per dialect", () => {
+    // Backticks doubled on MySQL
+    expect(buildSampleSql("mysql", undefined, "t`able", "c`ol")).toBe(
+      "SELECT `c``ol` FROM `t``able` WHERE `c``ol` IS NOT NULL",
+    )
+    // Closing brackets doubled on T-SQL
+    expect(buildSampleSql("tsql", undefined, "t]bl", "c]ol")).toBe(
+      "SELECT [c]]ol] FROM [t]]bl] WHERE [c]]ol] IS NOT NULL",
+    )
+    // Double quotes doubled on ANSI
+    expect(buildSampleSql("postgres", undefined, 't"bl', 'c"ol')).toBe(
+      'SELECT "c""ol" FROM "t""bl" WHERE "c""ol" IS NOT NULL',
+    )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 4. Integration: SQLite-backed Connectors driven through the native handler
 // ---------------------------------------------------------------------------
 
 /**
@@ -190,15 +256,23 @@ function makeSqliteConnector(db: Database): Connector {
     async close() {
       db.close()
     },
-    async execute(sql: string): Promise<ConnectorResult> {
-      const stmt = db.prepare(sql)
+    async execute(sql: string, limit?: number): Promise<ConnectorResult> {
+      // The detector no longer inlines LIMIT; mimic the production sqlite driver
+      // by appending it from the `limit` argument when missing.
+      let query = sql
+      if (limit && /^\s*select/i.test(sql) && !/\bLIMIT\b/i.test(sql)) {
+        query = `${sql.replace(/;\s*$/, "")} LIMIT ${limit + 1}`
+      }
+      const stmt = db.prepare(query)
       const rows = stmt.all() as Array<Record<string, unknown>>
       const columns = rows.length > 0 ? Object.keys(rows[0]) : []
+      const truncated = limit ? rows.length > limit : false
+      const limitedRows = limit && truncated ? rows.slice(0, limit) : rows
       return {
         columns,
-        rows: rows.map((r) => columns.map((c) => r[c])),
-        row_count: rows.length,
-        truncated: false,
+        rows: limitedRows.map((r) => columns.map((c) => r[c])),
+        row_count: limitedRows.length,
+        truncated,
       }
     },
     async listSchemas() {
@@ -236,14 +310,14 @@ describe("detectJoinCandidates (integration with SQLite)", () => {
   beforeEach(() => {
     opsDb = new Database(":memory:")
     opsDb.exec(
-      "CREATE TABLE invoices (id INTEGER PRIMARY KEY, business_id TEXT NOT NULL, amount INTEGER)",
+      'CREATE TABLE invoices (id INTEGER PRIMARY KEY, "business_id" TEXT NOT NULL, amount INTEGER)',
     )
-    const insertOps = opsDb.prepare("INSERT INTO invoices(business_id, amount) VALUES (?, ?)")
+    const insertOps = opsDb.prepare('INSERT INTO invoices("business_id", amount) VALUES (?, ?)')
     for (let i = 1; i <= 10; i++) insertOps.run(`businessid_${i}`, i * 100)
 
     crmDb = new Database(":memory:")
-    crmDb.exec("CREATE TABLE accounts (id INTEGER PRIMARY KEY, business_ref TEXT NOT NULL)")
-    const insertCrm = crmDb.prepare("INSERT INTO accounts(business_ref) VALUES (?)")
+    crmDb.exec('CREATE TABLE accounts (id INTEGER PRIMARY KEY, "business_ref" TEXT NOT NULL)')
+    const insertCrm = crmDb.prepare('INSERT INTO accounts("business_ref") VALUES (?)')
     // Suffixes 1..8 overlap with ops; 11, 12 do not.
     for (let i = 1; i <= 8; i++) insertCrm.run(`businessref_${i}`)
     insertCrm.run("businessref_11")
@@ -285,6 +359,20 @@ describe("detectJoinCandidates (integration with SQLite)", () => {
     expect(top.right_col).toBe("business_ref")
     expect(top.prefix_rule).toEqual({ left: "businessid_", right: "businessref_" })
     expect(top.suffix_overlap).toBe(8)
+    // match_score replaces the previous `confidence` field.
+    expect(typeof top.match_score).toBe("number")
+    expect(top).not.toHaveProperty("confidence")
+  })
+
+  test("filters out non-string columns (INTEGER amount is not sampled)", async () => {
+    const result = await detectJoinCandidates({
+      connections: ["ops", "crm"],
+      sample_size: 50,
+    })
+    expect(result.success).toBe(true)
+    // bags_scanned counts (db, table, column) bags of non-empty string samples.
+    // Two string columns total — business_id on ops, business_ref on crm.
+    expect(result.data.bags_scanned).toBe(2)
   })
 
   test("rejects calls with fewer than two connections", async () => {
@@ -304,10 +392,87 @@ describe("detectJoinCandidates (integration with SQLite)", () => {
     // The good pair still produced candidates.
     expect((result.data.candidates as unknown[]).length).toBeGreaterThan(0)
   })
+
+  test("surfaces per-table sampling failures via partial_errors", async () => {
+    // listSchemas → ["main"]; listTables succeeds; but describeTable on a
+    // bogus table will throw. We exercise the partial-error path by stubbing
+    // a connector whose describeTable rejects on a specific table.
+    const opsConn: Connector = {
+      async connect() {},
+      async close() {},
+      async execute() {
+        return { columns: [], rows: [], row_count: 0, truncated: false }
+      },
+      async listSchemas() {
+        return ["main"]
+      },
+      async listTables() {
+        return [{ name: "t_ok", type: "table" }, { name: "t_perm_denied", type: "table" }]
+      },
+      async describeTable(_schema, table) {
+        if (table === "t_perm_denied") throw new Error("permission denied: t_perm_denied")
+        return [{ name: "id", data_type: "TEXT", nullable: false }]
+      },
+    }
+    const crmConn = makeSqliteConnector(new Database(":memory:"))
+    const spy = spyOn(Registry, "get").mockImplementation(async (name: string) => {
+      if (name === "ops") return opsConn
+      if (name === "crm") return crmConn
+      throw new Error(`Unknown: ${name}`)
+    })
+    try {
+      const result = await detectJoinCandidates({
+        connections: ["ops", "crm"],
+        sample_size: 50,
+      })
+      expect(result.success).toBe(true)
+      const partial = (result.data.partial_errors ?? {}) as Record<string, string[]>
+      expect(partial.ops?.length ?? 0).toBeGreaterThan(0)
+      expect(partial.ops?.[0]).toMatch(/t_perm_denied/)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  test("surfaces listSchemas failures as a connection error (no `public` fallback)", async () => {
+    const brokenConn: Connector = {
+      async connect() {},
+      async close() {},
+      async execute() {
+        return { columns: [], rows: [], row_count: 0, truncated: false }
+      },
+      async listSchemas() {
+        throw new Error("permission denied: list schemas")
+      },
+      async listTables() {
+        return []
+      },
+      async describeTable() {
+        return []
+      },
+    }
+    const opsConn = makeSqliteConnector(new Database(":memory:"))
+    const spy = spyOn(Registry, "get").mockImplementation(async (name: string) => {
+      if (name === "broken") return brokenConn
+      if (name === "ops") return opsConn
+      throw new Error(`Unknown: ${name}`)
+    })
+    try {
+      const result = await detectJoinCandidates({
+        connections: ["ops", "broken"],
+        sample_size: 50,
+      })
+      expect(result.success).toBe(true)
+      const errors = (result.data.connection_errors ?? {}) as Record<string, string>
+      expect(errors.broken).toMatch(/list schemas|permission denied/i)
+    } finally {
+      spy.mockRestore()
+    }
+  })
 })
 
 // ---------------------------------------------------------------------------
-// 4. Tool surface: title/output formatting and dispatcher contract
+// 5. Tool surface: title/output formatting and dispatcher contract
 // ---------------------------------------------------------------------------
 
 describe("AltimateCoreDetectJoinCandidatesTool.execute", () => {
@@ -337,11 +502,12 @@ describe("AltimateCoreDetectJoinCandidatesTool.execute", () => {
             right_col: "business_ref",
             prefix_rule: { left: "businessid_", right: "businessref_" },
             suffix_overlap: 8,
-            confidence: 0.8,
+            match_score: 0.8,
           },
         ],
         bags_scanned: 4,
         connection_errors: {},
+        partial_errors: {},
       },
     })
 
@@ -356,6 +522,7 @@ describe("AltimateCoreDetectJoinCandidatesTool.execute", () => {
     expect(String(result.output)).toContain("businessid_")
     expect(String(result.output)).toContain("businessref_")
     expect(String(result.output)).toContain("8 matching suffix")
+    expect(String(result.output)).toContain("match_score")
   })
 
   test("renders 'No cross-DB join candidates detected' when the list is empty", () => {
@@ -367,6 +534,33 @@ describe("AltimateCoreDetectJoinCandidatesTool.execute", () => {
     const out = toolInternals.formatCandidates([], { broken: "ECONNREFUSED" })
     expect(out).toContain("Connection errors")
     expect(out).toContain("broken: ECONNREFUSED")
+  })
+
+  test("appends partial errors when present", () => {
+    const out = toolInternals.formatCandidates([], {}, {
+      ops: ["sample(main.t.c): permission denied", "describeTable(main.x): timeout"],
+    })
+    expect(out).toContain("Partial errors")
+    expect(out).toContain("permission denied")
+    expect(out).toContain("ops: 2 error(s)")
+  })
+
+  test("returns FAILED envelope when dispatcher returns success: false", async () => {
+    mockDispatcher({
+      success: false,
+      data: {},
+      error: "detect_join_candidates requires at least two warehouse connections.",
+    })
+    const tool = await AltimateCoreDetectJoinCandidatesTool.init()
+    const result = await tool.execute(
+      { connections: ["a", "b"] },
+      ctx as never,
+    )
+    expect(result.metadata.success).toBe(false)
+    expect(result.title).toContain("FAILED")
+    expect(String(result.output)).toContain("at least two")
+    // Must NOT silently render "0 found".
+    expect(result.title).not.toContain("0 found")
   })
 
   test("returns ERROR envelope when dispatcher throws", async () => {
@@ -381,5 +575,56 @@ describe("AltimateCoreDetectJoinCandidatesTool.execute", () => {
     expect(result.metadata.success).toBe(false)
     expect(result.title).toContain("ERROR")
     expect(String(result.output)).toContain("dispatcher down")
+  })
+
+  test("requests sql_execute_read permission before issuing any SELECT", async () => {
+    const askCalls: unknown[] = []
+    const askingCtx = {
+      ...ctx,
+      ask: async (req: unknown) => {
+        askCalls.push(req)
+      },
+    }
+    mockDispatcher({
+      success: true,
+      data: {
+        candidates: [],
+        bags_scanned: 0,
+        connection_errors: {},
+        partial_errors: {},
+      },
+    })
+    const tool = await AltimateCoreDetectJoinCandidatesTool.init()
+    await tool.execute({ connections: ["a", "b"] }, askingCtx as never)
+    expect(askCalls).toHaveLength(1)
+    expect((askCalls[0] as { permission: string }).permission).toBe("sql_execute_read")
+  })
+
+  test("rejects sample_size above the configured upper bound", async () => {
+    const tool = await AltimateCoreDetectJoinCandidatesTool.init()
+    await expect(
+      tool.execute(
+        { connections: ["a", "b"], sample_size: 1_000_000 },
+        ctx as never,
+      ),
+    ).rejects.toThrow()
+  })
+
+  test("rejects max_tables_per_connection above the configured upper bound", async () => {
+    const tool = await AltimateCoreDetectJoinCandidatesTool.init()
+    await expect(
+      tool.execute(
+        { connections: ["a", "b"], max_tables_per_connection: 999_999 },
+        ctx as never,
+      ),
+    ).rejects.toThrow()
+  })
+
+  test("rejects connections array longer than the configured upper bound", async () => {
+    const tool = await AltimateCoreDetectJoinCandidatesTool.init()
+    const tooMany = Array.from({ length: 100 }, (_, i) => `conn_${i}`)
+    await expect(
+      tool.execute({ connections: tooMany }, ctx as never),
+    ).rejects.toThrow()
   })
 })
