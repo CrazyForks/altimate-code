@@ -49,7 +49,7 @@ describe("bridge-merge-runtime: cycle 3 SyncEvent → BusEvent bridge", () => {
     const { SyncEvent } = await import("@/sync")
     const { BusEvent } = await import("@/bus/bus-event")
 
-    const fresh = "runtime-bridge.fresh." + Date.now()
+    const fresh = "runtime-bridge.fresh." + Date.now().toString(36)
     SyncEvent.define({
       type: fresh,
       version: 1,
@@ -65,7 +65,7 @@ describe("bridge-merge-runtime: cycle 3 SyncEvent → BusEvent bridge", () => {
     const { SyncEvent } = await import("@/sync")
     const { BusEvent } = await import("@/bus/bus-event")
 
-    const name = "runtime-bridge.unversioned." + Date.now()
+    const name = "runtime-bridge.unversioned." + Date.now().toString(36)
     SyncEvent.define({
       type: name,
       version: 1,
@@ -103,7 +103,7 @@ describe("bridge-merge-runtime: cycle 3 SyncEvent → BusEvent bridge", () => {
 describe("bridge-merge-runtime: cycle 4 BusEvent.define idempotency", () => {
   test("BusEvent.define returns the original registration when called again with same type", async () => {
     const { BusEvent } = await import("@/bus/bus-event")
-    const t = "runtime-bridge.idem." + Date.now()
+    const t = "runtime-bridge.idem." + Date.now().toString(36)
     const first: any = BusEvent.define(t, z.object({ a: z.string() }))
     const second: any = BusEvent.define(t, z.object({ b: z.number() })) // DIFFERENT schema
     expect(second).toBe(first) // referential equality — first registration wins
@@ -112,7 +112,7 @@ describe("bridge-merge-runtime: cycle 4 BusEvent.define idempotency", () => {
 
   test("SyncEvent.define double registration of same type does not throw at runtime", async () => {
     const { SyncEvent } = await import("@/sync")
-    const t = "runtime-bridge.double." + Date.now()
+    const t = "runtime-bridge.double." + Date.now().toString(36)
     const def1 = SyncEvent.define({
       type: t,
       version: 1,
@@ -191,7 +191,7 @@ describe("bridge-merge-runtime: cycle 5 immediate transaction", () => {
   test("SyncEvent.run rejects payload missing the aggregate field with a clear error", async () => {
     const { SyncEvent } = await import("@/sync")
     const def = SyncEvent.define({
-      type: "runtime-bridge.missing-agg." + Date.now(),
+      type: "runtime-bridge.missing-agg." + Date.now().toString(36),
       version: 1,
       aggregate: "id",
       schema: z.object({ id: z.string() }),
