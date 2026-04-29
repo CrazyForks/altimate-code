@@ -258,7 +258,8 @@ export const defaultConfig: MergeConfig = {
     "github/README.md",
     "github/index.ts",
     "install",
-    "packages/altimate-engine/**",
+    // Note: packages/altimate-engine/** was removed when the Python engine was
+    // eliminated (commit 845ee98271). Kept entry intentionally absent.
     "packages/drivers/**",
     "packages/opencode/src/altimate/**",
     "packages/opencode/src/bridge/**",
