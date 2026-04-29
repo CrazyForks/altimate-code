@@ -5,7 +5,7 @@ import os from "os"
 
 // Test tool parameter validation, output formatting, and integration
 // These tests verify Zod schemas and tool response structures
-// without requiring the full OpenCode runtime.
+// without requiring the full Altimate Code runtime.
 
 import z from "zod"
 
@@ -33,11 +33,7 @@ const MemoryReadParams = z.object({
 })
 
 const MemoryWriteParams = z.object({
-  id: z
-    .string()
-    .min(1)
-    .max(256)
-    .regex(SAFE_ID_REGEX),
+  id: z.string().min(1).max(256).regex(SAFE_ID_REGEX),
   scope: z.enum(["global", "project"]),
   content: z.string().min(1).max(MEMORY_MAX_BLOCK_SIZE),
   tags: z.array(z.string().max(64)).max(10).optional().default([]),
@@ -210,33 +206,23 @@ describe("Memory Tool Schemas", () => {
     })
 
     test("rejects empty id", () => {
-      expect(() =>
-        MemoryWriteParams.parse({ id: "", scope: "project", content: "test" }),
-      ).toThrow()
+      expect(() => MemoryWriteParams.parse({ id: "", scope: "project", content: "test" })).toThrow()
     })
 
     test("rejects id with uppercase", () => {
-      expect(() =>
-        MemoryWriteParams.parse({ id: "MyBlock", scope: "project", content: "test" }),
-      ).toThrow()
+      expect(() => MemoryWriteParams.parse({ id: "MyBlock", scope: "project", content: "test" })).toThrow()
     })
 
     test("rejects id with spaces", () => {
-      expect(() =>
-        MemoryWriteParams.parse({ id: "my block", scope: "project", content: "test" }),
-      ).toThrow()
+      expect(() => MemoryWriteParams.parse({ id: "my block", scope: "project", content: "test" })).toThrow()
     })
 
     test("rejects id starting with hyphen", () => {
-      expect(() =>
-        MemoryWriteParams.parse({ id: "-invalid", scope: "project", content: "test" }),
-      ).toThrow()
+      expect(() => MemoryWriteParams.parse({ id: "-invalid", scope: "project", content: "test" })).toThrow()
     })
 
     test("rejects id ending with slash", () => {
-      expect(() =>
-        MemoryWriteParams.parse({ id: "warehouse/", scope: "project", content: "test" }),
-      ).toThrow()
+      expect(() => MemoryWriteParams.parse({ id: "warehouse/", scope: "project", content: "test" })).toThrow()
     })
 
     test("accepts id with underscores and hyphens", () => {
@@ -259,9 +245,7 @@ describe("Memory Tool Schemas", () => {
     })
 
     test("rejects empty content", () => {
-      expect(() =>
-        MemoryWriteParams.parse({ id: "empty", scope: "project", content: "" }),
-      ).toThrow()
+      expect(() => MemoryWriteParams.parse({ id: "empty", scope: "project", content: "" })).toThrow()
     })
 
     test("rejects more than 10 tags", () => {
@@ -455,11 +439,11 @@ describe("Memory Block ID validation (hierarchical)", () => {
     "UPPER",
     "has space",
     "",
-    "warehouse/",   // ends with slash
-    "warehouse.",    // ends with dot
-    "/warehouse",    // starts with slash
-    ".warehouse",    // starts with dot
-    "warehouse-",    // ends with hyphen
+    "warehouse/", // ends with slash
+    "warehouse.", // ends with dot
+    "/warehouse", // starts with slash
+    ".warehouse", // starts with dot
+    "warehouse-", // ends with hyphen
   ]
 
   for (const id of validIds) {
@@ -499,8 +483,7 @@ describe("Memory Tool Integration", () => {
       content: "## Warehouse\n\n- Provider: Snowflake\n- Warehouse: ANALYTICS_WH",
     }
 
-    const serialized =
-      `---\nid: ${block.id}\nscope: ${block.scope}\ncreated: ${block.created}\nupdated: ${block.updated}\ntags: ${JSON.stringify(block.tags)}\n---\n\n${block.content}\n`
+    const serialized = `---\nid: ${block.id}\nscope: ${block.scope}\ncreated: ${block.created}\nupdated: ${block.updated}\ntags: ${JSON.stringify(block.tags)}\n---\n\n${block.content}\n`
     await fs.writeFile(path.join(memDir, `${block.id}.md`), serialized)
 
     const files = await fs.readdir(memDir)
@@ -512,10 +495,9 @@ describe("Memory Tool Integration", () => {
     expect(raw).toContain('tags: ["snowflake","warehouse"]')
     expect(raw).toContain("Provider: Snowflake")
 
-    const updated = serialized.replace("ANALYTICS_WH", "COMPUTE_WH").replace(
-      "2026-03-14T10:00:00.000Z\ntags",
-      "2026-03-14T12:00:00.000Z\ntags",
-    )
+    const updated = serialized
+      .replace("ANALYTICS_WH", "COMPUTE_WH")
+      .replace("2026-03-14T10:00:00.000Z\ntags", "2026-03-14T12:00:00.000Z\ntags")
     await fs.writeFile(path.join(memDir, `${block.id}.md`), updated)
 
     const rawUpdated = await fs.readFile(path.join(memDir, "warehouse-config.md"), "utf-8")
@@ -534,7 +516,10 @@ describe("Memory Tool Integration", () => {
     const content = `---\nid: warehouse/snowflake\nscope: project\ncreated: 2026-01-01T00:00:00.000Z\nupdated: 2026-01-01T00:00:00.000Z\ntags: ["snowflake"]\n---\n\nSnowflake config\n`
     await fs.writeFile(path.join(subDir, "snowflake.md"), content)
 
-    const exists = await fs.stat(path.join(subDir, "snowflake.md")).then(() => true).catch(() => false)
+    const exists = await fs
+      .stat(path.join(subDir, "snowflake.md"))
+      .then(() => true)
+      .catch(() => false)
     expect(exists).toBe(true)
 
     const raw = await fs.readFile(path.join(subDir, "snowflake.md"), "utf-8")

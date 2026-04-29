@@ -1408,8 +1408,8 @@ describe("ProviderTransform.message - strip openai metadata when store=false", (
       ...openaiModel,
       providerID: "opencode",
       api: {
-        id: "opencode-test",
-        url: "https://api.opencode.ai",
+        id: "altimate-test",
+        url: "https://api.altimate.ai",
         npm: "@ai-sdk/openai-compatible",
       },
     }
@@ -1442,8 +1442,8 @@ describe("ProviderTransform.message - strip openai metadata when store=false", (
       ...openaiModel,
       providerID: "opencode",
       api: {
-        id: "opencode-test",
-        url: "https://api.opencode.ai",
+        id: "altimate-test",
+        url: "https://api.altimate.ai",
         npm: "@ai-sdk/openai-compatible",
       },
     }

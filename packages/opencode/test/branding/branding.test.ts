@@ -145,7 +145,7 @@ describe("GitHub Action", () => {
 describe("User-Agent & Version", () => {
   test("USER_AGENT contains altimate-code", () => {
     const content = readText(join(srcDir, "installation", "index.ts"))
-    expect(content).toContain('USER_AGENT = `altimate-code/')
+    expect(content).toContain("USER_AGENT = `altimate-code/")
   })
 })
 
@@ -183,7 +183,9 @@ describe("Upstream Branding Leak Detection", () => {
     // ".opencode" as config dir name in array literals or string literals (fallback config)
     if (/['"]\.opencode['"]/.test(trimmed)) return true
     // path.join references with ".opencode" (e.g., path.join(".opencode", "bin"))
-    if (/\.opencode/.test(trimmed) && !(/opencode\.ai/i.test(trimmed))) return true
+    if (/\.opencode/.test(trimmed) && !/opencode\.ai/i.test(trimmed)) return true
+    // Generated models snapshot — contains real product URLs from external API (OpenCode Zen/Go)
+    if (filePath.includes("provider/models-snapshot.ts")) return true
     return false
   }
 

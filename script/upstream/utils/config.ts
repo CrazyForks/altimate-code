@@ -279,6 +279,15 @@ export const defaultConfig: MergeConfig = {
     ".claude/**",
     "sdks/**",
     "script/upstream/**",
+    // Test files that intentionally reference upstream branding —
+    // either testing upstream API/release fetches, or asserting that
+    // branding strings DON'T leak into shipped source. Excluding from
+    // the branding scan prevents false positives.
+    "packages/opencode/test/upstream/**",
+    "packages/opencode/test/branding/**",
+    // External-API fixture (models.dev response) — keeps real product
+    // names like "OpenCode Zen" because that's what the real API returns.
+    "packages/opencode/test/tool/fixtures/models-api.json",
   ],
 
   skipFiles: [

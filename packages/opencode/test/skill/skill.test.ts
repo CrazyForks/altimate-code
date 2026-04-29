@@ -366,7 +366,7 @@ name: opencode-skill
 description: A skill in the .opencode/skill directory.
 ---
 
-# OpenCode Skill
+# Altimate Code Skill
 `,
       )
       await Bun.write(
@@ -376,7 +376,7 @@ name: opencode-skill
 description: A skill in the .opencode/skills directory.
 ---
 
-# OpenCode Skill
+# Altimate Code Skill
 `,
       )
     },
