@@ -84,6 +84,15 @@ jobs:
       - name: Install dependencies
         run: bun install
 
+      - name: Install merge tooling deps (script/upstream)
+        # The script/upstream/ workspace is its own bun project (depends on
+        # minimatch). Root `bun install` doesn't reach it. Tests in
+        # test/upstream/bridge-merge-e2e.test.ts shell out to
+        # `bun run script/upstream/analyze.ts --branding` which requires this.
+        # Mirrors the install step in the marker-guard job below.
+        run: bun install
+        working-directory: script/upstream
+
       - name: Run tests
         working-directory: packages/opencode
         # Cloud E2E tests (Snowflake, BigQuery, Databricks) auto-skip when

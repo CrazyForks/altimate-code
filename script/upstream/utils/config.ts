@@ -258,10 +258,6 @@ export const defaultConfig: MergeConfig = {
     "github/README.md",
     "github/index.ts",
     "install",
-    // packages/altimate-engine/** — kept for backwards compatibility with the
-    // upstream-merge-guard regression test even though the Python engine was
-    // eliminated in commit 845ee98271. Glob matches nothing today; it'll cover
-    // the directory if anyone re-adds it.
     "packages/altimate-engine/**",
     "packages/drivers/**",
     "packages/opencode/src/altimate/**",
