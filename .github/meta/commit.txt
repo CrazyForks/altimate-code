@@ -1,109 +1,100 @@
-fix: bridge merge audit cycle 6 — release ledger + 6 real bugs + 56 lock-in tests
+test: add comprehensive E2E suite for the v1.4.0 bridge merge
 
-Cycle 6 deployed 5 agents in parallel with non-overlapping methodologies:
-- Per-release ledger walk (find what cycles 1-5 missed)
-- Differential CLI behavior testing (main vs merge branch)
-- Invariant test creation (lock in cycle 1-5 fixes)
-- Lockfile + dependency audit
-- Runtime stress test of SyncEvent + BusEvent bridge
+Spawns the CLI as a real user would (`bun run --cwd packages/opencode
+--conditions=browser src/index.ts <args>` with isolated XDG_* env vars)
+and visually inspects every output that the merge could have impacted.
 
-Six real bugs surfaced — fixed in this commit:
+Each test maps to a specific cycle 1-7 fix so future merges fail loudly
+instead of silently regressing.
 
-1. **chat.params maxOutputTokens hook silently ignored** (Agent A HIGH).
-   Plugin types advertise `maxOutputTokens` as mutable output; codex.ts and
-   copilot.ts both write `output.maxOutputTokens = undefined`. But
-   `session/llm.ts:147` computed it AFTER the hook and never read
-   `params.maxOutputTokens` — so codex/copilot exclusion logic was a no-op
-   and any third-party plugin trying to alter maxOutputTokens did nothing.
-   Fix: pass the default into the hook, read back from `params` (matches
-   upstream PRs #21220 + #21225). Test updated to upstream expectation
-   (`undefined` for OpenAI to match codex cli behavior).
+Test categories (76 tests in `test/upstream/bridge-merge-e2e.test.ts`):
 
-2. **`mcp add` lost its 7-flag non-interactive mode** (Agent B HIGH —
-   script-breaking regression). main has `--name --type --url --command
-   --header --oauth --global` flags + non-interactive code path (~85
-   lines). Bridge merge overwrote `McpAddCommand` with upstream's
-   interactive-only version. Scripts/CI calling `mcp add --name foo
-   --type remote --url ...` either hung (no TTY) or silently dropped
-   into prompts ignoring args. Restored full block with altimate_change
-   markers; verified `mcp add --help` lists all 7 flags.
+  1. CLI discovery (cycle 7) — `--version`, `--help` for top-level + every
+     impacted subcommand. Asserts no `OpenCode` brand in any rendered help.
 
-3. **`solid-js@1.9.10.patch` is a dead patch** (Agents A + D HIGH).
-   File is on disk but neither root nor opencode `package.json` declares
-   it in `patchedDependencies`. Upstream v1.4.0 declares it. Patch fixes
-   Solid Transition correctness (issue #2046) — UI state corruption under
-   Transitions, manifests rarely, hard to repro. Fix: add the
-   declaration; verified with `bun install`.
+  2. mcp lifecycle (cycle 2 + 4 + 6 + 7) — `mcp --help` lists all subcommands
+     including the cycle-2-restored `remove`/`rm`. `mcp add --help` shows
+     all 7 cycle-6-restored non-interactive flags. `mcp remove
+     <not-found>` exits non-zero (cycle 4 exit-code plumbing). `mcp list`
+     empty-state hint says `altimate mcp add` (cycle 7 brand). Real
+     non-interactive add via `--name --type --command --global`.
 
-4. **`mcp list` empty-state hint says "opencode mcp add"** (Agent B MED).
-   Brand leak from upstream string. Fix: rebrand to "altimate mcp add"
-   (matches main's behavior).
+  3. Account/auth (cycle 1) — `providers list` runs without unhandled
+     promise warnings (cycle 1 awaited Account.active calls).
 
-5. **Alibaba/plain-text rate-limit retry not bridged** (Agent A MED, PR
-   #21355). `session/retry.ts` was missing the plain-text rate-limit
-   detection block. Alibaba/DashScope and other providers returning
-   non-JSON 429 responses weren't being retried. Fix: 13-line block
-   wrapped in altimate_change markers.
+  4. Session commands (cycle 3 + 4) — `session --help`, `session list`
+     run without crashes from session/* sources.
 
-6. **`BatchTool` import + registration unwrapped** (Agent A LOW).
-   Upstream deleted `tool/batch.ts` in PR #21052 (tool system refactor).
-   We kept `BatchTool` as an experimental flag-gated tool but the import
-   at `tool/registry.ts:7` and registration at `:211` were not wrapped
-   in altimate_change markers. Currently invisible to analyzer because
-   the lines existed on main, but a future re-bridge from current upstream
-   would silently lose them. Fix: wrap both with markers.
+  5. Exit codes (cycle 4) — `trace view` no-args exits non-zero.
 
-Tests added (cycle 6, all passing):
+  6. System prompts (cycle 7) — every prompt file (anthropic, default,
+     kimi, gpt, codex) opens without `You are OpenCode` and contains no
+     `anomalyco/opencode` or `opencode.ai` references.
 
-- `test/upstream/bridge-merge-invariants.test.ts` (Agent C — 39 tests):
-  cross-module consistency, async signature invariants, db/storage
-  invariants, schema shape invariants, build infrastructure invariants,
-  behavioral safety. Category breakdown:
-  - Service identifier uniqueness (cycle 5 lock-in)
-  - SyncEvent ⊆ BusEvent bridge (cycle 3 lock-in)
-  - Filesystem.containsReal in security-sensitive paths
-  - HTML escaping in OAuth/codex callback templates
-  - effect override pin, cross-spawn catalog, npm-package-arg deps
-  - PlanExitTool reject-on-anything-but-Yes (cycle 4)
-  - BusEvent.define idempotent (cycle 4)
+  7. TUI theme schemas (cycle 7) — every builtin theme JSON's `$schema`
+     URL points to altimate.ai, not opencode.ai.
 
-- `test/upstream/bridge-merge-runtime.test.ts` (Agent E — 17 tests):
-  - SyncEvent.define populates BusEvent registry at runtime
-  - SyncEvent payloads use unversioned type literals
-  - Database.transaction passes `behavior:"immediate"` through (monkey-
-    patches Bun client transaction to capture and assert)
-  - bun:sqlite IMMEDIATE mode serializes 10 parallel writers (proves
-    cycle 5's race fix works)
-  - SyncEvent.run rejects payload missing aggregate field
-  - No two ServiceMap.Service classes share an identifier (cycle 5)
-  - Runtime Promise checks for Account.active, MessageV2.toModelMessages,
-    SessionStatus.set, SessionPrompt.cancel
-  - PlanExitTool reject semantic via fs.readFile + comment-strip
-  - Question.RejectedError constructible
+  8. OAuth callback XSS (cycle 1 + 2) — both `mcp/oauth-callback.ts` and
+     `plugin/codex.ts` define `escapeHtml()` AND every `${error}` interp
+     goes through it.
 
-Runtime test discovered minor docs reality:
-- `MessageV2.toModelMessages` requires `model.api.npm` to be set (no
-  defensive default at line 597) — not a cycle bug, worth knowing.
-- `BusEvent` registry is module-private; existing tests' fallback
-  `(BusEvent as any).registry` is dead code.
+  9. Symlink escape protection (cycle 1 + 2) — `project/instance.ts`,
+     `plugin/shared.ts`, and `util/filesystem.ts` use `containsReal`
+     (resolves symlinks) not lexical `contains` for path containment
+     checks.
 
-Documented but NOT fixed in this PR (out of scope, RESUME doc tracks):
-- `Snapshot.FileDiff` schema split-brain (vcs.ts has new patch shape;
-  snapshot/index.ts + SDK still on before/after).
-- `Bun.serve` still in 3 places (server/server.ts, mcp/oauth-callback.ts,
-  plugin/codex.ts) — Hono node adapter migration #18335 deferred.
-- `--dangerously-skip-permissions` flag missing (we have `--yolo`).
-- PDF DnD (#16926), variant_list keybind (#21185), tool system refactor
-  (#21052), opentui 0.1.97 — all flagged earlier as intentional skips.
-- `@modelcontextprotocol/sdk@1.26.0` peer-asks `hono@^4.11.4` but we
-  hoist `hono@4.10.7` (Agent D MED).
+ 10. SDK Event union (cycle 3 SyncEvent → BusEvent bridge) —
+     EventMessageUpdated, EventMessagePartUpdated exported from
+     `@opencode-ai/sdk/v2`; the `Event` discriminated union lists them.
 
-Verification:
-- Typecheck: 0 errors across 5 packages
-- Tests: 8270 pass / 503 skip / 9 fail (all 9 pre-existing env timeouts:
-  3 compiled-binary smoke, 3 tool.registry, 1 tool.bash, 1 detectDataTools,
-  1 OPENCODE_CONFIG_DIR install — none caused by cycle 6 changes)
-- Bridge regression suite: **233 tests** across 7 files in `test/upstream/`
-  (was 177 before cycle 6: +39 invariants + 17 runtime). All pass.
-- Manual smoke: `mcp add --help` shows all 7 flags; `mcp list` shows
-  altimate brand; CLI dev mode runs.
+ 11. SyncEvent IMMEDIATE transaction (cycle 5) — `Database.transaction`
+     accepts `behavior` config; `SyncEvent.run` actually passes
+     `behavior: "immediate"` (regex on active code, comments stripped).
+
+ 12. PlanExitTool reject safety (cycle 4) — active code uses
+     `answer !== "Yes"` (rejects on dialog cancel/dismiss); does NOT use
+     the unsafe `answer === "No"` upstream pattern.
+
+ 13. chat.params maxOutputTokens hook (cycle 6) — `session/llm.ts`
+     passes maxOutputTokens INTO the hook AND reads back from
+     `params.maxOutputTokens` (so plugin overrides take effect).
+
+ 14. Alibaba retry (cycle 6 — PR #21355) — `session/retry.ts` detects
+     plain-text rate-limit messages.
+
+ 15. solid-js patch (cycle 6) — `package.json patchedDependencies`
+     declares `solid-js@1.9.10` with the patch on disk.
+
+ 16. BatchTool (cycle 6) — `tool/registry.ts` import + registration
+     wrapped in altimate_change markers; `batch.ts` exists.
+
+ 17. Effect Service identifier (cycle 5) — `account/service.ts` and
+     `effect/runtime.ts` deleted; `auth/index.ts` uses
+     `@opencode/Auth.cli`; `auth/service.ts` keeps `@opencode/Auth`.
+
+ 18. SessionStatus.set async (cycle 4) — definition is async; static
+     scan asserts every caller in src/ uses `await`; cancel() is async;
+     prompt.ts uses `await using` for cancel disposer.
+
+ 19. README mandated branding audit — `script/upstream/analyze.ts
+     --branding` reports zero leaks AND marker analysis reports all
+     blocks closed.
+
+ 20. skipFiles / keepOurs compliance — verifies upstream-only packages
+     (`packages/{app,console,desktop,...}`, `infra/`, `nix/`) don't exist
+     and altimate-only packages (`packages/{altimate-engine,drivers,
+     dbt-tools}`, `packages/opencode/src/altimate`) do.
+
+Also fixed: added `.github/meta/**` to keepOurs in
+`script/upstream/utils/config.ts`. The transient commit-message file
+(per CLAUDE.md commit workflow) intentionally quotes upstream brand
+strings when describing rebrand fixes — would otherwise produce false-
+positive leaks in the audit.
+
+Verification
+- 76 E2E tests pass (~40s wall clock, isolated tmpdirs, no network).
+- 310 tests total across 8 files in `test/upstream/`.
+- Typecheck: 0 errors.
+- Branding audit: 0 leaks.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>

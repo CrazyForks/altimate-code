@@ -288,6 +288,10 @@ export const defaultConfig: MergeConfig = {
     // External-API fixture (models.dev response) — keeps real product
     // names like "OpenCode Zen" because that's what the real API returns.
     "packages/opencode/test/tool/fixtures/models-api.json",
+    // Transient commit message / PR body files — intentionally quote
+    // upstream brand strings when describing rebrand fixes. See CLAUDE.md
+    // commit workflow conventions.
+    ".github/meta/**",
   ],
 
   skipFiles: [
