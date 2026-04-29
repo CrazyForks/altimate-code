@@ -344,6 +344,10 @@ export const defaultConfig: MergeConfig = {
     "script/sync-zed.ts",
     // Upstream AGENTS.md references dev branch, misleading for our fork
     "AGENTS.md",
+    // Unused legacy Anthropic prompt variant — active prompt is anthropic.txt.
+    // PR #18186 deleted this; we do not restore it. If upstream resurrects
+    // this filename, skipFiles ensures the overlay drops it.
+    "packages/opencode/src/session/prompt/anthropic-20250930.txt",
   ],
 
   brandingRules: [

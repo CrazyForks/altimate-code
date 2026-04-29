@@ -19,6 +19,7 @@ import { test, expect, describe } from "bun:test"
 import path from "path"
 import fs from "fs/promises"
 import { existsSync } from "fs"
+import { defaultConfig } from "../../../../script/upstream/utils/config.ts"
 
 const repoRoot = path.resolve(import.meta.dir, "..", "..", "..", "..")
 const srcDir = path.join(repoRoot, "packages", "opencode", "src")
@@ -99,6 +100,74 @@ describe("bridge merge: PR #18186 stays reverted (Anthropic provider preserved)"
     const content = await readText(path.join(srcDir, "provider", "provider.ts"))
     expect(content).toContain("createAnthropic")
     expect(content).toContain('"@ai-sdk/anthropic"')
+  })
+})
+
+describe("bridge merge: legacy anthropic-20250930.txt must never re-enter the tree", () => {
+  // The unused legacy prompt variant must stay out of the repo: the active
+  // prompt is anthropic.txt. Three lines of defense, all asserted here:
+  //   1) the file is absent on disk
+  //   2) skipFiles in script/upstream/utils/config.ts blocks any upstream resurrection
+  //   3) script/upstream/bridge-merge.ts does not reference the path in code
+  const legacyRel = "packages/opencode/src/session/prompt/anthropic-20250930.txt"
+
+  test("legacy anthropic-20250930.txt does not exist on disk", () => {
+    expect(existsSync(path.join(repoRoot, legacyRel))).toBe(false)
+  })
+
+  test("defaultConfig.skipFiles contains the legacy path (array membership, not substring)", () => {
+    expect(defaultConfig.skipFiles).toContain(legacyRel)
+  })
+
+  test("bridge-merge.ts does not reference the legacy file in executable code", async () => {
+    // Stronger than the prior pair of regexes: assert the filename never
+    // appears outside comments. Catches future restoration via any mechanism
+    // (git show / git checkout / Bun.write / fs.promises.writeFile / multi-line).
+    const content = await readText(path.join(repoRoot, "script", "upstream", "bridge-merge.ts"))
+    const codeLines = content
+      .split("\n")
+      .filter((l) => {
+        const trimmed = l.trim()
+        return !trimmed.startsWith("//") && !trimmed.startsWith("*") && trimmed !== ""
+      })
+    expect(codeLines.join("\n")).not.toContain("anthropic-20250930")
+  })
+})
+
+describe("bridge merge: transient .github/meta/* files must never be tracked", () => {
+  // .github/meta/{commit,diff,pr-body-*}.* are scratch files used during the
+  // commit/PR workflow. They commonly contain raw upstream brand strings (when
+  // describing rebrand fixes) and trigger branding-leak alarms if accidentally
+  // tracked. Layered defense, all asserted here:
+  //   1) .gitignore excludes the conventional names with **/ so nested paths match
+  //   2) keepOurs in script/upstream/utils/config.ts protects the directory
+  //   3) no transient meta files are tracked anywhere in the repo (any depth)
+  const transientPatterns = [
+    "**/.github/meta/commit.txt",
+    "**/.github/meta/diff.txt",
+    "**/.github/meta/pr-body-*.md",
+  ]
+  const leakRegex = /(?:^|\/)\.github\/meta\/(?:commit\.txt|diff\.txt|pr-body-.*\.md)$/
+
+  test(".gitignore excludes the transient meta files with nested-path coverage", async () => {
+    const content = await readText(path.join(repoRoot, ".gitignore"))
+    for (const pattern of transientPatterns) {
+      expect(content).toContain(pattern)
+    }
+  })
+
+  test("keepOurs in script/upstream/utils/config.ts covers .github/meta/**", () => {
+    expect(defaultConfig.keepOurs).toContain(".github/meta/**")
+  })
+
+  test("no transient meta files are tracked anywhere in the repo", () => {
+    // Repo-wide scan — catches commit.txt / diff.txt / pr-body-*.md at any depth,
+    // not just at repo root. Prevents PR #574-style leaks (nested commit.txt).
+    const proc = Bun.spawnSync({ cmd: ["git", "ls-files"], cwd: repoRoot })
+    expect(proc.exitCode).toBe(0)
+    const tracked = new TextDecoder().decode(proc.stdout).split("\n")
+    const leaked = tracked.filter((p) => leakRegex.test(p))
+    expect(leaked).toEqual([])
   })
 })
 

@@ -39,6 +39,8 @@ __pycache__
 # workflow. Do NOT track — they're per-developer scratch files that
 # intentionally quote upstream brand strings when describing rebrand
 # fixes, and tracking them produces false-positive branding leaks.
-.github/meta/commit.txt
-.github/meta/diff.txt
-.github/meta/pr-body-*.md
+# Use **/ so nested .github/meta paths (e.g. packages/*/.github/meta/)
+# are also covered — a flat anchor would silently miss them.
+**/.github/meta/commit.txt
+**/.github/meta/diff.txt
+**/.github/meta/pr-body-*.md

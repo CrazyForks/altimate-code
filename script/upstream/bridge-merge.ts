@@ -42,7 +42,7 @@
 import { $ } from "bun"
 import { parseArgs } from "util"
 import path from "path"
-import { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from "fs"
+import { writeFileSync, existsSync, readFileSync, rmSync } from "fs"
 import { loadConfig, repoRoot, type MergeConfig } from "./utils/config.ts"
 import * as logger from "./utils/logger.ts"
 import { bold, cyan, dim, green, yellow, red } from "./utils/logger.ts"
@@ -74,7 +74,7 @@ if (args.help || !args.version) {
     --version, -v <tag>      Upstream tag to overlay (e.g., v1.4.0)
     --dry-run                Print the plan without writing files
     --no-branch              Don't create a branch (operate on current branch)
-    --skip-pr-revert         Skip the PR #18186 anthropic-restore step
+    --skip-pr-revert         Skip the PR #18186 anthropic-provider fix step
     --help, -h               Show this help
 `)
   process.exit(args.help ? 0 : 1)
@@ -314,26 +314,19 @@ function buildPlan(
 }
 
 // ---------------------------------------------------------------------------
-// PR #18186 restoration (anthropic legal requests)
+// PR #18186 anthropic-provider fix reapplication
 // ---------------------------------------------------------------------------
 
-async function restorePR18186(report: string[]): Promise<void> {
-  report.push("\n## PR #18186 Restoration (Anthropic provider preserved)\n")
-
-  // 1. Restore anthropic-20250930.txt from v1.3.17 (last tag that had it).
-  const promptPath = "packages/opencode/src/session/prompt/anthropic-20250930.txt"
-  const promptAbs = path.join(ROOT, promptPath)
-  const promptContent = await $`git show v1.3.17:${promptPath}`.cwd(ROOT).text().catch(() => "")
-  if (promptContent) {
-    if (!DRY_RUN) {
-      mkdirSync(path.dirname(promptAbs), { recursive: true })
-      writeFileSync(promptAbs, promptContent)
-    }
-    report.push(`- restored \`${promptPath}\` (${promptContent.split("\n").length} lines)`)
-  } else {
-    report.push(`- ⚠ could not fetch \`${promptPath}\` from v1.3.17`)
-  }
-
+// Reapplies the four code-level edits PR #18186 wiped out, keeping Anthropic
+// as a fully-supported provider in the fork: BUILTIN plugin, login hint in
+// providers.ts, claude-code beta header, and the non-anthropic User-Agent
+// guard in session/llm.ts.
+//
+// We deliberately do NOT restore prompt/anthropic-20250930.txt — it was an
+// unused legacy variant; the active prompt is anthropic.txt. The skipFiles
+// entry in utils/config.ts blocks any future upstream resurrection.
+async function reapplyPR18186AnthropicProviderFixes(report: string[]): Promise<void> {
+  report.push("\n## PR #18186 anthropic-provider fix reapplication\n")
   await editProvidersTs(report)
   await editPluginIndex(report)
   await editProviderTs(report)
@@ -601,8 +594,8 @@ async function main(): Promise<void> {
   for (const f of plan.upstreamDeletedReview.sort()) report.push(`- \`${f}\``)
 
   if (!SKIP_PR_REVERT) {
-    logger.step(7, 7, "Restoring PR #18186 changes (Anthropic provider preserved)")
-    await restorePR18186(report)
+    logger.step(7, 7, "Reapplying PR #18186 anthropic-provider fixes")
+    await reapplyPR18186AnthropicProviderFixes(report)
   }
 
   writeFileSync(REPORT_PATH, report.join("\n"))
