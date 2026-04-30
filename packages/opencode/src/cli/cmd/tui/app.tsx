@@ -21,6 +21,9 @@ import { DialogThemeList } from "@tui/component/dialog-theme-list"
 import { DialogHelp } from "./ui/dialog-help"
 import { CommandProvider, useCommandDialog } from "@tui/component/dialog-command"
 import { DialogAgent } from "@tui/component/dialog-agent"
+// altimate_change start — backport upstream PR #21185 (variant_list keybind)
+import { DialogVariant } from "@tui/component/dialog-variant"
+// altimate_change end
 import { DialogSessionList } from "@tui/component/dialog-session-list"
 import { DialogWorkspaceList } from "@tui/component/dialog-workspace-list"
 import { KeybindProvider } from "@tui/context/keybind"
@@ -623,6 +626,21 @@ function App() {
         local.model.variant.cycle()
       },
     },
+    // altimate_change start — backport upstream PR #21185 (variant_list keybind)
+    {
+      title: "Switch model variant",
+      value: "variant.list",
+      keybind: "variant_list",
+      category: "Agent",
+      hidden: local.model.variant.list().length === 0,
+      slash: {
+        name: "variants",
+      },
+      onSelect: () => {
+        dialog.replace(() => <DialogVariant />)
+      },
+    },
+    // altimate_change end
     {
       title: "Agent cycle reverse",
       value: "agent.cycle.reverse",

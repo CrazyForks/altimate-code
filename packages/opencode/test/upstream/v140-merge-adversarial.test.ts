@@ -262,15 +262,17 @@ describe("v1.4.0 merge — permission system handles new flags + settings (PR #2
     }
   })
 
-  // KNOWN REGRESSION: PR #21185 added a `variant_list` keybind for "Switch
-  // model variant" but our merge dropped both the binding and the config
-  // schema entry. Files: cli/cmd/tui/app.tsx, config/config.ts.
-  test("[KNOWN REGRESSION] PR #21185 variant_list keybind is missing from app.tsx + config.ts", async () => {
+  test("PR #21185 variant_list keybind is wired in app.tsx (Switch model variant command)", async () => {
     const app = await readText(path.join(srcDir, "cli", "cmd", "tui", "app.tsx"))
+    expect(app).toMatch(/keybind:\s*"variant_list"/)
+    expect(app).toMatch(/value:\s*"variant\.list"/)
+    // dialog component must be imported & invoked
+    expect(app).toContain("DialogVariant")
+  })
+
+  test("PR #21185 variant_list keybind is in the config schema", async () => {
     const cfg = await readText(path.join(srcDir, "config", "config.ts"))
-    // documents the regression — flip both .not.toMatch to .toMatch when restored
-    expect(app).not.toMatch(/variant_list\b|variantList\b/)
-    expect(cfg).not.toMatch(/variant_list\b|variantList\b/)
+    expect(cfg).toMatch(/variant_list:\s*z\.string\(\)/)
   })
 })
 

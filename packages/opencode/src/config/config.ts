@@ -910,6 +910,9 @@ export namespace Config {
       agent_cycle: z.string().optional().default("tab").describe("Next agent"),
       agent_cycle_reverse: z.string().optional().default("shift+tab").describe("Previous agent"),
       variant_cycle: z.string().optional().default("ctrl+t").describe("Cycle model variants"),
+      // altimate_change start — backport upstream PR #21185 (variant_list keybind)
+      variant_list: z.string().optional().default("none").describe("List model variants"),
+      // altimate_change end
       // altimate_change start - add prompt enhance keybind
       prompt_enhance: z.string().optional().default("<leader>i").describe("Enhance prompt with AI before sending"),
       // altimate_change end
