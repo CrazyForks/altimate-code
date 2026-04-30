@@ -453,6 +453,9 @@ async function runReview(
     variant,
     model: { providerID, modelID },
     tools: { "*": false }, // No tools needed for review — text-only
+    // altimate_change - non-interactive CI runner; force headless so max-steps
+    // emits a best-guess answer rather than a meta-summary.
+    headless: true,
     parts: [
       {
         id: PartID.ascending(),

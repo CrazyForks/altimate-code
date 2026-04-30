@@ -3026,6 +3026,9 @@
                   "variant": {
                     "type": "string"
                   },
+                  "headless": {
+                    "type": "boolean"
+                  },
                   "parts": {
                     "type": "array",
                     "items": {
@@ -3510,6 +3513,9 @@
                   "variant": {
                     "type": "string"
                   },
+                  "headless": {
+                    "type": "boolean"
+                  },
                   "parts": {
                     "type": "array",
                     "items": {
@@ -3641,6 +3647,9 @@
                   },
                   "variant": {
                     "type": "string"
+                  },
+                  "headless": {
+                    "type": "boolean"
                   },
                   "parts": {
                     "type": "array",
@@ -7290,6 +7299,9 @@
           },
           "variant": {
             "type": "string"
+          },
+          "headless": {
+            "type": "boolean"
           }
         },
         "required": ["id", "sessionID", "role", "time", "agent", "model"]

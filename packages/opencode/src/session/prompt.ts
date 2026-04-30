@@ -110,6 +110,9 @@ export namespace SessionPrompt {
   // - Final step in interactive mode: existing summarize-what-you-tried wording.
   // - One step before the final step in headless mode: a softer pre-warning that
   //   nudges the model to start writing its answer.
+  // The pre-warning template substitutes `{TURNS_REMAINING}` with the count of
+  // tool-using turns left (computed as `maxSteps - step`) so the wording is
+  // always internally consistent with the actual budget.
   export function selectMaxStepsPrompt(input: {
     step: number
     maxSteps: number
@@ -117,8 +120,26 @@ export namespace SessionPrompt {
   }): string | undefined {
     const { step, maxSteps, headless } = input
     if (step >= maxSteps) return headless ? MAX_STEPS_HEADLESS : MAX_STEPS
-    if (headless && Number.isFinite(maxSteps) && step === maxSteps - 1) return MAX_STEPS_HEADLESS_PREWARN
+    if (headless && Number.isFinite(maxSteps) && step === maxSteps - 1) {
+      const remaining = maxSteps - step
+      return MAX_STEPS_HEADLESS_PREWARN.replaceAll("{TURNS_REMAINING}", String(remaining))
+    }
     return undefined
+  }
+
+  // Extracted so the loop's tool-stripping behaviour is unit-testable.
+  // At the headless final step, the injected prompt promises "Tools are
+  // disabled" — to make that promise honest we strip the active tool set from
+  // the upstream request. JSON-schema mode is exempt because StructuredOutput
+  // is the only way to capture the structured response.
+  export function shouldDisableToolsForHeadlessFinalStep(input: {
+    step: number
+    maxSteps: number
+    headless: boolean
+    formatType: string
+  }): boolean {
+    const { step, maxSteps, headless, formatType } = input
+    return headless && Number.isFinite(maxSteps) && step >= maxSteps && formatType !== "json_schema"
   }
   // altimate_change end
 
@@ -606,6 +627,10 @@ export namespace SessionPrompt {
             },
             agent: lastUser.agent,
             model: lastUser.model,
+            // altimate_change - propagate headless flag; otherwise the next loop
+            // iteration's `lastUser` is this synthetic message and headless mode
+            // is silently lost, defeating the max-steps best-guess behaviour.
+            headless: lastUser.headless,
           }
           await Session.updateMessage(summaryUserMsg)
           await Session.updatePart({
@@ -903,6 +928,19 @@ export namespace SessionPrompt {
       }
       // altimate_change end
 
+      // altimate_change start - in headless mode at the final step, the
+      // injected prompt promises "Tools are disabled". Make that promise true
+      // by stripping the active tool set from the upstream request.
+      const isHeadlessFinalStep = shouldDisableToolsForHeadlessFinalStep({
+        step,
+        maxSteps,
+        headless: !!lastUser.headless,
+        formatType: format.type,
+      })
+      const effectiveTools = isHeadlessFinalStep ? ({} as typeof tools) : tools
+      const effectiveToolChoice = format.type === "json_schema" ? "required" : isHeadlessFinalStep ? "none" : undefined
+      // altimate_change end
+
       const result = await processor.process({
         user: lastUser,
         agent,
@@ -921,9 +959,11 @@ export namespace SessionPrompt {
               ]
             : []),
         ],
-        tools,
+        // altimate_change - tools and toolChoice may be overridden in headless
+        // final step to actually disable tool emission (matches prompt copy).
+        tools: effectiveTools,
         model,
-        toolChoice: format.type === "json_schema" ? "required" : undefined,
+        toolChoice: effectiveToolChoice,
       })
 
       // If structured output was captured, save it and exit immediately
@@ -2125,6 +2165,12 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     arguments: z.string(),
     command: z.string(),
     variant: z.string().optional(),
+    // altimate_change start - propagate headless flag so commands invoked via
+    // the `run --command` CLI path get the same best-guess-at-max-turns
+    // behaviour as `run -p`. Without this, `command()` builds a fresh user
+    // message with `headless` undefined and falls back to interactive max-steps.
+    headless: z.boolean().optional(),
+    // altimate_change end
     parts: z
       .array(
         z.discriminatedUnion("type", [
@@ -2285,6 +2331,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       agent: userAgent,
       parts,
       variant: input.variant,
+      // altimate_change - forward headless flag from command caller (e.g. `run --command`)
+      headless: input.headless,
     })) as MessageV2.WithParts
 
     Bus.publish(Command.Event.Executed, {
