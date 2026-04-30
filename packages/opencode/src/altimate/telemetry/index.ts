@@ -974,8 +974,19 @@ export namespace Telemetry {
     return SENSITIVE_KEYS.some((k) => lower === k || lower.endsWith(`_${k}`) || lower.startsWith(`${k}_`))
   }
 
+  // Order matters: strip API-key/bearer patterns BEFORE quote masking so a
+  // key inside quotes still gets normalized (the quote rule replaces the
+  // whole quoted span with `?`, but a key in an unquoted error message would
+  // otherwise survive). Patterns chosen for the providers we ship:
+  //   sk-ant-…   Anthropic
+  //   sk-…       OpenAI / OpenRouter (any 20+ char trailing token)
+  //   Bearer …   Authorization headers leaked in error text
+  // Each match replaces with a fixed redaction so length-based fingerprinting
+  // can't reconstruct the original token.
   export function maskString(s: string): string {
     return s
+      .replace(/sk-(?:ant-)?[A-Za-z0-9_-]{20,}/g, "sk-***")
+      .replace(/Bearer\s+[A-Za-z0-9._-]{20,}/gi, "Bearer ***")
       .replace(/'(?:[^'\\]|\\.)*'/g, "?")
       .replace(/"(?:[^"\\]|\\.)*"/g, "?")
       .replace(/\s+/g, " ")
