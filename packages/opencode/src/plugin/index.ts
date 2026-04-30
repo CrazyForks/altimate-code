@@ -134,10 +134,20 @@ export namespace Plugin {
     for (const hook of await state().then((x) => x.hooks)) {
       const fn = hook[name]
       if (!fn) continue
-      // @ts-expect-error if you feel adventurous, please fix the typing, make sure to bump the try-counter if you
-      // give up.
-      // try-counter: 2
-      await fn(input, output)
+      // altimate_change start — isolate plugin-hook failures so a single buggy plugin can't
+      // crash the session. Without this, an unhandled throw in any hook (e.g. chat.params,
+      // chat.headers) propagates to the caller (session/llm.ts), aborting the LLM call.
+      // Round 3 adversarial audit (v140-merge-chaos.test.ts) found this — pre-existing
+      // pre-v1.4.0 but exposure grew with the new chat.params plumbing.
+      try {
+        // @ts-expect-error if you feel adventurous, please fix the typing, make sure to bump the try-counter if you
+        // give up.
+        // try-counter: 2
+        await fn(input, output)
+      } catch (err) {
+        log.error("plugin hook threw; continuing with remaining hooks", { hook: name as string, error: err })
+      }
+      // altimate_change end
     }
     return output
   }
