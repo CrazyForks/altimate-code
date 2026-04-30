@@ -242,19 +242,23 @@ describe("v1.4.0 merge — tool registration without agent context (PR #21052)",
 // Permission system
 // ---------------------------------------------------------------------------
 describe("v1.4.0 merge — permission system handles new flags + settings (PR #21266, #21308)", () => {
-  // KNOWN REGRESSION (filed during v1.4.0 final-check): PR #21266 added
-  // `--dangerously-skip-permissions` to `opencode run` in upstream v1.4.0,
-  // but our merge dropped it. Tracking via this test so it'll go green
-  // automatically once the flag is restored.
-  test("[KNOWN REGRESSION] PR #21266 --dangerously-skip-permissions flag is missing from run.ts", async () => {
+  test("PR #21266 --dangerously-skip-permissions flag is wired to run subcommand (yargs option)", async () => {
     const runCmd = await readText(path.join(srcDir, "cli", "cmd", "run.ts"))
-    const upstreamHasIt = !!(await readText(path.join(srcDir, "cli", "cmd", "run.ts"))).match(/dangerously-skip-permissions/)
-    if (upstreamHasIt) {
-      // flag was restored — flip this assertion to .toMatch(...)
-      expect(runCmd).toMatch(/dangerously-skip-permissions|dangerouslySkipPermissions/)
-    } else {
-      // documents the regression; remove this branch once restored
-      expect(runCmd).not.toMatch(/dangerously-skip-permissions/)
+    expect(runCmd).toMatch(/\.option\("dangerously-skip-permissions"/)
+  })
+
+  test("PR #21266 --dangerously-skip-permissions handler routes to auto-approve path", async () => {
+    const runCmd = await readText(path.join(srcDir, "cli", "cmd", "run.ts"))
+    // We aliased it to our yolo mode (which respects explicit deny rules).
+    // Verify the args lookup is wired into the yolo branch.
+    expect(runCmd).toMatch(/args\["dangerously-skip-permissions"\]/)
+  })
+
+  test("PR #21266 flag is NOT in auth.ts (run-only)", async () => {
+    const authPath = path.join(srcDir, "cli", "cmd", "auth.ts")
+    if (existsSync(authPath)) {
+      const auth = await readText(authPath)
+      expect(auth).not.toMatch(/dangerously-skip-permissions/)
     }
   })
 

@@ -357,6 +357,13 @@ export const RunCommand = cmd({
         describe: "maximum number of assistant turns before aborting the session",
       })
       // altimate_change end
+      // altimate_change start — backport upstream PR #21266 (dropped during v1.4.0 merge)
+      .option("dangerously-skip-permissions", {
+        type: "boolean",
+        describe: "auto-approve permissions that are not explicitly denied (dangerous!)",
+        default: false,
+      })
+      // altimate_change end
   },
   handler: async (args) => {
     let message = [...args.message, ...(args["--"] || [])]
@@ -686,8 +693,11 @@ You are speaking to a non-technical business executive. Follow these rules stric
           if (event.type === "permission.asked") {
             const permission = event.properties
             if (permission.sessionID !== sessionID) continue
-            // altimate_change start - yolo mode: auto-approve but respect explicit deny rules
-            const yolo = args.yolo || Flag.ALTIMATE_CLI_YOLO
+            // altimate_change start - yolo mode: auto-approve but respect explicit deny rules.
+            // --dangerously-skip-permissions (backport of upstream PR #21266) is treated as
+            // an alias — same auto-approve behavior, plus our deny-rule safety net which
+            // the upstream implementation lacks.
+            const yolo = args.yolo || Flag.ALTIMATE_CLI_YOLO || args["dangerously-skip-permissions"]
             if (yolo) {
               // Check if any pattern matches an explicit deny rule from the session config
               const isDenied = rules.some(
