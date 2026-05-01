@@ -90,6 +90,7 @@
     "@opencode-ai/plugin": "workspace:*",
     "@opencode-ai/script": "workspace:*",
     "@opencode-ai/sdk": "workspace:*",
+    "duckdb": "1.4.4",
     "typescript": "catalog:"
   },
   "repository": {
