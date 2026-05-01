@@ -13,8 +13,15 @@ import * as adaptors from "../../src/control-plane/adaptors"
 import type { Adaptor } from "../../src/control-plane/types"
 import { Flag } from "../../src/flag/flag"
 
+// Snapshot global fetch before any test mutates it. Tests in this file replace
+// globalThis.fetch to capture proxy calls; if it leaks, every other test file
+// that uses fetch (oauth-callback, retry/ECONNRESET, HttpExporter) sees the
+// stub's "proxied" Response and fails. afterEach restores it.
+const _originalGlobalFetch = globalThis.fetch
+
 afterEach(async () => {
   mock.restore()
+  globalThis.fetch = _originalGlobalFetch
   await resetDatabase()
 })
 
@@ -54,7 +61,9 @@ async function setup(state: State) {
     },
   }
 
-  const originalFetch = globalThis.fetch
+  // The top-level afterEach restores the original globalThis.fetch — see
+  // _originalGlobalFetch snapshot above. Tests in other files (oauth-callback,
+  // retry/ECONNRESET, HttpExporter) see real fetch behavior afterward.
   globalThis.fetch = (async (input: any, init?: RequestInit) => {
     const request = input instanceof Request ? input : new Request(input, init)
     const body = request.method === "GET" || request.method === "HEAD" ? undefined : await request.text()
@@ -65,11 +74,6 @@ async function setup(state: State) {
     })
     return new Response("proxied", { status: 202 })
   }) as typeof fetch
-  // restore on test exit (the test suite's afterEach mock.restore() doesn't
-  // catch the direct globalThis assignment, so guard it explicitly)
-  const restoreFetch = () => {
-    globalThis.fetch = originalFetch
-  }
   // altimate_change end
 
   adaptors.installAdaptor("testing", TestAdaptor)
@@ -110,7 +114,6 @@ async function setup(state: State) {
     id1,
     id2,
     app,
-    restoreFetch,
     async request(input: RequestInfo | URL, init?: RequestInit) {
       return Instance.provide({
         directory: tmp.path,
