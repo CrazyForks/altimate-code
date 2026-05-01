@@ -925,6 +925,17 @@ export namespace Telemetry {
         "http 429",
         "http 451",
         "http 403",
+        // R3 audit: real provider 5xx + rate-limit messages don't carry "status code:" prefix.
+        // Add bare phrases so 503 / 502 / 504 + Retry-After / "rate limit exceeded" classify
+        // out of "unknown" into http_error (preserving diagnostic specificity in agent_outcome.error_class).
+        "service unavailable",
+        "rate limit",
+        "rate_limit",
+        "retry after",
+        "too many requests",
+        "503",
+        "502",
+        "504",
       ],
     },
     // altimate_change end

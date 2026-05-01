@@ -26,33 +26,65 @@ import path from "path"
 const repoRoot = path.resolve(import.meta.dir, "..", "..", "..", "..")
 
 // ---------- Regex DoS resistance ----------
+//
+// We measure adversarial-input runtime relative to a baseline of a benign
+// short input. This is more robust against CI runner variability than a
+// fixed wall-clock threshold: a slow runner that takes 50ms on the baseline
+// gets a 50× budget (2500ms) for adversarial input; a fast runner that takes
+// 0.5ms gets a 25ms budget. Either way, catastrophic-backtracking regressions
+// (which would be 100×–1000× slower than baseline) get caught.
+//
+// We also include a single warmup invocation before each timed run so JIT
+// optimization doesn't artificially penalize the first call.
 describe("v1.4.0 chaos — maskString regex DoS resistance", () => {
-  test("10000 backslashes processed in <100ms", () => {
+  // Baseline: trivial input. Computed once per describe block.
+  const BASELINE_INPUT = "no secrets here, just plain text"
+  const BUDGET_MULTIPLIER = 50 // adversarial input must be at most 50× baseline
+
+  function baselineMs(): number {
+    // Take min of 5 runs to filter out scheduler jitter
+    const samples: number[] = []
+    for (let i = 0; i < 5; i++) {
+      const t0 = performance.now()
+      Telemetry.maskString(BASELINE_INPUT)
+      samples.push(performance.now() - t0)
+    }
+    // 1ms floor so we don't divide-by-zero on very-fast runners
+    return Math.max(1, Math.min(...samples))
+  }
+
+  function probe(input: string, label: string): void {
+    Telemetry.maskString(input) // warmup
+    const t0 = performance.now()
+    Telemetry.maskString(input)
+    const dt = performance.now() - t0
+    const baseline = baselineMs()
+    const budget = baseline * BUDGET_MULTIPLIER
+    if (dt > budget) {
+      throw new Error(
+        `DoS regression: "${label}" took ${dt.toFixed(2)}ms (baseline ${baseline.toFixed(2)}ms × ${BUDGET_MULTIPLIER} budget = ${budget.toFixed(2)}ms)`,
+      )
+    }
+  }
+
+  test("10000 backslashes — runtime stays within 50× baseline", () => {
     const input = '"' + "\\\\".repeat(10000) + '"'
-    const t0 = performance.now()
-    Telemetry.maskString(input)
-    expect(performance.now() - t0).toBeLessThan(100)
+    expect(() => probe(input, "10000 backslashes")).not.toThrow()
   })
 
-  test("alternating quotes (10k) processed in <100ms", () => {
+  test("alternating quotes (10k) — runtime stays within 50× baseline", () => {
     const input = '""""'.repeat(2500)
-    const t0 = performance.now()
-    Telemetry.maskString(input)
-    expect(performance.now() - t0).toBeLessThan(100)
+    expect(() => probe(input, "alternating quotes")).not.toThrow()
   })
 
-  test("evil escape pattern (1k×3) processed in <100ms", () => {
+  test("evil escape pattern (1k×3) — runtime stays within 50× baseline", () => {
     const input = '"' + "\\\\.".repeat(1000) + '"'
-    const t0 = performance.now()
-    Telemetry.maskString(input)
-    expect(performance.now() - t0).toBeLessThan(100)
+    expect(() => probe(input, "evil escape pattern")).not.toThrow()
   })
 
-  test("1000 concurrent sk-ant prefixes processed in <100ms", () => {
+  test("1000 concurrent sk-ant prefixes — runtime stays within 50× baseline", () => {
     const input = ("sk-ant-" + "a".repeat(20) + " ").repeat(1000)
-    const t0 = performance.now()
-    Telemetry.maskString(input)
-    expect(performance.now() - t0).toBeLessThan(100)
+    expect(() => probe(input, "sk-ant prefix flood")).not.toThrow()
   })
 })
 

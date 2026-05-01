@@ -232,12 +232,13 @@ describe("v1.4.0 failure injection — synthetic provider errors flow through di
     expect(out.error_class).not.toBe("unknown")
   })
 
-  // KNOWN GAP: classifyError patterns lack "503" / "Service unavailable" /
-  // "Rate limit" / "Retry after" keywords. Real provider errors get
-  // classified as "unknown" — diagnostic value lost. Fix: extend
-  // ERROR_PATTERNS in altimate/telemetry/index.ts. Tests below pin the
-  // current behavior so a future fix flips them automatically.
-  test("[KNOWN GAP] APIError 503 classifies as 'unknown' (pattern coverage hole)", () => {
+  // Once gapped: classifyError patterns lacked "503" / "Service unavailable" /
+  // "Rate limit" / "Retry after" / "Too many requests" keywords, so real
+  // provider 5xx and rate-limit errors classified as "unknown" — defeating
+  // the diagnostic value of agent_outcome.error_class. ERROR_PATTERNS now
+  // includes those phrases under the http_error class. Tests below pin
+  // the new classifications.
+  test("APIError 503 classifies as 'http_error' (Service unavailable)", () => {
     const out = Telemetry.deriveAgentOutcomeReason({
       outcome: "error",
       lastToolName: "edit",
@@ -245,11 +246,11 @@ describe("v1.4.0 failure injection — synthetic provider errors flow through di
       abortReason: null,
       lastErrorClass: "",
     })
-    expect(out.error_class).toBe("unknown") // flip when pattern added
+    expect(out.error_class).toBe("http_error")
     expect(out.reason).toContain("Service unavailable")
   })
 
-  test("[KNOWN GAP] rate-limit error classifies as 'unknown' (pattern coverage hole)", () => {
+  test("rate-limit error classifies as 'http_error' (Retry after)", () => {
     const out = Telemetry.deriveAgentOutcomeReason({
       outcome: "error",
       lastToolName: null,
@@ -257,6 +258,6 @@ describe("v1.4.0 failure injection — synthetic provider errors flow through di
       abortReason: null,
       lastErrorClass: "",
     })
-    expect(out.error_class).toBe("unknown") // flip when pattern added
+    expect(out.error_class).toBe("http_error")
   })
 })
