@@ -318,6 +318,33 @@ describe("v1.4.0 merge — permission system handles new flags + settings (PR #2
       expect(hasOldAsk && !hasNewAsk).toBe(false)
     }
   })
+
+  // Broader invariant: nobody outside src/permission/ should import the Effect-TS
+  // Permission module at runtime. The Permission service has its own pending map
+  // that's separate from PermissionNext's; any runtime caller would observe an
+  // empty map. Type-only imports (used by session.sql.ts for the Ruleset shape)
+  // are fine. Block runtime imports across the whole src/ tree to prevent the
+  // half-migration that re-creates the split-brain.
+  test("no production source file outside src/permission/ imports Effect Permission at runtime", async () => {
+    const { Glob } = await import("bun")
+    const glob = new Glob("**/*.{ts,tsx}")
+    const violations: string[] = []
+    for await (const rel of glob.scan({ cwd: srcDir })) {
+      // Skip the Effect Permission module's own files.
+      if (rel.startsWith("permission/")) continue
+      const content = await readText(path.join(srcDir, rel))
+      // Catch both `import { Permission }` and `import * as Permission` — but
+      // allow `import type { Permission }` because that's just a Ruleset shape.
+      const lines = content.split("\n")
+      for (const line of lines) {
+        if (!/from\s+["']@\/permission["']/.test(line) && !/from\s+["']\.\.+\/permission["']/.test(line)) continue
+        // Allow type-only imports (compile-time only; no runtime split-brain).
+        if (/import\s+type\s/.test(line)) continue
+        violations.push(`${rel}: ${line.trim()}`)
+      }
+    }
+    expect(violations).toEqual([])
+  })
 })
 
 // ---------------------------------------------------------------------------
