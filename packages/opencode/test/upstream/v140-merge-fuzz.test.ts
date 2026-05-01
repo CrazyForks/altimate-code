@@ -184,15 +184,18 @@ describe("v1.4.0 failure injection — synthetic provider errors flow through di
   })
 
   test("Bearer token in error: redacted", () => {
+    // Synthetic 30+ char token (avoid real JWT shape — GitGuardian flags
+    // those even in test fixtures).
+    const synthetic = "abc123def456ghi789jkl012mno345pqr678"
     const out = Telemetry.deriveAgentOutcomeReason({
       outcome: "error",
       lastToolName: null,
-      lastMessageError: "Auth header rejected: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload",
+      lastMessageError: `Auth header rejected: Bearer ${synthetic}`,
       abortReason: null,
       lastErrorClass: "",
     })
     expect(out.reason).toContain("Bearer ***")
-    expect(out.reason).not.toContain("eyJhbGciOi")
+    expect(out.reason).not.toContain(synthetic.slice(0, 12))
   })
 
   test("aborted with non-string reason normalized to 'non_string_reason' (not [object Object])", () => {

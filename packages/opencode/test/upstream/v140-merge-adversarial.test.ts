@@ -191,8 +191,12 @@ describe("v1.4.0 merge — agent_outcome diagnostic fields are well-formed and s
   })
 
   test("maskString strips Bearer tokens", () => {
-    const masked = Telemetry.maskString("Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload")
-    expect(masked).not.toContain("eyJhbGciOi")
+    // Synthetic 30+ char token. We deliberately avoid a real-looking JWT
+    // header (base64-encoded "alg":"HS256") because GitGuardian pattern-
+    // matches those prefixes even in test fixtures.
+    const synthetic = "abc123def456ghi789jkl012mno345pqr678"
+    const masked = Telemetry.maskString(`Authorization: Bearer ${synthetic}`)
+    expect(masked).not.toContain(synthetic.slice(0, 12))
     expect(masked).toContain("Bearer ***")
   })
 

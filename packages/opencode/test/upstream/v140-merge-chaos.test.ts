@@ -157,10 +157,13 @@ describe("v1.4.0 chaos — KNOWN ISSUES (round 3 findings)", () => {
   // could drop the `+` without test failure. Add a multi-whitespace
   // test case to pin the behavior.
   test("[KNOWN ISSUE] maskString does NOT pin Bearer multi-whitespace behavior", () => {
-    // Both should redact. If either fails to redact, the regex broke.
-    const single = Telemetry.maskString("Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9")
-    const double = Telemetry.maskString("Authorization: Bearer  eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9")
+    // Synthetic 30+ char token (avoid real-looking JWT header which trips
+    // GitGuardian even in tests). Both single- and double-space variants
+    // must redact; if either fails, the regex broke.
+    const synthetic = "abc123def456ghi789jkl012mno345pqr678"
+    const single = Telemetry.maskString(`Authorization: Bearer ${synthetic}`)
+    const double = Telemetry.maskString(`Authorization: Bearer  ${synthetic}`)
     expect(single).toContain("Bearer ***")
-    expect(double).toContain("Bearer ***") // ← this assertion makes the test catch a future `\s+`→`\s` mutation
+    expect(double).toContain("Bearer ***") // ← pins the `\s+` mutation
   })
 })
