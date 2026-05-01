@@ -302,7 +302,7 @@ describe("bridge-merge-runtime: cycle 4 async drift", () => {
 // ---------------------------------------------------------------------------
 
 describe("bridge-merge-runtime: cycle 4 PlanExitTool reject semantic", () => {
-  test("PlanExitTool source contains the explicit `answer !== \"Yes\"` reject branch (cycle 4)", async () => {
+  test('PlanExitTool source contains the explicit `answer !== "Yes"` reject branch (cycle 4)', async () => {
     // Read the file at runtime via fs.readFile (NOT a static regex on import time).
     const planFile = path.join(srcDir, "tool", "plan.ts")
     const content = await fs.readFile(planFile, "utf-8")

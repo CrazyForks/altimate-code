@@ -71,12 +71,7 @@ export default [
 
   SyncEvent.project(Session.Event.Updated as any, (db, data: { info: Session.Info }) => {
     const info = data.info
-    const row = db
-      .update(SessionTable)
-      .set(toPartialRow(info))
-      .where(eq(SessionTable.id, info.id))
-      .returning()
-      .get()
+    const row = db.update(SessionTable).set(toPartialRow(info)).where(eq(SessionTable.id, info.id)).returning().get()
     if (!row) throw new NotFoundError({ message: `Session not found: ${info.id}` })
   }),
 

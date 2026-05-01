@@ -316,7 +316,7 @@ describe("altimate features: anthropic provider stays bundled", () => {
   test("provider.ts wires altimate-specific snowflake-cortex and databricks loaders", async () => {
     const src = await readSrc("provider", "provider.ts")
     expect(src).toContain('"snowflake-cortex":')
-    expect(src).toContain('databricks:')
+    expect(src).toContain("databricks:")
   })
 
   test("plugin/index.ts has BUILTIN list with opencode-anthropic-auth", async () => {

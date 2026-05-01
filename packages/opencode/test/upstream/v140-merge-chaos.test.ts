@@ -60,11 +60,7 @@ describe("v1.4.0 chaos — maskString regex DoS resistance", () => {
 describe("v1.4.0 chaos — deriveAgentOutcomeReason isolates state across parallel calls", () => {
   test("100 parallel calls return per-call outputs (no state bleed)", async () => {
     const inputs = Array.from({ length: 100 }, (_, i) => ({
-      outcome: ["completed", "abandoned", "aborted", "error"][i % 4] as
-        | "completed"
-        | "abandoned"
-        | "aborted"
-        | "error",
+      outcome: ["completed", "abandoned", "aborted", "error"][i % 4] as "completed" | "abandoned" | "aborted" | "error",
       lastToolName: `tool_${i}`,
       lastMessageError: i % 4 === 3 ? `error_${i}` : null,
       abortReason: i % 4 === 2 ? `reason_${i}` : null,
@@ -135,10 +131,7 @@ describe("v1.4.0 chaos — KNOWN ISSUES (round 3 findings)", () => {
   // the session at session/llm.ts:121. Round-3 fix wraps the hook call
   // in try/catch and logs failures, then continues with remaining hooks.
   test("Plugin.trigger isolates hook failures (try/catch around hook invocation)", async () => {
-    const pluginSrc = readFileSync(
-      path.join(repoRoot, "packages/opencode/src/plugin/index.ts"),
-      "utf-8",
-    )
+    const pluginSrc = readFileSync(path.join(repoRoot, "packages/opencode/src/plugin/index.ts"), "utf-8")
     // Extract the body of the trigger function
     const triggerBody = pluginSrc.match(/export async function trigger[\s\S]*?^  }$/m)?.[0] ?? ""
     // Must wrap the hook invocation in try { await fn(input, output) } catch
@@ -151,10 +144,7 @@ describe("v1.4.0 chaos — KNOWN ISSUES (round 3 findings)", () => {
     // throw, (b) the second plugin still ran. Implemented as a focused
     // shape test — the full path requires Bus + state, so this asserts
     // the source-level invariant only. Pairs with the regex test above.
-    const pluginSrc = readFileSync(
-      path.join(repoRoot, "packages/opencode/src/plugin/index.ts"),
-      "utf-8",
-    )
+    const pluginSrc = readFileSync(path.join(repoRoot, "packages/opencode/src/plugin/index.ts"), "utf-8")
     const triggerBody = pluginSrc.match(/export async function trigger[\s\S]*?^  }$/m)?.[0] ?? ""
     // The catch block must call log.error — proves we're logging not silently swallowing
     expect(triggerBody).toMatch(/catch[\s\S]*log\.error/)

@@ -318,7 +318,10 @@ function App() {
       // Check if trace file exists on disk before opening browser
       const safeId = sessionID.replace(/[/\\.:]/g, "_")
       const traceFilePath = `${Trace.getTracesDir(tracesDir())}/${safeId}.json`
-      const exists = await fsAsync.access(traceFilePath).then(() => true).catch(() => false)
+      const exists = await fsAsync
+        .access(traceFilePath)
+        .then(() => true)
+        .catch(() => false)
       if (!exists) {
         toast.show({ variant: "warning", message: "Trace not available yet — send a prompt first", duration: 4000 })
         return
@@ -328,7 +331,11 @@ function App() {
       toast.show({ variant: "info", message: `Trace viewer: ${url}`, duration: 6000 })
     } catch (err) {
       Log.Default.error(`Failed to open trace viewer: ${err}`)
-      toast.show({ variant: "warning", message: `Failed to open browser. Trace files: ${Trace.getTracesDir(tracesDir())}`, duration: 8000 })
+      toast.show({
+        variant: "warning",
+        message: `Failed to open browser. Trace files: ${Trace.getTracesDir(tracesDir())}`,
+        duration: 8000,
+      })
     }
   }
   // altimate_change end
@@ -740,11 +747,7 @@ function App() {
       onSelect: (dialog) => {
         const currentSessionID = route.data.type === "session" ? route.data.sessionID : undefined
         dialog.replace(() => (
-          <DialogTraceList
-            currentSessionID={currentSessionID}
-            tracesDir={tracesDir()}
-            onSelect={openTraceInBrowser}
-          />
+          <DialogTraceList currentSessionID={currentSessionID} tracesDir={tracesDir()} onSelect={openTraceInBrowser} />
         ))
       },
     },

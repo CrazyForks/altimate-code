@@ -31,9 +31,7 @@ async function readText(p: string): Promise<string> {
 
 // Generated/data files that legitimately contain upstream URLs (model registry,
 // upstream package metadata snapshots, etc.). Branding rules don't apply.
-const GENERATED_FILES = new Set([
-  "packages/opencode/src/provider/models-snapshot.ts",
-])
+const GENERATED_FILES = new Set(["packages/opencode/src/provider/models-snapshot.ts"])
 
 async function walkSource(dir: string, exts = [".ts", ".tsx"]): Promise<string[]> {
   const out: string[] = []
@@ -124,12 +122,10 @@ describe("bridge merge: legacy anthropic-20250930.txt must never re-enter the tr
     // appears outside comments. Catches future restoration via any mechanism
     // (git show / git checkout / Bun.write / fs.promises.writeFile / multi-line).
     const content = await readText(path.join(repoRoot, "script", "upstream", "bridge-merge.ts"))
-    const codeLines = content
-      .split("\n")
-      .filter((l) => {
-        const trimmed = l.trim()
-        return !trimmed.startsWith("//") && !trimmed.startsWith("*") && trimmed !== ""
-      })
+    const codeLines = content.split("\n").filter((l) => {
+      const trimmed = l.trim()
+      return !trimmed.startsWith("//") && !trimmed.startsWith("*") && trimmed !== ""
+    })
     expect(codeLines.join("\n")).not.toContain("anthropic-20250930")
   })
 })
@@ -142,11 +138,7 @@ describe("bridge merge: transient .github/meta/* files must never be tracked", (
   //   1) .gitignore excludes the conventional names with **/ so nested paths match
   //   2) keepOurs in script/upstream/utils/config.ts protects the directory
   //   3) no transient meta files are tracked anywhere in the repo (any depth)
-  const transientPatterns = [
-    "**/.github/meta/commit.txt",
-    "**/.github/meta/diff.txt",
-    "**/.github/meta/pr-body-*.md",
-  ]
+  const transientPatterns = ["**/.github/meta/commit.txt", "**/.github/meta/diff.txt", "**/.github/meta/pr-body-*.md"]
   const leakRegex = /(?:^|\/)\.github\/meta\/(?:commit\.txt|diff\.txt|pr-body-.*\.md)$/
 
   test(".gitignore excludes the transient meta files with nested-path coverage", async () => {
@@ -314,9 +306,7 @@ describe("bridge merge: altimate_change marker integrity", () => {
       const starts = (content.match(/altimate_change\s+start/g) ?? []).length
       const ends = (content.match(/altimate_change\s+end/g) ?? []).length
       if (starts !== ends) {
-        violations.push(
-          `${path.relative(repoRoot, file)}: ${starts} start / ${ends} end (must be equal)`,
-        )
+        violations.push(`${path.relative(repoRoot, file)}: ${starts} start / ${ends} end (must be equal)`)
       }
     }
     expect(violations).toEqual([])
@@ -347,7 +337,7 @@ describe("bridge merge: critical altimate features remain wired", () => {
     const agentPath = path.join(srcDir, "agent", "agent.ts")
     const content = await readText(agentPath)
     expect(content).toMatch(/agent === ["']build["']/)
-    expect(content).toContain("x[\"builder\"]")
+    expect(content).toContain('x["builder"]')
   })
 
   test("Altimate-specific provider plugins exist", async () => {
@@ -440,7 +430,22 @@ describe("bridge merge: workspace integrity", () => {
     const turbo = JSON.parse(await readText(path.join(repoRoot, "turbo.json")))
     const tasks = Object.keys(turbo.tasks ?? {})
     const orphaned: string[] = []
-    const skipFilesPackages = ["app", "console", "containers", "desktop", "desktop-electron", "docs", "enterprise", "extensions", "function", "identity", "slack", "storybook", "ui", "web"]
+    const skipFilesPackages = [
+      "app",
+      "console",
+      "containers",
+      "desktop",
+      "desktop-electron",
+      "docs",
+      "enterprise",
+      "extensions",
+      "function",
+      "identity",
+      "slack",
+      "storybook",
+      "ui",
+      "web",
+    ]
     for (const task of tasks) {
       if (!task.includes("#")) continue
       const [pkgName] = task.split("#")

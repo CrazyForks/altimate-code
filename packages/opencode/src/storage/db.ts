@@ -84,9 +84,9 @@ export namespace Database {
   function backfillMigrationNames(sqlite: BunDatabase, entries: Journal) {
     try {
       // Check if the migrations table exists and has the name column
-      const tableInfo = sqlite
-        .prepare("SELECT name FROM pragma_table_info('__drizzle_migrations')")
-        .all() as { name: string }[]
+      const tableInfo = sqlite.prepare("SELECT name FROM pragma_table_info('__drizzle_migrations')").all() as {
+        name: string
+      }[]
       if (!tableInfo.length || !tableInfo.some((c) => c.name === "name")) return
 
       // Find entries with NULL or empty names
@@ -205,12 +205,9 @@ export namespace Database {
     } catch (err) {
       if (err instanceof Context.NotFound) {
         const effects: (() => void | Promise<void>)[] = []
-        const result = (Client().transaction as any)(
-          (tx: TxOrDb) => {
-            return ctx.provide({ tx, effects }, () => callback(tx))
-          },
-          config,
-        )
+        const result = (Client().transaction as any)((tx: TxOrDb) => {
+          return ctx.provide({ tx, effects }, () => callback(tx))
+        }, config)
         for (const effect of effects) effect()
         return result
       }

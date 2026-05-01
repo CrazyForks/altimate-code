@@ -340,7 +340,14 @@ export namespace SessionPrompt {
     let toolErrorCount = 0
     let errorRecoveryCount = 0
     let lastToolWasError = false
-    interface ErrorRecord { toolName: string; toolCategory: string; errorClass: string; errorHash: string; recovered: boolean; recoveryTool: string }
+    interface ErrorRecord {
+      toolName: string
+      toolCategory: string
+      errorClass: string
+      errorHash: string
+      recovered: boolean
+      recoveryTool: string
+    }
     const errorRecords: ErrorRecord[] = []
     let pendingError: Omit<ErrorRecord, "recovered" | "recoveryTool"> | null = null
     // altimate_change end
@@ -654,10 +661,11 @@ export namespace SessionPrompt {
         const currentUserMsgId = lastUserMsg?.info.id
         if (planHasWritten && step > 1 && currentUserMsgId && currentUserMsgId !== planLastUserMsgId) {
           planLastUserMsgId = currentUserMsgId
-          const userText = lastUserMsg?.parts
-            .filter((p): p is MessageV2.TextPart => p.type === "text" && !("synthetic" in p && p.synthetic))
-            .map((p) => p.text.toLowerCase())
-            .join(" ") ?? ""
+          const userText =
+            lastUserMsg?.parts
+              .filter((p): p is MessageV2.TextPart => p.type === "text" && !("synthetic" in p && p.synthetic))
+              .map((p) => p.text.toLowerCase())
+              .join(" ") ?? ""
 
           if (planRevisionCount >= 5) {
             // Cap reached — track and inject a synthetic hint so the LLM informs the user
@@ -688,13 +696,46 @@ export namespace SessionPrompt {
 
             // Refinement qualifiers: if the user says "yes, but ..." or "approve, however ..."
             // they intend to refine, not approve. Check for these before pure approval.
-            const refinementQualifiers = [" but ", " however ", " except ", " change ", " modify ", " update ", " instead ", " although ", " with the following", " with these"]
+            const refinementQualifiers = [
+              " but ",
+              " however ",
+              " except ",
+              " change ",
+              " modify ",
+              " update ",
+              " instead ",
+              " although ",
+              " with the following",
+              " with these",
+            ]
             const hasRefinementQualifier = refinementQualifiers.some((q) => userText.includes(q))
 
-            const rejectionPhrases = ["don't", "stop", "reject", "not good", "not approve", "not approved", "disapprove", "undo", "abort", "start over", "wrong"]
+            const rejectionPhrases = [
+              "don't",
+              "stop",
+              "reject",
+              "not good",
+              "not approve",
+              "not approved",
+              "disapprove",
+              "undo",
+              "abort",
+              "start over",
+              "wrong",
+            ]
             // "no" as a standalone word to avoid matching "know", "notion", etc.
             const rejectionWords = ["no"]
-            const approvalPhrases = ["looks good", "proceed", "approved", "approve", "lgtm", "go ahead", "ship it", "yes", "perfect"]
+            const approvalPhrases = [
+              "looks good",
+              "proceed",
+              "approved",
+              "approve",
+              "lgtm",
+              "go ahead",
+              "ship it",
+              "yes",
+              "perfect",
+            ]
 
             const isRejectionPhrase = rejectionPhrases.some((phrase) => userText.includes(phrase))
             const isRejectionWord = rejectionWords.some((word) => {
@@ -704,10 +745,13 @@ export namespace SessionPrompt {
             const isRejection = isRejectionPhrase || isRejectionWord
             // Use word-boundary matching for approval phrases to avoid false positives
             // e.g. "this doesn't look good" should NOT match "looks good"
-            const isApproval = !isRejection && !hasRefinementQualifier && approvalPhrases.some((phrase) => {
-              const regex = new RegExp(`\\b${phrase.replace(/\s+/g, "\\s+")}\\b`, "i")
-              return regex.test(userText)
-            })
+            const isApproval =
+              !isRejection &&
+              !hasRefinementQualifier &&
+              approvalPhrases.some((phrase) => {
+                const regex = new RegExp(`\\b${phrase.replace(/\s+/g, "\\s+")}\\b`, "i")
+                return regex.test(userText)
+              })
             const action = isRejection ? "reject" : isApproval ? "approve" : "refine"
             Telemetry.track({
               type: "plan_revision",
@@ -808,9 +852,22 @@ export namespace SessionPrompt {
           if (userText.length > 0) {
             const { intent, confidence } = Telemetry.classifyTaskIntent(userText)
             const fp = Fingerprint.get()
-            const warehouseType = fp?.tags.find((t) =>
-              ["snowflake", "bigquery", "redshift", "databricks", "postgres", "mysql", "sqlite", "duckdb", "trino", "spark", "clickhouse"].includes(t),
-            ) ?? "unknown"
+            const warehouseType =
+              fp?.tags.find((t) =>
+                [
+                  "snowflake",
+                  "bigquery",
+                  "redshift",
+                  "databricks",
+                  "postgres",
+                  "mysql",
+                  "sqlite",
+                  "duckdb",
+                  "trino",
+                  "spark",
+                  "clickhouse",
+                ].includes(t),
+              ) ?? "unknown"
             Telemetry.track({
               type: "task_classified",
               timestamp: Date.now(),
@@ -849,10 +906,12 @@ export namespace SessionPrompt {
       // Build system prompt, adding structured output instruction if needed
       const skills = await SystemPrompt.skills(agent)
       // altimate_change start - unified context-aware injection for memory + training
-      const knowledgeInjection = Flag.ALTIMATE_DISABLE_MEMORY ? "" : await MemoryPrompt.inject(
-        UNIFIED_INJECTION_BUDGET,
-        { agent: agent.name, disableTraining: Flag.ALTIMATE_DISABLE_TRAINING },
-      )
+      const knowledgeInjection = Flag.ALTIMATE_DISABLE_MEMORY
+        ? ""
+        : await MemoryPrompt.inject(UNIFIED_INJECTION_BUDGET, {
+            agent: agent.name,
+            disableTraining: Flag.ALTIMATE_DISABLE_TRAINING,
+          })
       // altimate_change end
       const system = [
         ...(await SystemPrompt.environment(model)),
@@ -929,7 +988,7 @@ export namespace SessionPrompt {
       // altimate_change start — accumulate session metrics
       sessionTotalCost += processor.message.cost ?? 0
       const t = processor.message.tokens
-      sessionTotalTokens += (t.input + t.output + t.reasoning + t.cache.read + t.cache.write)
+      sessionTotalTokens += t.input + t.output + t.reasoning + t.cache.read + t.cache.write
       const stepParts = await MessageV2.parts(processor.message.id)
       toolCallCount += stepParts.filter((p) => p.type === "tool").length
       if (processor.message.error) sessionHadError = true
@@ -950,7 +1009,7 @@ export namespace SessionPrompt {
       const toolParts = stepParts.filter((p) => p.type === "tool")
       for (const part of toolParts) {
         if (part.type !== "tool") continue
-        const toolType = part.tool.startsWith("mcp__") ? "mcp" as const : "standard" as const
+        const toolType = part.tool.startsWith("mcp__") ? ("mcp" as const) : ("standard" as const)
         const toolCategory = Telemetry.categorizeToolName(part.tool, toolType)
         lastToolCategory = toolCategory
         // altimate_change start — track last tool name for agent_outcome diagnostics
@@ -965,7 +1024,8 @@ export namespace SessionPrompt {
             if (errorRecords.length < 200) errorRecords.push({ ...pendingError, recovered: false, recoveryTool: "" })
           }
           lastToolWasError = true
-          const errorMsg = part.state.status === "error" && typeof part.state.error === "string" ? part.state.error : "unknown"
+          const errorMsg =
+            part.state.status === "error" && typeof part.state.error === "string" ? part.state.error : "unknown"
           const masked = Telemetry.maskString(errorMsg).slice(0, 500)
           pendingError = {
             toolName: part.tool,
@@ -976,7 +1036,8 @@ export namespace SessionPrompt {
         } else {
           if (lastToolWasError && pendingError) {
             errorRecoveryCount++
-            if (errorRecords.length < 200) errorRecords.push({ ...pendingError, recovered: true, recoveryTool: part.tool })
+            if (errorRecords.length < 200)
+              errorRecords.push({ ...pendingError, recovered: true, recoveryTool: part.tool })
             pendingError = null
           }
           lastToolWasError = false
@@ -1068,17 +1129,15 @@ export namespace SessionPrompt {
     // altimate_change end — emit quality signal, tool chain, and error fingerprint events
     // altimate_change start — populate agent_outcome diagnostic fields
     const abortReason: string | null = abort.aborted
-      ? (typeof abort.reason === "string"
-          ? abort.reason
-          : abort.reason instanceof Error
-            ? abort.reason.message
-            : abort.reason
-              ? "non_string_reason"
-              : null)
+      ? typeof abort.reason === "string"
+        ? abort.reason
+        : abort.reason instanceof Error
+          ? abort.reason.message
+          : abort.reason
+            ? "non_string_reason"
+            : null
       : null
-    const lastErrorClass = errorRecords.length > 0
-      ? errorRecords[errorRecords.length - 1].errorClass
-      : ""
+    const lastErrorClass = errorRecords.length > 0 ? errorRecords[errorRecords.length - 1].errorClass : ""
     const diag = Telemetry.deriveAgentOutcomeReason({
       outcome,
       lastToolName: lastToolName || null,
@@ -1353,7 +1412,7 @@ export namespace SessionPrompt {
       },
       toModelOutput(result) {
         // result.output is the tool's return value (an object with `output: string`).
-        const value = typeof result.output === "string" ? result.output : (result.output as any)?.output ?? ""
+        const value = typeof result.output === "string" ? result.output : ((result.output as any)?.output ?? "")
         return {
           type: "text",
           value,
@@ -1366,7 +1425,9 @@ export namespace SessionPrompt {
     const agentName = input.agent ?? (await Agent.defaultAgent())
     const agent = await Agent.get(agentName)
     if (!agent) {
-      const available = await Agent.list().then((agents) => agents.filter((a: any) => !a.hidden).map((a: any) => a.name))
+      const available = await Agent.list().then((agents) =>
+        agents.filter((a: any) => !a.hidden).map((a: any) => a.name),
+      )
       const hint = available.length ? ` Available agents: ${available.join(", ")}` : ""
       throw new NamedError.Unknown({ message: `Agent not found: "${agentName}".${hint}` })
     }
@@ -2189,7 +2250,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     const command = await Command.get(input.command)
     if (!command) {
       const all = await Command.list()
-      const names = all.map((c: any) => c.name).filter(Boolean).sort()
+      const names = all
+        .map((c: any) => c.name)
+        .filter(Boolean)
+        .sort()
       throw new NamedError.Unknown({
         message: `Command not found: "${input.command}". Available: ${names.join(", ") || "(none)"}`,
       })
@@ -2219,7 +2283,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     const usesArgumentsPlaceholder = templateCommand.includes("$ARGUMENTS")
     // altimate_change start — allow $$ARGUMENTS to produce literal $ARGUMENTS in output
     const ESCAPE_SENTINEL = "\x00ESCAPED_DOLLAR_ARGUMENTS\x00"
-    let template = withArgs.replaceAll("$$ARGUMENTS", ESCAPE_SENTINEL).replaceAll("$ARGUMENTS", input.arguments).replaceAll(ESCAPE_SENTINEL, "$ARGUMENTS")
+    let template = withArgs
+      .replaceAll("$$ARGUMENTS", ESCAPE_SENTINEL)
+      .replaceAll("$ARGUMENTS", input.arguments)
+      .replaceAll(ESCAPE_SENTINEL, "$ARGUMENTS")
     // altimate_change end
 
     // If command doesn't explicitly handle arguments (no $N or $ARGUMENTS placeholders)

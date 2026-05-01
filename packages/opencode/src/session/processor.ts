@@ -328,7 +328,9 @@ export namespace SessionProcessor {
                     tokens_input: usage.tokens.input,
                     tokens_output: usage.tokens.output,
                     // altimate_change start — include total input tokens (with cache) when they differ from tokens_input
-                    ...(usage.tokens.inputTotal !== usage.tokens.input && { tokens_input_total: usage.tokens.inputTotal }),
+                    ...(usage.tokens.inputTotal !== usage.tokens.input && {
+                      tokens_input_total: usage.tokens.inputTotal,
+                    }),
                     // altimate_change end
                     ...(value.usage.reasoningTokens !== undefined && { tokens_reasoning: usage.tokens.reasoning }),
                     ...(value.usage.cachedInputTokens !== undefined && { tokens_cache_read: usage.tokens.cache.read }),
@@ -497,7 +499,7 @@ export namespace SessionProcessor {
               const retry = SessionRetry.retryable(error)
               // altimate_change start — cap retries to avoid infinite loops, log on exhaustion
               if (retry !== undefined && attempt < SessionRetry.RETRY_MAX_ATTEMPTS) {
-              // altimate_change end
+                // altimate_change end
                 attempt++
                 const delay = SessionRetry.delay(attempt, error.name === "APIError" ? error : undefined)
                 // altimate_change start — SessionStatus.set became async in v1.4.0; await so retry state flushes before sleep

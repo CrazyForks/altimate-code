@@ -228,7 +228,7 @@ function splitSqlStatements(sql: string): string[] {
     } else if (inStr && ch === strChar) {
       inStr = false
       current.push(ch)
-    } else if (!inStr && ch === ";" ) {
+    } else if (!inStr && ch === ";") {
       const s = current.join("").trim()
       if (s) stmts.push(s)
       current.length = 0
@@ -251,119 +251,121 @@ export const RunCommand = cmd({
   command: "run [message..]",
   describe: "run altimate with a message",
   builder: (yargs: Argv) => {
-    return yargs
-      .positional("message", {
-        describe: "message to send",
-        type: "string",
-        array: true,
-        default: [],
-      })
-      .option("command", {
-        describe: "the command to run, use message for args",
-        type: "string",
-      })
-      .option("continue", {
-        alias: ["c"],
-        describe: "continue the last session",
-        type: "boolean",
-      })
-      .option("session", {
-        alias: ["s"],
-        describe: "session id to continue",
-        type: "string",
-      })
-      .option("fork", {
-        describe: "fork the session before continuing (requires --continue or --session)",
-        type: "boolean",
-      })
-      .option("share", {
-        type: "boolean",
-        describe: "share the session",
-      })
-      .option("model", {
-        type: "string",
-        alias: ["m"],
-        describe: "model to use in the format of provider/model",
-      })
-      .option("agent", {
-        type: "string",
-        describe: "agent to use",
-      })
-      .option("format", {
-        type: "string",
-        choices: ["default", "json"],
-        default: "default",
-        describe: "format: default (formatted) or json (raw JSON events)",
-      })
-      .option("file", {
-        alias: ["f"],
-        type: "string",
-        array: true,
-        describe: "file(s) to attach to message",
-      })
-      .option("title", {
-        type: "string",
-        describe: "title for the session (uses truncated prompt if no value provided)",
-      })
-      .option("attach", {
-        type: "string",
-        describe: "attach to a running altimate server (e.g., http://localhost:4096)",
-      })
-      .option("password", {
-        alias: ["p"],
-        type: "string",
-        describe: "basic auth password (defaults to OPENCODE_SERVER_PASSWORD)",
-      })
-      .option("dir", {
-        type: "string",
-        describe: "directory to run in, path on remote server if attaching",
-      })
-      .option("port", {
-        type: "number",
-        describe: "port for the local server (defaults to random port if no value provided)",
-      })
-      .option("variant", {
-        type: "string",
-        describe: "model variant (provider-specific reasoning effort, e.g., high, max, minimal)",
-      })
-      .option("thinking", {
-        type: "boolean",
-        describe: "show thinking blocks",
-        default: false,
-      })
-      .option("output", {
-        alias: ["o"],
-        type: "string",
-        describe: "write final assistant response to file (.md or .txt)",
-      })
-      .option("audience", {
-        type: "string",
-        choices: ["executive", "technical"] as const,
-        describe: "output calibration: executive (no SQL/jargon, business framing) or technical (default)",
-      })
-      .option("query", {
-        alias: ["q"],
-        type: "number",
-        describe: "when using --file with a SQL file, analyze only the Nth statement (1-indexed)",
-      })
-      .option("trace", {
-        type: "boolean",
-        describe: "enable session tracing (default: true, disable with --no-trace)",
-        default: true,
-      })
-      // altimate_change start — budget limits for CI/enterprise governance
-      .option("max-turns", {
-        type: "number",
-        describe: "maximum number of assistant turns before aborting the session",
-      })
-      // altimate_change end
-      // altimate_change start — backport upstream PR #21266 (dropped during v1.4.0 merge)
-      .option("dangerously-skip-permissions", {
-        type: "boolean",
-        describe: "auto-approve permissions that are not explicitly denied (dangerous!)",
-        default: false,
-      })
-      // altimate_change end
+    return (
+      yargs
+        .positional("message", {
+          describe: "message to send",
+          type: "string",
+          array: true,
+          default: [],
+        })
+        .option("command", {
+          describe: "the command to run, use message for args",
+          type: "string",
+        })
+        .option("continue", {
+          alias: ["c"],
+          describe: "continue the last session",
+          type: "boolean",
+        })
+        .option("session", {
+          alias: ["s"],
+          describe: "session id to continue",
+          type: "string",
+        })
+        .option("fork", {
+          describe: "fork the session before continuing (requires --continue or --session)",
+          type: "boolean",
+        })
+        .option("share", {
+          type: "boolean",
+          describe: "share the session",
+        })
+        .option("model", {
+          type: "string",
+          alias: ["m"],
+          describe: "model to use in the format of provider/model",
+        })
+        .option("agent", {
+          type: "string",
+          describe: "agent to use",
+        })
+        .option("format", {
+          type: "string",
+          choices: ["default", "json"],
+          default: "default",
+          describe: "format: default (formatted) or json (raw JSON events)",
+        })
+        .option("file", {
+          alias: ["f"],
+          type: "string",
+          array: true,
+          describe: "file(s) to attach to message",
+        })
+        .option("title", {
+          type: "string",
+          describe: "title for the session (uses truncated prompt if no value provided)",
+        })
+        .option("attach", {
+          type: "string",
+          describe: "attach to a running altimate server (e.g., http://localhost:4096)",
+        })
+        .option("password", {
+          alias: ["p"],
+          type: "string",
+          describe: "basic auth password (defaults to OPENCODE_SERVER_PASSWORD)",
+        })
+        .option("dir", {
+          type: "string",
+          describe: "directory to run in, path on remote server if attaching",
+        })
+        .option("port", {
+          type: "number",
+          describe: "port for the local server (defaults to random port if no value provided)",
+        })
+        .option("variant", {
+          type: "string",
+          describe: "model variant (provider-specific reasoning effort, e.g., high, max, minimal)",
+        })
+        .option("thinking", {
+          type: "boolean",
+          describe: "show thinking blocks",
+          default: false,
+        })
+        .option("output", {
+          alias: ["o"],
+          type: "string",
+          describe: "write final assistant response to file (.md or .txt)",
+        })
+        .option("audience", {
+          type: "string",
+          choices: ["executive", "technical"] as const,
+          describe: "output calibration: executive (no SQL/jargon, business framing) or technical (default)",
+        })
+        .option("query", {
+          alias: ["q"],
+          type: "number",
+          describe: "when using --file with a SQL file, analyze only the Nth statement (1-indexed)",
+        })
+        .option("trace", {
+          type: "boolean",
+          describe: "enable session tracing (default: true, disable with --no-trace)",
+          default: true,
+        })
+        // altimate_change start — budget limits for CI/enterprise governance
+        .option("max-turns", {
+          type: "number",
+          describe: "maximum number of assistant turns before aborting the session",
+        })
+        // altimate_change end
+        // altimate_change start — backport upstream PR #21266 (dropped during v1.4.0 merge)
+        .option("dangerously-skip-permissions", {
+          type: "boolean",
+          describe: "auto-approve permissions that are not explicitly denied (dangerous!)",
+          default: false,
+        })
+    )
+    // altimate_change end
   },
   handler: async (args) => {
     let message = [...args.message, ...(args["--"] || [])]
@@ -414,11 +416,13 @@ export const RunCommand = cmd({
         const stmts = splitSqlStatements(content)
         const n = args.query
         if (n < 1 || n > stmts.length) {
-          UI.error(`--query ${n} is out of range (${path.basename(filePath)} has ${stmts.length} statement${stmts.length === 1 ? "" : "s"})`)
+          UI.error(
+            `--query ${n} is out of range (${path.basename(filePath)} has ${stmts.length} statement${stmts.length === 1 ? "" : "s"})`,
+          )
           process.exit(1)
         }
         extractedParts.push(
-          `[${path.basename(filePath)}, statement ${n} of ${stmts.length}]\n\`\`\`sql\n${stmts[n - 1].trim()}\n\`\`\``
+          `[${path.basename(filePath)}, statement ${n} of ${stmts.length}]\n\`\`\`sql\n${stmts[n - 1].trim()}\n\`\`\``,
         )
       }
       // Replace file attachments with extracted statement as inline text
@@ -624,10 +628,7 @@ You are speaking to a non-technical business executive. Follow these rules stric
               turnCount++
               if (maxTurns && turnCount > maxTurns) {
                 error = `Budget exceeded: reached ${maxTurns} assistant turn${maxTurns !== 1 ? "s" : ""} limit`
-                UI.println(
-                  UI.Style.TEXT_DANGER_BOLD + "!",
-                  UI.Style.TEXT_NORMAL + ` ${error}. Aborting session.`,
-                )
+                UI.println(UI.Style.TEXT_DANGER_BOLD + "!", UI.Style.TEXT_NORMAL + ` ${error}. Aborting session.`)
                 await sdk.session.abort({ sessionID })
                 break
               }
@@ -794,9 +795,17 @@ You are speaking to a non-technical business executive. Follow these rules stric
       // altimate_change end
 
       // Register crash handlers to flush the trace on unexpected exit
-      const onSigint = () => { tracer?.flushSync("Process interrupted"); process.exit(130) }
-      const onSigterm = () => { tracer?.flushSync("Process interrupted"); process.exit(143) }
-      const onBeforeExit = () => { tracer?.flushSync("Process exited") }
+      const onSigint = () => {
+        tracer?.flushSync("Process interrupted")
+        process.exit(130)
+      }
+      const onSigterm = () => {
+        tracer?.flushSync("Process interrupted")
+        process.exit(143)
+      }
+      const onBeforeExit = () => {
+        tracer?.flushSync("Process exited")
+      }
       process.on("SIGINT", onSigint)
       process.on("SIGTERM", onSigterm)
       process.on("beforeExit", onBeforeExit)

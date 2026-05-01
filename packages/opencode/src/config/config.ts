@@ -1102,7 +1102,7 @@ export namespace Config {
         .optional()
         // altimate_change start — altimate docs URL
         .describe("Command configuration, see https://docs.altimate.sh/configure/commands/"),
-        // altimate_change end
+      // altimate_change end
       skills: Skills.optional().describe("Additional skill folder paths"),
       watcher: z
         .object({
@@ -1171,7 +1171,7 @@ export namespace Config {
         .optional()
         // altimate_change start — altimate docs URL
         .describe("Agent configuration, see https://docs.altimate.sh/configure/agents/"),
-        // altimate_change end
+      // altimate_change end
       provider: z
         .record(z.string(), Provider)
         .optional()

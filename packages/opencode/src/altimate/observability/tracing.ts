@@ -298,8 +298,12 @@ function formatDurationShort(ms: number): string {
 export class Trace {
   // Global active trace — set when a session starts, cleared on end.
   private static _active: Trace | null = null
-  static get active(): Trace | null { return Trace._active }
-  static setActive(trace: Trace | null) { Trace._active = trace }
+  static get active(): Trace | null {
+    return Trace._active
+  }
+  static setActive(trace: Trace | null) {
+    Trace._active = trace
+  }
 
   private traceId: string
   private sessionId: string | undefined
@@ -321,7 +325,13 @@ export class Trace {
 
   // altimate_change start — trace: loop detection state
   private toolCallHistory: Array<{ tool: string; inputHash: string; time: number }> = []
-  private loopsDetected: Array<{ tool: string; inputHash: string; count: number; firstSeen: number; lastSeen: number }> = []
+  private loopsDetected: Array<{
+    tool: string
+    inputHash: string
+    count: number
+    firstSeen: number
+    lastSeen: number
+  }> = []
   // altimate_change end
 
   private metadata: TraceFile["metadata"] = {}
@@ -423,12 +433,7 @@ export class Trace {
    * Enrich the trace with model/provider info from the first assistant message.
    * Called when the message.updated event fires with assistant role.
    */
-  enrichFromAssistant(info: {
-    modelID?: string
-    providerID?: string
-    agent?: string
-    variant?: string
-  }) {
+  enrichFromAssistant(info: { modelID?: string; providerID?: string; agent?: string; variant?: string }) {
     try {
       if (!info) return
       if (info.modelID) this.metadata.model = `${info.providerID ?? ""}/${info.modelID}`
@@ -524,9 +529,7 @@ export class Trace {
       const textOutput = this.generationText.join("")
       const output =
         textOutput ||
-        (this.generationToolCalls.length > 0
-          ? `[tool calls: ${this.generationToolCalls.join(", ")}]`
-          : undefined)
+        (this.generationToolCalls.length > 0 ? `[tool calls: ${this.generationToolCalls.join(", ")}]` : undefined)
 
       const span = this.spans.find((s) => s.spanId === this.currentGenerationSpanId)
       if (span) {
@@ -580,9 +583,7 @@ export class Trace {
 
       const errorStr = isError ? String(state.error ?? "") : ""
       const outputStr = !isError ? String(state.output ?? "") : ""
-      const outputSummary = isError
-        ? `error: ${errorStr.slice(0, 200)}`
-        : outputStr.slice(0, 500)
+      const outputSummary = isError ? `error: ${errorStr.slice(0, 200)}` : outputStr.slice(0, 500)
       this.pendingToolResults.push({ tool: toolName, summary: outputSummary })
 
       const time = state.time ?? { start: Date.now(), end: Date.now() }
@@ -761,7 +762,8 @@ export class Trace {
     // Atomic write: write to temp file, then rename (prevents partial reads).
     // We re-check `this.crashed` immediately before rename so a flushSync that
     // ran *during* the write doesn't get clobbered.
-    this.snapshotPromise = fs.mkdir(this.snapshotDir, { recursive: true })
+    this.snapshotPromise = fs
+      .mkdir(this.snapshotDir, { recursive: true })
       .then(() => fs.writeFile(tmpPath, JSON.stringify(trace, null, 2)))
       .then(() => {
         if (this.crashed) {
@@ -908,14 +910,17 @@ export class Trace {
 
       // Narrative
       const dur = formatDurationShort(trace.summary.duration)
-      const top3 = topTools.slice(0, 3).map((t) => t.name).join(", ")
+      const top3 = topTools
+        .slice(0, 3)
+        .map((t) => t.name)
+        .join(", ")
       const toolsStr = top3 ? ` using ${toolCounts.size} tools (${top3})` : ""
-      const loopWarning = this.loopsDetected.length > 0
-        ? ` Warning: ${this.loopsDetected.length} loop(s) detected.`
-        : ""
+      const loopWarning =
+        this.loopsDetected.length > 0 ? ` Warning: ${this.loopsDetected.length} loop(s) detected.` : ""
       const costStr = Number.isFinite(this.totalCost) ? `$${this.totalCost.toFixed(4)}` : "$0.0000"
       const statusPrefix = error ? `Failed after ${dur}` : `Completed in ${dur}`
-      const llmStr = this.generationCount > 0 ? `. Made ${this.generationCount} LLM call${this.generationCount > 1 ? "s" : ""}` : ""
+      const llmStr =
+        this.generationCount > 0 ? `. Made ${this.generationCount} LLM call${this.generationCount > 1 ? "s" : ""}` : ""
       trace.summary.narrative = `${statusPrefix}${llmStr}${toolsStr}.${loopWarning} Total cost: ${costStr}.`
     } catch {
       // Narrative generation must never crash the trace

@@ -55,7 +55,10 @@ interface CliResult {
  * Uses ALTIMATE_HOME / XDG_* / OPENCODE_DISABLE_TELEMETRY env vars to
  * isolate the run from the developer's local config.
  */
-function runCli(args: string[], opts: { cwd?: string; timeoutMs?: number; env?: Record<string, string> } = {}): CliResult {
+function runCli(
+  args: string[],
+  opts: { cwd?: string; timeoutMs?: number; env?: Record<string, string> } = {},
+): CliResult {
   const cwd = opts.cwd ?? testRoot
   const timeout = opts.timeoutMs ?? 15_000
   const home = path.join(testRoot, "home-" + Math.random().toString(36).slice(2, 8))
@@ -139,9 +142,7 @@ describe("E2E: CLI discovery (cycle 7 rebrand)", () => {
       const r = runCli([sub, "--help"])
       expect(r.status).toBe(0)
       const out = stripAnsi(r.combined)
-      const violations = out
-        .split("\n")
-        .filter((l) => /\bOpenCode\b/.test(l) && !/OpenCodeError/.test(l))
+      const violations = out.split("\n").filter((l) => /\bOpenCode\b/.test(l) && !/OpenCodeError/.test(l))
       expect(violations).toEqual([])
     })
   }

@@ -32,7 +32,14 @@ export namespace Plugin {
   // vs the workspace version, causing a type mismatch on internal HeyApiClient.
   // The types are structurally compatible at runtime.
   // altimate_change start — snowflake cortex, databricks, and altimate backend internal plugins
-  const INTERNAL_PLUGINS: PluginInstance[] = [CodexAuthPlugin, CopilotAuthPlugin, GitlabAuthPlugin as unknown as PluginInstance, SnowflakeCortexAuthPlugin, DatabricksAuthPlugin, AltimateAuthPlugin]
+  const INTERNAL_PLUGINS: PluginInstance[] = [
+    CodexAuthPlugin,
+    CopilotAuthPlugin,
+    GitlabAuthPlugin as unknown as PluginInstance,
+    SnowflakeCortexAuthPlugin,
+    DatabricksAuthPlugin,
+    AltimateAuthPlugin,
+  ]
   // altimate_change end
 
   const state = Instance.state(async () => {

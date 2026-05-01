@@ -1021,34 +1021,103 @@ export namespace Provider {
       options: {},
       models: {
         // Claude models — tool calling supported
-        "claude-sonnet-4-6": makeSnowflakeModel("claude-sonnet-4-6", "Claude Sonnet 4.6", { context: 200000, output: 64000 }),
+        "claude-sonnet-4-6": makeSnowflakeModel("claude-sonnet-4-6", "Claude Sonnet 4.6", {
+          context: 200000,
+          output: 64000,
+        }),
         "claude-opus-4-6": makeSnowflakeModel("claude-opus-4-6", "Claude Opus 4.6", { context: 200000, output: 32000 }),
-        "claude-sonnet-4-5": makeSnowflakeModel("claude-sonnet-4-5", "Claude Sonnet 4.5", { context: 200000, output: 64000 }),
+        "claude-sonnet-4-5": makeSnowflakeModel("claude-sonnet-4-5", "Claude Sonnet 4.5", {
+          context: 200000,
+          output: 64000,
+        }),
         "claude-opus-4-5": makeSnowflakeModel("claude-opus-4-5", "Claude Opus 4.5", { context: 200000, output: 32000 }),
-        "claude-haiku-4-5": makeSnowflakeModel("claude-haiku-4-5", "Claude Haiku 4.5", { context: 200000, output: 16000 }),
+        "claude-haiku-4-5": makeSnowflakeModel("claude-haiku-4-5", "Claude Haiku 4.5", {
+          context: 200000,
+          output: 16000,
+        }),
         "claude-4-sonnet": makeSnowflakeModel("claude-4-sonnet", "Claude 4 Sonnet", { context: 200000, output: 64000 }),
         // claude-4-opus: documented but gated (403 "account not allowed" on tested accounts)
-        "claude-3-7-sonnet": makeSnowflakeModel("claude-3-7-sonnet", "Claude 3.7 Sonnet", { context: 200000, output: 16000 }),
-        "claude-3-5-sonnet": makeSnowflakeModel("claude-3-5-sonnet", "Claude 3.5 Sonnet", { context: 200000, output: 8192 }),
+        "claude-3-7-sonnet": makeSnowflakeModel("claude-3-7-sonnet", "Claude 3.7 Sonnet", {
+          context: 200000,
+          output: 16000,
+        }),
+        "claude-3-5-sonnet": makeSnowflakeModel("claude-3-5-sonnet", "Claude 3.5 Sonnet", {
+          context: 200000,
+          output: 8192,
+        }),
         // OpenAI models — tool calling supported
         "openai-gpt-4.1": makeSnowflakeModel("openai-gpt-4.1", "OpenAI GPT-4.1", { context: 1047576, output: 32768 }),
         "openai-gpt-5": makeSnowflakeModel("openai-gpt-5", "OpenAI GPT-5", { context: 1047576, output: 32768 }),
-        "openai-gpt-5-mini": makeSnowflakeModel("openai-gpt-5-mini", "OpenAI GPT-5 Mini", { context: 1047576, output: 32768 }),
-        "openai-gpt-5-nano": makeSnowflakeModel("openai-gpt-5-nano", "OpenAI GPT-5 Nano", { context: 1047576, output: 32768 }),
-        "openai-gpt-5-chat": makeSnowflakeModel("openai-gpt-5-chat", "OpenAI GPT-5 Chat", { context: 1047576, output: 32768 }),
+        "openai-gpt-5-mini": makeSnowflakeModel("openai-gpt-5-mini", "OpenAI GPT-5 Mini", {
+          context: 1047576,
+          output: 32768,
+        }),
+        "openai-gpt-5-nano": makeSnowflakeModel("openai-gpt-5-nano", "OpenAI GPT-5 Nano", {
+          context: 1047576,
+          output: 32768,
+        }),
+        "openai-gpt-5-chat": makeSnowflakeModel("openai-gpt-5-chat", "OpenAI GPT-5 Chat", {
+          context: 1047576,
+          output: 32768,
+        }),
         // openai-gpt-oss-120b: documented but returns 500 (not yet stable)
         // Meta Llama — no tool calling
-        "llama4-maverick": makeSnowflakeModel("llama4-maverick", "Llama 4 Maverick", { context: 1048576, output: 4096 }, { toolcall: false }),
-        "snowflake-llama-3.3-70b": makeSnowflakeModel("snowflake-llama-3.3-70b", "Snowflake Llama 3.3 70B", { context: 128000, output: 4096 }, { toolcall: false }),
-        "llama3.1-70b": makeSnowflakeModel("llama3.1-70b", "Llama 3.1 70B", { context: 128000, output: 4096 }, { toolcall: false }),
-        "llama3.1-405b": makeSnowflakeModel("llama3.1-405b", "Llama 3.1 405B", { context: 128000, output: 4096 }, { toolcall: false }),
-        "llama3.1-8b": makeSnowflakeModel("llama3.1-8b", "Llama 3.1 8B", { context: 128000, output: 4096 }, { toolcall: false }),
+        "llama4-maverick": makeSnowflakeModel(
+          "llama4-maverick",
+          "Llama 4 Maverick",
+          { context: 1048576, output: 4096 },
+          { toolcall: false },
+        ),
+        "snowflake-llama-3.3-70b": makeSnowflakeModel(
+          "snowflake-llama-3.3-70b",
+          "Snowflake Llama 3.3 70B",
+          { context: 128000, output: 4096 },
+          { toolcall: false },
+        ),
+        "llama3.1-70b": makeSnowflakeModel(
+          "llama3.1-70b",
+          "Llama 3.1 70B",
+          { context: 128000, output: 4096 },
+          { toolcall: false },
+        ),
+        "llama3.1-405b": makeSnowflakeModel(
+          "llama3.1-405b",
+          "Llama 3.1 405B",
+          { context: 128000, output: 4096 },
+          { toolcall: false },
+        ),
+        "llama3.1-8b": makeSnowflakeModel(
+          "llama3.1-8b",
+          "Llama 3.1 8B",
+          { context: 128000, output: 4096 },
+          { toolcall: false },
+        ),
         // Mistral — no tool calling
-        "mistral-large": makeSnowflakeModel("mistral-large", "Mistral Large", { context: 131000, output: 4096 }, { toolcall: false }),
-        "mistral-large2": makeSnowflakeModel("mistral-large2", "Mistral Large 2", { context: 131000, output: 4096 }, { toolcall: false }),
-        "mistral-7b": makeSnowflakeModel("mistral-7b", "Mistral 7B", { context: 32000, output: 4096 }, { toolcall: false }),
+        "mistral-large": makeSnowflakeModel(
+          "mistral-large",
+          "Mistral Large",
+          { context: 131000, output: 4096 },
+          { toolcall: false },
+        ),
+        "mistral-large2": makeSnowflakeModel(
+          "mistral-large2",
+          "Mistral Large 2",
+          { context: 131000, output: 4096 },
+          { toolcall: false },
+        ),
+        "mistral-7b": makeSnowflakeModel(
+          "mistral-7b",
+          "Mistral 7B",
+          { context: 32000, output: 4096 },
+          { toolcall: false },
+        ),
         // DeepSeek — no tool calling
-        "deepseek-r1": makeSnowflakeModel("deepseek-r1", "DeepSeek R1", { context: 64000, output: 32000 }, { reasoning: true, toolcall: false }),
+        "deepseek-r1": makeSnowflakeModel(
+          "deepseek-r1",
+          "DeepSeek R1",
+          { context: 64000, output: 32000 },
+          { reasoning: true, toolcall: false },
+        ),
       },
     }
     // altimate_change end
@@ -1098,21 +1167,53 @@ export namespace Provider {
       options: {},
       models: {
         // Meta Llama models — tool calling supported
-        "databricks-meta-llama-3-1-405b-instruct": makeDatabricksModel("databricks-meta-llama-3-1-405b-instruct", "Meta Llama 3.1 405B Instruct", { context: 128000, output: 4096 }),
-        "databricks-meta-llama-3-1-70b-instruct": makeDatabricksModel("databricks-meta-llama-3-1-70b-instruct", "Meta Llama 3.1 70B Instruct", { context: 128000, output: 4096 }),
-        "databricks-meta-llama-3-1-8b-instruct": makeDatabricksModel("databricks-meta-llama-3-1-8b-instruct", "Meta Llama 3.1 8B Instruct", { context: 128000, output: 4096 }),
+        "databricks-meta-llama-3-1-405b-instruct": makeDatabricksModel(
+          "databricks-meta-llama-3-1-405b-instruct",
+          "Meta Llama 3.1 405B Instruct",
+          { context: 128000, output: 4096 },
+        ),
+        "databricks-meta-llama-3-1-70b-instruct": makeDatabricksModel(
+          "databricks-meta-llama-3-1-70b-instruct",
+          "Meta Llama 3.1 70B Instruct",
+          { context: 128000, output: 4096 },
+        ),
+        "databricks-meta-llama-3-1-8b-instruct": makeDatabricksModel(
+          "databricks-meta-llama-3-1-8b-instruct",
+          "Meta Llama 3.1 8B Instruct",
+          { context: 128000, output: 4096 },
+        ),
         // Claude models via Databricks AI Gateway
-        "databricks-claude-sonnet-4-6": makeDatabricksModel("databricks-claude-sonnet-4-6", "Claude Sonnet 4.6", { context: 200000, output: 64000 }),
-        "databricks-claude-opus-4-6": makeDatabricksModel("databricks-claude-opus-4-6", "Claude Opus 4.6", { context: 200000, output: 32000 }),
+        "databricks-claude-sonnet-4-6": makeDatabricksModel("databricks-claude-sonnet-4-6", "Claude Sonnet 4.6", {
+          context: 200000,
+          output: 64000,
+        }),
+        "databricks-claude-opus-4-6": makeDatabricksModel("databricks-claude-opus-4-6", "Claude Opus 4.6", {
+          context: 200000,
+          output: 32000,
+        }),
         // GPT models via Databricks AI Gateway
         "databricks-gpt-5-4": makeDatabricksModel("databricks-gpt-5-4", "GPT-5-4", { context: 128000, output: 16384 }),
-        "databricks-gpt-5-mini": makeDatabricksModel("databricks-gpt-5-mini", "GPT-5 Mini", { context: 128000, output: 16384 }),
+        "databricks-gpt-5-mini": makeDatabricksModel("databricks-gpt-5-mini", "GPT-5 Mini", {
+          context: 128000,
+          output: 16384,
+        }),
         // Gemini models via Databricks AI Gateway
-        "databricks-gemini-3-1-pro": makeDatabricksModel("databricks-gemini-3-1-pro", "Gemini 3.1 Pro", { context: 1000000, output: 8192 }),
+        "databricks-gemini-3-1-pro": makeDatabricksModel("databricks-gemini-3-1-pro", "Gemini 3.1 Pro", {
+          context: 1000000,
+          output: 8192,
+        }),
         // DBRX — Databricks native model
-        "databricks-dbrx-instruct": makeDatabricksModel("databricks-dbrx-instruct", "DBRX Instruct", { context: 32768, output: 4096 }),
+        "databricks-dbrx-instruct": makeDatabricksModel("databricks-dbrx-instruct", "DBRX Instruct", {
+          context: 32768,
+          output: 4096,
+        }),
         // Mixtral via Databricks
-        "databricks-mixtral-8x7b-instruct": makeDatabricksModel("databricks-mixtral-8x7b-instruct", "Mixtral 8x7B Instruct", { context: 32768, output: 4096 }, { toolcall: false }),
+        "databricks-mixtral-8x7b-instruct": makeDatabricksModel(
+          "databricks-mixtral-8x7b-instruct",
+          "Mixtral 8x7B Instruct",
+          { context: 32768, output: 4096 },
+          { toolcall: false },
+        ),
       },
     }
     // altimate_change end
@@ -1160,7 +1261,6 @@ export namespace Provider {
       }
     }
     // altimate_change end
-
 
     function mergeProvider(providerID: ProviderID, provider: Partial<Info>) {
       const existing = providers[providerID]

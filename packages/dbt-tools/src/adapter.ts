@@ -58,7 +58,6 @@ function configuration(cfg: Config): DBTConfiguration {
   }
 }
 
-
 function terminal(): DBTTerminal {
   return {
     show: async () => {},
@@ -101,19 +100,89 @@ export async function create(cfg: Config): Promise<DBTProjectIntegrationAdapter>
   const python = new PythonDBTCommandExecutionStrategy(exec, runtime, term, config)
   const cli = (cwd: string, path: string) => new CLIDBTCommandExecutionStrategy(exec, runtime, term, cwd, path)
 
-  const core = (root: string, diag: DBTDiagnosticData[], defer: DeferConfig, changed: () => void): DBTProjectIntegration =>
-    new DBTCoreProjectIntegration(infra, runtime, provider, python, cli, term, config, client, root, diag, defer, changed)
+  const core = (
+    root: string,
+    diag: DBTDiagnosticData[],
+    defer: DeferConfig,
+    changed: () => void,
+  ): DBTProjectIntegration =>
+    new DBTCoreProjectIntegration(
+      infra,
+      runtime,
+      provider,
+      python,
+      cli,
+      term,
+      config,
+      client,
+      root,
+      diag,
+      defer,
+      changed,
+    )
 
   const cloudVariantDetector = new DbtCloudVariantDetector(term)
 
-  const cloud = (root: string, diag: DBTDiagnosticData[], defer: DeferConfig, changed: () => void): DBTProjectIntegration =>
-    new DBTCloudProjectIntegration(infra, factory, cli, runtime, provider, term, root, diag, defer, changed, cloudVariantDetector)
+  const cloud = (
+    root: string,
+    diag: DBTDiagnosticData[],
+    defer: DeferConfig,
+    changed: () => void,
+  ): DBTProjectIntegration =>
+    new DBTCloudProjectIntegration(
+      infra,
+      factory,
+      cli,
+      runtime,
+      provider,
+      term,
+      root,
+      diag,
+      defer,
+      changed,
+      cloudVariantDetector,
+    )
 
-  const command = (root: string, diag: DBTDiagnosticData[], defer: DeferConfig, changed: () => void): DBTProjectIntegration =>
-    new DBTCoreCommandProjectIntegration(infra, runtime, provider, python, cli, term, config, client, root, diag, defer, changed)
+  const command = (
+    root: string,
+    diag: DBTDiagnosticData[],
+    defer: DeferConfig,
+    changed: () => void,
+  ): DBTProjectIntegration =>
+    new DBTCoreCommandProjectIntegration(
+      infra,
+      runtime,
+      provider,
+      python,
+      cli,
+      term,
+      config,
+      client,
+      root,
+      diag,
+      defer,
+      changed,
+    )
 
-  const fusion = (root: string, diag: DBTDiagnosticData[], defer: DeferConfig, changed: () => void): DBTProjectIntegration =>
-    new DBTFusionCommandProjectIntegration(infra, factory, cli, runtime, provider, term, root, diag, defer, changed, cloudVariantDetector)
+  const fusion = (
+    root: string,
+    diag: DBTDiagnosticData[],
+    defer: DeferConfig,
+    changed: () => void,
+  ): DBTProjectIntegration =>
+    new DBTFusionCommandProjectIntegration(
+      infra,
+      factory,
+      cli,
+      runtime,
+      provider,
+      term,
+      root,
+      diag,
+      defer,
+      changed,
+      cloudVariantDetector,
+    )
 
   const adapter = new DBTProjectIntegrationAdapter(
     config,

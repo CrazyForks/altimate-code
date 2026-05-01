@@ -43,16 +43,7 @@ const WIN32_HOME = ["AppData", "Downloads", "Desktop", "Documents", "Pictures", 
  * These contain credentials, version control state, or configuration that
  * should not be modified without the user's awareness.
  */
-const SENSITIVE_DIRS = [
-  ".git",
-  ".ssh",
-  ".gnupg",
-  ".aws",
-  ".azure",
-  ".gcloud",
-  ".kube",
-  ".docker",
-]
+const SENSITIVE_DIRS = [".git", ".ssh", ".gnupg", ".aws", ".azure", ".gcloud", ".kube", ".docker"]
 
 // altimate_change start — assemble entries from parts so secret-scanners (e.g.
 // GitGuardian "Generic Password" detector) don't pattern-match these *filenames*
@@ -114,8 +105,7 @@ export namespace Protected {
 
     // Use case-insensitive comparison on macOS/Windows where
     // .GIT/config and .git/config refer to the same path
-    const cmp = (a: string, b: string) =>
-      CASE_INSENSITIVE ? a.toLowerCase() === b.toLowerCase() : a === b
+    const cmp = (a: string, b: string) => (CASE_INSENSITIVE ? a.toLowerCase() === b.toLowerCase() : a === b)
 
     // Check if any path segment is a sensitive directory
     for (const segment of segments) {

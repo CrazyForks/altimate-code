@@ -434,21 +434,23 @@ export namespace MCP {
           if (toolsList) toolListCache.set(key, toolsList.tools)
           // altimate_change end
           // Census: collect resource counts (fire-and-forget, never block connect)
-          const remoteTransport = name === "SSE" ? "sse" as const : "streamable-http" as const
+          const remoteTransport = name === "SSE" ? ("sse" as const) : ("streamable-http" as const)
           void Promise.all([
             Promise.resolve(toolsList ?? { tools: [] }),
             client.listResources().catch(() => ({ resources: [] })),
-          ]).then(([toolsList, resourcesList]) => {
-            Telemetry.track({
-              type: "mcp_server_census",
-              timestamp: Date.now(),
-              session_id: Telemetry.getContext().sessionId,
-              server_name: key,
-              transport: remoteTransport,
-              tool_count: toolsList.tools.length,
-              resource_count: resourcesList.resources.length,
+          ])
+            .then(([toolsList, resourcesList]) => {
+              Telemetry.track({
+                type: "mcp_server_census",
+                timestamp: Date.now(),
+                session_id: Telemetry.getContext().sessionId,
+                server_name: key,
+                transport: remoteTransport,
+                tool_count: toolsList.tools.length,
+                resource_count: resourcesList.resources.length,
+              })
             })
-          }).catch(() => {})
+            .catch(() => {})
           break
         } catch (error) {
           lastError = error instanceof Error ? error : new Error(String(error))
@@ -573,17 +575,19 @@ export namespace MCP {
         void Promise.all([
           Promise.resolve(toolsListSync ?? { tools: [] }),
           client.listResources().catch(() => ({ resources: [] })),
-        ]).then(([toolsList, resourcesList]) => {
-          Telemetry.track({
-            type: "mcp_server_census",
-            timestamp: Date.now(),
-            session_id: Telemetry.getContext().sessionId,
-            server_name: key,
-            transport: "stdio",
-            tool_count: toolsList.tools.length,
-            resource_count: resourcesList.resources.length,
+        ])
+          .then(([toolsList, resourcesList]) => {
+            Telemetry.track({
+              type: "mcp_server_census",
+              timestamp: Date.now(),
+              session_id: Telemetry.getContext().sessionId,
+              server_name: key,
+              transport: "stdio",
+              tool_count: toolsList.tools.length,
+              resource_count: resourcesList.resources.length,
+            })
           })
-        }).catch(() => {})
+          .catch(() => {})
       } catch (error) {
         log.error("local mcp startup failed", {
           key,

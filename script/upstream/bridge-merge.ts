@@ -224,11 +224,7 @@ function reapplyMarkers(ourContent: string, upstreamContent: string): ApplyResul
     }
 
     if (matches.length === 1) {
-      lines = [
-        ...lines.slice(0, matches[0]! + 1),
-        ...block.body,
-        ...lines.slice(matches[0]! + 1),
-      ]
+      lines = [...lines.slice(0, matches[0]! + 1), ...block.body, ...lines.slice(matches[0]! + 1)]
       applied.push(block)
     } else {
       skipped.push({
@@ -274,12 +270,7 @@ function fileHasMarkers(filePath: string): boolean {
   }
 }
 
-function buildPlan(
-  upstreamFiles: Set<string>,
-  ourFiles: Set<string>,
-  config: MergeConfig,
-  minimatch: any,
-): Plan {
+function buildPlan(upstreamFiles: Set<string>, ourFiles: Set<string>, config: MergeConfig, minimatch: any): Plan {
   const plan: Plan = {
     takeUpstream: [],
     keepOurs: [],
@@ -475,7 +466,10 @@ async function main(): Promise<void> {
     process.exit(1)
   }
 
-  const tagSha = await $`git rev-parse ${VERSION}`.cwd(ROOT).text().catch(() => "")
+  const tagSha = await $`git rev-parse ${VERSION}`
+    .cwd(ROOT)
+    .text()
+    .catch(() => "")
   if (!tagSha.trim()) {
     logger.error(`Tag ${VERSION} not found. Fetch upstream first: git fetch upstream --tags`)
     process.exit(1)
@@ -555,7 +549,10 @@ async function main(): Promise<void> {
   for (let i = 0; i < overlayList.length; i += batchSize) {
     const batch = overlayList.slice(i, i + batchSize)
     const cmd = `git checkout ${VERSION} -- ${batch.map((f) => JSON.stringify(f)).join(" ")}`
-    await $`sh -c ${cmd}`.cwd(ROOT).quiet().catch(() => null)
+    await $`sh -c ${cmd}`
+      .cwd(ROOT)
+      .quiet()
+      .catch(() => null)
     overlaid += batch.length
     if ((i / batchSize) % 5 === 0) logger.info(`  overlaid ${overlaid}/${overlayList.length}`)
   }
@@ -590,7 +587,9 @@ async function main(): Promise<void> {
   report.push(`\n## Files kept for human review (upstream removed, no rule matched)\n`)
   report.push(`These files exist in our main but not in v1.4.0. They don't match keepOurs/skipFiles `)
   report.push(`patterns and don't carry altimate_change markers. We kept them by default — review `)
-  report.push(`each and either:\n- Add to \`keepOurs\` in \`script/upstream/utils/config.ts\` if it's altimate code, or\n- Add to \`skipFiles\` (and delete) if it's truly stale upstream code.\n`)
+  report.push(
+    `each and either:\n- Add to \`keepOurs\` in \`script/upstream/utils/config.ts\` if it's altimate code, or\n- Add to \`skipFiles\` (and delete) if it's truly stale upstream code.\n`,
+  )
   for (const f of plan.upstreamDeletedReview.sort()) report.push(`- \`${f}\``)
 
   if (!SKIP_PR_REVERT) {
@@ -605,7 +604,9 @@ async function main(): Promise<void> {
   logger.banner("Bridge Merge Complete")
   console.log(`  Branch:           ${cyan(mergeBranch)}`)
   console.log(`  Backup:           ${cyan(backupBranch)}`)
-  console.log(`  Marker files:     ${green(String(markerFiles.size))} preserved from main (need manual upstream merge in followup)`)
+  console.log(
+    `  Marker files:     ${green(String(markerFiles.size))} preserved from main (need manual upstream merge in followup)`,
+  )
   console.log(`  Files overlaid:   ${overlaid}`)
   console.log(`  Files deleted:    ${deleted}`)
   console.log(`  Report:           ${REPORT_PATH}`)
@@ -614,7 +615,9 @@ async function main(): Promise<void> {
   console.log(`  1. Review the report:    ${dim("cat .bridge-merge-report.md")}`)
   console.log(`  2. Check unmarked files: ${dim("git status")}`)
   console.log(`  3. Run branding audit:   ${dim("bun run script/upstream/analyze.ts --branding")}`)
-  console.log(`  4. Run typecheck/tests:  ${dim("bun install && bunx turbo typecheck && bun run --cwd packages/opencode test")}`)
+  console.log(
+    `  4. Run typecheck/tests:  ${dim("bun install && bunx turbo typecheck && bun run --cwd packages/opencode test")}`,
+  )
   console.log()
 }
 

@@ -168,37 +168,67 @@ export namespace Agent {
           PermissionNext.fromConfig({
             "*": "deny",
             // SQL read tools
-            sql_execute: "allow", altimate_core_validate: "allow", sql_analyze: "allow",
-            sql_translate: "allow", sql_optimize: "allow", lineage_check: "allow",
-            sql_explain: "allow", sql_format: "allow", sql_fix: "allow",
-            sql_autocomplete: "allow", sql_diff: "allow",
+            sql_execute: "allow",
+            altimate_core_validate: "allow",
+            sql_analyze: "allow",
+            sql_translate: "allow",
+            sql_optimize: "allow",
+            lineage_check: "allow",
+            sql_explain: "allow",
+            sql_format: "allow",
+            sql_fix: "allow",
+            sql_autocomplete: "allow",
+            sql_diff: "allow",
             // SQL writes denied
             sql_execute_write: "deny",
             // Warehouse/schema/finops
-            warehouse_list: "allow", warehouse_test: "allow", warehouse_discover: "allow",
-            schema_inspect: "allow", schema_index: "allow", schema_search: "allow",
-            schema_cache_status: "allow", schema_detect_pii: "allow",
-            schema_tags: "allow", schema_tags_list: "allow",
-            finops_query_history: "allow", finops_analyze_credits: "allow",
-            finops_expensive_queries: "allow", finops_warehouse_advice: "allow",
-            finops_unused_resources: "allow", finops_role_grants: "allow",
-            finops_role_hierarchy: "allow", finops_user_roles: "allow",
+            warehouse_list: "allow",
+            warehouse_test: "allow",
+            warehouse_discover: "allow",
+            schema_inspect: "allow",
+            schema_index: "allow",
+            schema_search: "allow",
+            schema_cache_status: "allow",
+            schema_detect_pii: "allow",
+            schema_tags: "allow",
+            schema_tags_list: "allow",
+            finops_query_history: "allow",
+            finops_analyze_credits: "allow",
+            finops_expensive_queries: "allow",
+            finops_warehouse_advice: "allow",
+            finops_unused_resources: "allow",
+            finops_role_grants: "allow",
+            finops_role_hierarchy: "allow",
+            finops_user_roles: "allow",
             // Core tools
             altimate_core_check: "allow",
             altimate_core_rewrite: "allow",
             // Read-only file access
-            read: "allow", grep: "allow", glob: "allow",
-            webfetch: "allow", websearch: "allow",
-            question: "allow", tool_lookup: "allow",
+            read: "allow",
+            grep: "allow",
+            glob: "allow",
+            webfetch: "allow",
+            websearch: "allow",
+            question: "allow",
+            tool_lookup: "allow",
             // Bash: last-match-wins — "*": "deny" MUST come first, then specific allows override
             bash: {
               "*": "deny",
-              "ls *": "allow", "grep *": "allow", "cat *": "allow",
-              "head *": "allow", "tail *": "allow", "find *": "allow", "wc *": "allow",
-              "dbt list *": "allow", "dbt ls *": "allow", "dbt debug *": "allow",
+              "ls *": "allow",
+              "grep *": "allow",
+              "cat *": "allow",
+              "head *": "allow",
+              "tail *": "allow",
+              "find *": "allow",
+              "wc *": "allow",
+              "dbt list *": "allow",
+              "dbt ls *": "allow",
+              "dbt debug *": "allow",
             },
             // Training
-            training_save: "allow", training_list: "allow", training_remove: "allow",
+            training_save: "allow",
+            training_list: "allow",
+            training_remove: "allow",
           }),
           userWithSafety,
         ),
@@ -346,7 +376,11 @@ export namespace Agent {
       item.steps = value.steps ?? item.steps
       item.options = mergeDeep(item.options, value.options ?? {})
       // Re-apply safety denials AFTER user config so they cannot be overridden
-      item.permission = PermissionNext.merge(item.permission, PermissionNext.fromConfig(value.permission ?? {}), safetyDenials)
+      item.permission = PermissionNext.merge(
+        item.permission,
+        PermissionNext.fromConfig(value.permission ?? {}),
+        safetyDenials,
+      )
     }
 
     // Ensure Truncate.GLOB is allowed unless explicitly configured

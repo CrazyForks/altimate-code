@@ -480,7 +480,20 @@ export namespace Telemetry {
         session_id: string
         tool_name: string
         tool_category: string
-        error_class: "parse_error" | "connection" | "timeout" | "validation" | "internal" | "permission" | "http_error" | "file_not_found" | "file_stale" | "edit_mismatch" | "not_configured" | "resource_exhausted" | "unknown"
+        error_class:
+          | "parse_error"
+          | "connection"
+          | "timeout"
+          | "validation"
+          | "internal"
+          | "permission"
+          | "http_error"
+          | "file_not_found"
+          | "file_stale"
+          | "edit_mismatch"
+          | "not_configured"
+          | "resource_exhausted"
+          | "unknown"
         error_message: string
         input_signature: string
         masked_args?: string
@@ -641,7 +654,7 @@ export namespace Telemetry {
         /** Total LLM cost */
         total_cost: number
       }
-  // altimate_change end
+    // altimate_change end
     // altimate_change start — pre-execution SQL validation telemetry
     | {
         type: "sql_pre_validation"
@@ -695,7 +708,7 @@ export namespace Telemetry {
         /** output tokens on the stop-without-tools generation — helps distinguish "refused" (low) from "wrote a long text plan" (high) */
         tokens_output: number
       }
-    // altimate_change end
+  // altimate_change end
 
   /** SHA256 hash a masked error message for anonymous grouping. */
   export function hashError(maskedMessage: string): string {
@@ -704,9 +717,7 @@ export namespace Telemetry {
 
   /** Classify user intent from the first message text.
    *  Pure regex/keyword matcher — zero LLM cost, <1ms. */
-  export function classifyTaskIntent(
-    text: string,
-  ): { intent: string; confidence: number } {
+  export function classifyTaskIntent(text: string): { intent: string; confidence: number } {
     const lower = text.slice(0, 2000).toLowerCase()
 
     // Order matters: more specific patterns first
@@ -718,7 +729,10 @@ export namespace Telemetry {
       },
       {
         intent: "build_model",
-        strong: [/(?:create|build|write|add|new)\s+.*?(?:dbt\s+)?model/, /(?:create|build)\s+.*?(?:staging|mart|dim|fact)/],
+        strong: [
+          /(?:create|build|write|add|new)\s+.*?(?:dbt\s+)?model/,
+          /(?:create|build)\s+.*?(?:staging|mart|dim|fact)/,
+        ],
         weak: [/\bmodel\b/, /materialization/, /incremental/],
       },
       {
@@ -728,7 +742,10 @@ export namespace Telemetry {
       },
       {
         intent: "write_sql",
-        strong: [/(?:write|create|build|generate)\s+(?:a\s+)?(?:sql|query)/, /(?:write|create)\s+(?:a\s+)?(?:select|insert|update|delete)/],
+        strong: [
+          /(?:write|create|build|generate)\s+(?:a\s+)?(?:sql|query)/,
+          /(?:write|create)\s+(?:a\s+)?(?:select|insert|update|delete)/,
+        ],
         weak: [/\bsql\b/, /\bquery\b/, /\bjoin\b/, /\bwhere\b/],
       },
       {
@@ -738,17 +755,26 @@ export namespace Telemetry {
       },
       {
         intent: "explore_schema",
-        strong: [/(?:show|list|describe|inspect|explore)\s+.*?(?:schema|tables?|columns?|database)/, /what\s+.*?(?:tables|columns|schemas)/],
+        strong: [
+          /(?:show|list|describe|inspect|explore)\s+.*?(?:schema|tables?|columns?|database)/,
+          /what\s+.*?(?:tables|columns|schemas)/,
+        ],
         weak: [/\bschema\b/, /\btable\b/, /\bcolumn\b/, /introspect/],
       },
       {
         intent: "migrate_sql",
-        strong: [/migrat|convert.*(?:to|from)\s+.*?(?:snowflake|bigquery|postgres|redshift|databricks)/, /translate.*(?:sql|dialect)/],
+        strong: [
+          /migrat|convert.*(?:to|from)\s+.*?(?:snowflake|bigquery|postgres|redshift|databricks)/,
+          /translate.*(?:sql|dialect)/,
+        ],
         weak: [/dialect|transpile|port\s+(?:to|from)/],
       },
       {
         intent: "manage_warehouse",
-        strong: [/(?:connect|setup|configure|add|test)\s+.*?(?:warehouse|connection|database)/, /warehouse.*(?:config|setting)/],
+        strong: [
+          /(?:connect|setup|configure|add|test)\s+.*?(?:warehouse|connection|database)/,
+          /warehouse.*(?:config|setting)/,
+        ],
         weak: [/\bwarehouse\b/, /connection\s+string/, /\bcredentials\b/],
       },
       {
@@ -879,53 +905,44 @@ export namespace Telemetry {
     // altimate_change start — edit_mismatch class for edit tool failures
     {
       class: "edit_mismatch",
-      keywords: [
-        "could not find oldstring",
-        "no changes to apply",
-        "oldstring and newstring are identical",
-      ],
+      keywords: ["could not find oldstring", "no changes to apply", "oldstring and newstring are identical"],
     },
     // altimate_change end
     { class: "timeout", keywords: ["timeout", "etimedout", "bridge timeout", "timed out"] },
-    { class: "permission", keywords: ["permission", "access denied", "permission denied", "unauthorized", "forbidden", "authentication"] },
+    {
+      class: "permission",
+      keywords: ["permission", "access denied", "permission denied", "unauthorized", "forbidden", "authentication"],
+    },
     // altimate_change start — http_error before validation to prevent "HTTP 404" matching "invalid"/"missing"
     {
       class: "http_error",
-      keywords: ["status code: 4", "status code: 5", "request failed with status", "http 404", "http 410", "http 429", "http 451", "http 403"],
+      keywords: [
+        "status code: 4",
+        "status code: 5",
+        "request failed with status",
+        "http 404",
+        "http 410",
+        "http 429",
+        "http 451",
+        "http 403",
+      ],
     },
     // altimate_change end
     // altimate_change start — split file_stale out of validation for cleaner triage
     {
       class: "file_stale",
-      keywords: [
-        "must read file",
-        "has been modified since",
-        "before overwriting",
-      ],
+      keywords: ["must read file", "has been modified since", "before overwriting"],
     },
     {
       class: "validation",
-      keywords: [
-        "invalid params",
-        "invalid",
-        "missing",
-        "required",
-        "does not exist",
-      ],
+      keywords: ["invalid params", "invalid", "missing", "required", "does not exist"],
     },
     // altimate_change end
     { class: "internal", keywords: ["internal", "assertion"] },
     // altimate_change start — resource_exhausted class for OOM/quota errors
     {
       class: "resource_exhausted",
-      keywords: [
-        "out of memory",
-        "resource limit",
-        "quota exceeded",
-        "disk i/o",
-        "enomem",
-        "heap out of memory",
-      ],
+      keywords: ["out of memory", "resource limit", "quota exceeded", "disk i/o", "enomem", "heap out of memory"],
     },
     // altimate_change end
   ]
@@ -1100,7 +1117,9 @@ export namespace Telemetry {
   }
 
   // altimate_change start — classify how a skill was triggered for discovery analytics
-  export function classifySkillTrigger(extra?: { [key: string]: any }): "user_command" | "llm_selected" | "auto_suggested" | "unknown" {
+  export function classifySkillTrigger(extra?: {
+    [key: string]: any
+  }): "user_command" | "llm_selected" | "auto_suggested" | "unknown" {
     if (!extra) return "llm_selected"
     if (extra.trigger === "user_command") return "user_command"
     if (extra.trigger === "auto_suggested") return "auto_suggested"

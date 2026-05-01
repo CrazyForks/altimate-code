@@ -198,36 +198,48 @@ Object.defineProperty(Flag, "ALTIMATE_CLI_CLIENT", {
 // All are env-driven booleans/strings with sensible defaults so missing env =
 // off behavior matches what those callers expect.
 Object.defineProperty(Flag, "OTEL_EXPORTER_OTLP_ENDPOINT", {
-  get() { return process.env["OTEL_EXPORTER_OTLP_ENDPOINT"] },
-  enumerable: true, configurable: false,
+  get() {
+    return process.env["OTEL_EXPORTER_OTLP_ENDPOINT"]
+  },
+  enumerable: true,
+  configurable: false,
 })
 Object.defineProperty(Flag, "OTEL_EXPORTER_OTLP_HEADERS", {
-  get() { return process.env["OTEL_EXPORTER_OTLP_HEADERS"] },
-  enumerable: true, configurable: false,
+  get() {
+    return process.env["OTEL_EXPORTER_OTLP_HEADERS"]
+  },
+  enumerable: true,
+  configurable: false,
 })
 Object.defineProperty(Flag, "OPENCODE_AUTO_HEAP_SNAPSHOT", {
   get() {
     const v = process.env["OPENCODE_AUTO_HEAP_SNAPSHOT"]?.toLowerCase()
     return v === "true" || v === "1"
   },
-  enumerable: true, configurable: false,
+  enumerable: true,
+  configurable: false,
 })
 Object.defineProperty(Flag, "OPENCODE_PLUGIN_META_FILE", {
-  get() { return process.env["OPENCODE_PLUGIN_META_FILE"] },
-  enumerable: true, configurable: false,
+  get() {
+    return process.env["OPENCODE_PLUGIN_META_FILE"]
+  },
+  enumerable: true,
+  configurable: false,
 })
 Object.defineProperty(Flag, "OPENCODE_DISABLE_EMBEDDED_WEB_UI", {
   get() {
     const v = process.env["OPENCODE_DISABLE_EMBEDDED_WEB_UI"]?.toLowerCase()
     return v === "true" || v === "1"
   },
-  enumerable: true, configurable: false,
+  enumerable: true,
+  configurable: false,
 })
 Object.defineProperty(Flag, "OPENCODE_PURE", {
   get() {
     const v = process.env["OPENCODE_PURE"]?.toLowerCase()
     return v === "true" || v === "1"
   },
-  enumerable: true, configurable: false,
+  enumerable: true,
+  configurable: false,
 })
 // altimate_change end

@@ -231,9 +231,7 @@ describe("v1.4.0 merge — tool registration without agent context (PR #21052)",
     // an `agent` object would crash. Heuristic: top-level `agent.` outside
     // any function body. Approximation: count non-comment lines containing
     // bare `agent.` at indent 0-2.
-    const offendingLines = content
-      .split("\n")
-      .filter((l) => /^\s{0,4}agent\./.test(l) && !l.trim().startsWith("//"))
+    const offendingLines = content.split("\n").filter((l) => /^\s{0,4}agent\./.test(l) && !l.trim().startsWith("//"))
     expect(offendingLines).toEqual([])
   })
 })
@@ -281,7 +279,16 @@ describe("v1.4.0 merge — permission system handles new flags + settings (PR #2
 // ---------------------------------------------------------------------------
 describe("v1.4.0 merge — upstream_fix tags are still load-bearing", () => {
   test("each upstream_fix tag has a marker pair and a non-empty description", async () => {
-    const files = ["packages/opencode/src/skill/followups.ts", "packages/opencode/src/util/locale.ts", "packages/opencode/src/util/filesystem.ts", "packages/opencode/src/cli/cmd/tui/context/theme.tsx", "packages/opencode/src/cli/cmd/tui/routes/home.tsx", "packages/opencode/src/cli/cmd/tui/routes/session/index.tsx", "packages/opencode/src/altimate/api/client.ts", "packages/opencode/src/command/index.ts"]
+    const files = [
+      "packages/opencode/src/skill/followups.ts",
+      "packages/opencode/src/util/locale.ts",
+      "packages/opencode/src/util/filesystem.ts",
+      "packages/opencode/src/cli/cmd/tui/context/theme.tsx",
+      "packages/opencode/src/cli/cmd/tui/routes/home.tsx",
+      "packages/opencode/src/cli/cmd/tui/routes/session/index.tsx",
+      "packages/opencode/src/altimate/api/client.ts",
+      "packages/opencode/src/command/index.ts",
+    ]
     for (const rel of files) {
       const abs = path.join(repoRoot, rel)
       if (!existsSync(abs)) continue

@@ -66,7 +66,11 @@ describe("bridge merge cycle 1: Account.active() is async — every caller await
     for (const line of lines) {
       // skip comments and the type re-export
       if (line.trim().startsWith("//") || line.trim().startsWith("*")) continue
-      if (/Account\.active\s*\(/.test(line) && !/await\s+Account\.active\s*\(/.test(line) && !/=\s*Account\.active\b/.test(line)) {
+      if (
+        /Account\.active\s*\(/.test(line) &&
+        !/await\s+Account\.active\s*\(/.test(line) &&
+        !/=\s*Account\.active\b/.test(line)
+      ) {
         throw new Error(`share-next.ts has a non-awaited Account.active() call: ${line}`)
       }
     }
@@ -168,10 +172,7 @@ describe("bridge merge cycle 2: XSS — HTML error pages must escape interpolate
   })
 
   test("escapeHtml in both files covers <, >, &, \" and '", async () => {
-    for (const file of [
-      path.join(srcDir, "plugin", "codex.ts"),
-      path.join(srcDir, "mcp", "oauth-callback.ts"),
-    ]) {
+    for (const file of [path.join(srcDir, "plugin", "codex.ts"), path.join(srcDir, "mcp", "oauth-callback.ts")]) {
       const content = await readText(file)
       expect(content).toContain("&amp;")
       expect(content).toContain("&lt;")
@@ -274,7 +275,9 @@ describe("bridge merge cycle 2: v3 type drift — pinned to ai-sdk v2", () => {
       // never v4's `createProviderTool…` rename.
       if (/from\s+["']@ai-sdk\/provider-utils["']/.test(content)) {
         if (/createProviderTool\w*\(/.test(content)) {
-          throw new Error(`${path.relative(repoRoot, f)} uses v4 createProviderTool* (renamed) — should be createProviderDefined*`)
+          throw new Error(
+            `${path.relative(repoRoot, f)} uses v4 createProviderTool* (renamed) — should be createProviderDefined*`,
+          )
         }
         if (/createProviderDefined\w*Factory/.test(content)) factoryUseCount++
       }

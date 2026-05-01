@@ -65,9 +65,7 @@ describe("lsp.spawn", () => {
 
     // Mock Npm.which to return a fake binary path so spawn() actually runs
     const npmModule = await import("../../src/npm")
-    const whichSpy = spyOn(npmModule.Npm, "which").mockResolvedValue(
-      "/fake/path/typescript-language-server",
-    )
+    const whichSpy = spyOn(npmModule.Npm, "which").mockResolvedValue("/fake/path/typescript-language-server")
 
     const spawnSpy = spyOn(launch, "spawn").mockImplementation(
       () =>
@@ -111,9 +109,7 @@ describe("lsp.spawn", () => {
     // NO tsconfig.json or jsconfig.json created here
 
     const npmModule = await import("../../src/npm")
-    const whichSpy = spyOn(npmModule.Npm, "which").mockResolvedValue(
-      "/fake/path/typescript-language-server",
-    )
+    const whichSpy = spyOn(npmModule.Npm, "which").mockResolvedValue("/fake/path/typescript-language-server")
 
     const spawnSpy = spyOn(launch, "spawn").mockImplementation(
       () =>

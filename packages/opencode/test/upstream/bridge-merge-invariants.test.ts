@@ -317,10 +317,7 @@ describe("invariant: security-critical code uses Filesystem.containsReal (not co
   // Symlink escape: Filesystem.contains is lexical; .containsReal does realpath
   // resolution first. Project-containment and plugin-path checks are the two
   // historically-vulnerable sites. Any future merge must keep them on containsReal.
-  const SECURITY_FILES = [
-    "project/instance.ts",
-    "plugin/shared.ts",
-  ]
+  const SECURITY_FILES = ["project/instance.ts", "plugin/shared.ts"]
   for (const rel of SECURITY_FILES) {
     test(`${rel} uses Filesystem.containsReal exclusively`, async () => {
       const content = stripComments(await readText(path.join(srcDir, rel)))

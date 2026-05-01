@@ -83,7 +83,8 @@ export const InstanceRoutes = (upgrade: UpgradeWebSocket, app: Hono = new Hono()
       "/path",
       describeRoute({
         summary: "Get paths",
-        description: "Retrieve the current working directory and related path information for the Altimate Code instance.",
+        description:
+          "Retrieve the current working directory and related path information for the Altimate Code instance.",
         operationId: "path.get",
         responses: {
           200: {

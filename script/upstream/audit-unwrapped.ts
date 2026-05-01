@@ -115,9 +115,7 @@ async function main() {
 
   // Resolve list of files in main that we'd try to overlay (i.e., not keepOurs, not skipFiles)
   const ourFiles = (await $`git ls-tree -r --name-only HEAD`.cwd(ROOT).text()).trim().split("\n")
-  const baseFiles = new Set(
-    (await $`git ls-tree -r --name-only ${BASE}`.cwd(ROOT).text()).trim().split("\n"),
-  )
+  const baseFiles = new Set((await $`git ls-tree -r --name-only ${BASE}`.cwd(ROOT).text()).trim().split("\n"))
 
   const candidates = ourFiles.filter((f) => {
     if (!baseFiles.has(f)) return false

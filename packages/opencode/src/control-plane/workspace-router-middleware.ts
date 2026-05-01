@@ -30,7 +30,7 @@ async function routeRequest(req: Request) {
   // altimate_change start — bridge merge: Adaptor.fetch is a v1.4.0-only API
   // not in main's Adaptor type; cast to bypass until we add fetch() to Adaptor.
   return (adaptor as any).fetch(workspace, `${new URL(req.url).pathname}${new URL(req.url).search}`, {
-  // altimate_change end
+    // altimate_change end
     method: req.method,
     body: req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer(),
     signal: req.signal,

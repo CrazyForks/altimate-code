@@ -71,7 +71,11 @@ import { FinopsAnalyzeCreditsTool } from "../altimate/tools/finops-analyze-credi
 import { FinopsExpensiveQueriesTool } from "../altimate/tools/finops-expensive-queries"
 import { FinopsWarehouseAdviceTool } from "../altimate/tools/finops-warehouse-advice"
 import { FinopsUnusedResourcesTool } from "../altimate/tools/finops-unused-resources"
-import { FinopsRoleGrantsTool, FinopsRoleHierarchyTool, FinopsUserRolesTool } from "../altimate/tools/finops-role-access"
+import {
+  FinopsRoleGrantsTool,
+  FinopsRoleHierarchyTool,
+  FinopsUserRolesTool,
+} from "../altimate/tools/finops-role-access"
 import { SchemaDetectPiiTool } from "../altimate/tools/schema-detect-pii"
 import { SchemaTagsTool, SchemaTagsListTool } from "../altimate/tools/schema-tags"
 import { SqlRewriteTool } from "../altimate/tools/sql-rewrite"
@@ -296,10 +300,20 @@ export namespace ToolRegistry {
       FeedbackSubmitTool,
       // altimate_change end
       // altimate_change start - register altimate persistent memory tools
-      ...(!Flag.ALTIMATE_DISABLE_MEMORY ? [MemoryReadTool, MemoryWriteTool, MemoryDeleteTool, MemoryAuditTool, ...(Flag.ALTIMATE_MEMORY_AUTO_EXTRACT ? [MemoryExtractTool] : [])] : []),
+      ...(!Flag.ALTIMATE_DISABLE_MEMORY
+        ? [
+            MemoryReadTool,
+            MemoryWriteTool,
+            MemoryDeleteTool,
+            MemoryAuditTool,
+            ...(Flag.ALTIMATE_MEMORY_AUTO_EXTRACT ? [MemoryExtractTool] : []),
+          ]
+        : []),
       // altimate_change end
       // altimate_change start - register training tools for AI teammate
-      ...(!Flag.ALTIMATE_DISABLE_TRAINING ? [TrainingSaveTool, TrainingListTool, TrainingRemoveTool, TrainingImportTool] : []),
+      ...(!Flag.ALTIMATE_DISABLE_TRAINING
+        ? [TrainingSaveTool, TrainingListTool, TrainingRemoveTool, TrainingImportTool]
+        : []),
       // altimate_change end
       // altimate_change start - register impact analysis tool
       ImpactAnalysisTool,

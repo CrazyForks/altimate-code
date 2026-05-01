@@ -34,10 +34,12 @@ export namespace InstanceState {
       // registry so Instance.reload/dispose invalidate this cache too.
       const off = registerDisposer((directory) => Effect.runPromise(ScopedCache.invalidate(cache, directory)))
       // altimate_change end
-      yield* Effect.addFinalizer(() => Effect.sync(() => {
-        tasks.delete(task)
-        off()
-      }))
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          tasks.delete(task)
+          off()
+        }),
+      )
 
       return {
         [TypeId]: TypeId,
