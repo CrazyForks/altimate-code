@@ -89,22 +89,30 @@ type Capture = {
   body: Record<string, unknown>
 }
 
+type Pending = { path: string; response: Response; resolve: (value: Capture) => void; reject: (e: unknown) => void }
+
 const state = {
   server: null as ReturnType<typeof Bun.serve> | null,
-  queue: [] as Array<{ path: string; response: Response; resolve: (value: Capture) => void }>,
+  // Map<pathSuffix, Pending>. Path-keyed (was a FIFO queue) so a slow OpenAI
+  // request can't resolve a faster Gemini deferred — that cascade was the
+  // failure mode under heavy parallel-suite load (test 3 timed out at 5s,
+  // its in-flight request landed in test 4's queue, test 4 saw "/v1/responses"
+  // instead of "/v1beta/...:streamGenerateContent").
+  pending: new Map<string, Pending>(),
 }
 
 function deferred<T>() {
-  const result = {} as { promise: Promise<T>; resolve: (value: T) => void }
-  result.promise = new Promise((resolve) => {
+  const result = {} as { promise: Promise<T>; resolve: (value: T) => void; reject: (e: unknown) => void }
+  result.promise = new Promise((resolve, reject) => {
     result.resolve = resolve
+    result.reject = reject
   })
   return result
 }
 
 function waitRequest(pathname: string, response: Response) {
   const pending = deferred<Capture>()
-  state.queue.push({ path: pathname, response, resolve: pending.resolve })
+  state.pending.set(pathname, { path: pathname, response, resolve: pending.resolve, reject: pending.reject })
   return pending.promise
 }
 
@@ -112,26 +120,34 @@ beforeAll(() => {
   state.server = Bun.serve({
     port: 0,
     async fetch(req) {
-      const next = state.queue.shift()
-      if (!next) {
-        return new Response("unexpected request", { status: 500 })
-      }
-
       const url = new URL(req.url)
+      // Find the pending entry whose registered suffix matches this request's path.
+      // Last-suffix-wins for unlikely overlapping registrations (none today).
+      let matchedKey: string | undefined
+      for (const key of state.pending.keys()) {
+        if (url.pathname.endsWith(key)) matchedKey = key
+      }
+      if (!matchedKey) {
+        return new Response(`unexpected request: ${url.pathname}`, { status: 500 })
+      }
+      const next = state.pending.get(matchedKey)!
+      state.pending.delete(matchedKey)
+
       const body = (await req.json()) as Record<string, unknown>
       next.resolve({ url, headers: req.headers, body })
-
-      if (!url.pathname.endsWith(next.path)) {
-        return new Response("not found", { status: 404 })
-      }
-
       return next.response
     },
   })
 })
 
 beforeEach(() => {
-  state.queue.length = 0
+  // Reject any leftover deferreds before clearing — otherwise an awaiting test
+  // would hang for the full timeout. Always-resolved capture means the next
+  // test sees real path mismatch errors rather than a corrupted Capture.
+  for (const pending of state.pending.values()) {
+    pending.reject(new Error("test cleanup: pending request never received"))
+  }
+  state.pending.clear()
 })
 
 afterAll(() => {
@@ -430,7 +446,7 @@ describe("session.llm.stream", () => {
         // altimate_change end
       },
     })
-  })
+  }, 30_000)
 
   test.skip("sends messages API payload for Anthropic models", async () => {
     const server = state.server
@@ -652,5 +668,5 @@ describe("session.llm.stream", () => {
         expect(config?.maxOutputTokens).toBe(ProviderTransform.maxOutputTokens(resolved))
       },
     })
-  })
+  }, 30_000)
 })

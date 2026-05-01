@@ -50,7 +50,7 @@ function chat(text: string) {
   })
 }
 
-function hanging(ready: () => void) {
+function hanging(ready: () => void): { stream: ReadableStream<Uint8Array>; dispose: () => void } {
   const encoder = new TextEncoder()
   let timer: ReturnType<typeof setTimeout> | undefined
   const first =
@@ -74,19 +74,33 @@ function hanging(ready: () => void) {
       "data: [DONE]",
     ].join("\n\n") + "\n\n"
 
-  return new ReadableStream<Uint8Array>({
+  const stream = new ReadableStream<Uint8Array>({
     start(ctrl) {
       ctrl.enqueue(encoder.encode(first))
       ready()
       timer = setTimeout(() => {
-        ctrl.enqueue(encoder.encode(rest))
-        ctrl.close()
+        // Stream may already be closed if the consumer cancelled — guard the enqueue.
+        try {
+          ctrl.enqueue(encoder.encode(rest))
+          ctrl.close()
+        } catch {
+          // closed/cancelled — ignore
+        }
       }, 10000)
     },
     cancel() {
       if (timer) clearTimeout(timer)
     },
   })
+  // Expose dispose so the test's finally block can clear the 10s timer when
+  // the test finishes via assertion-pass/cancel rather than stream cancel —
+  // otherwise the timer keeps the event loop busy for subsequent test files.
+  return {
+    stream,
+    dispose: () => {
+      if (timer) clearTimeout(timer)
+    },
+  }
 }
 
 describe("session.prompt missing file", () => {
@@ -227,6 +241,10 @@ describe("session.prompt special characters", () => {
 })
 
 describe("session.prompt regression", () => {
+  // 30s timeout: tmpdir + git init + Instance.state bootstrap + ModelsDev fetch
+  // can exceed 5s under heavy parallel suite load on slow CI runners. Default Bun
+  // timeout is 5s when invoked as `bun test <paths>` (the package.json
+  // --timeout 30000 only applies to bare `bun test`).
   test("does not loop empty assistant turns for a simple reply", async () => {
     let calls = 0
     const server = Bun.serve({
@@ -292,10 +310,11 @@ describe("session.prompt regression", () => {
     } finally {
       server.stop(true)
     }
-  })
+  }, 30_000)
 
   test("records aborted errors when prompt is cancelled mid-stream", async () => {
     const ready = defer<void>()
+    let hangingDispose: (() => void) | undefined
     const server = Bun.serve({
       port: 0,
       fetch(req) {
@@ -303,13 +322,12 @@ describe("session.prompt regression", () => {
         if (!url.pathname.endsWith("/chat/completions")) {
           return new Response("not found", { status: 404 })
         }
-        return new Response(
-          hanging(() => ready.resolve()),
-          {
-            status: 200,
-            headers: { "Content-Type": "text/event-stream" },
-          },
-        )
+        const h = hanging(() => ready.resolve())
+        hangingDispose = h.dispose
+        return new Response(h.stream, {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        })
       },
     })
 
@@ -374,9 +392,12 @@ describe("session.prompt regression", () => {
         },
       })
     } finally {
+      // Clear the hanging stream's 10s setTimeout so it doesn't keep the
+      // event loop busy for subsequent test files in the same Bun process.
+      hangingDispose?.()
       server.stop(true)
     }
-  })
+  }, 30_000)
 })
 
 describe("session.prompt agent variant", () => {

@@ -1,157 +1,63 @@
-import { describe, expect, mock, test } from "bun:test"
+// altimate_change start — rewritten to drop mock.module() (which leaks across
+// test files in Bun's multi-file runner — was the root cause of issue #704
+// theme tests + several other suites failing under parallel load).
+//
+// The original test mocked @/util/log, @/project/instance, @/util/rpc and
+// @/cli/cmd/tui/app via mock.module() to intercept what `directory` got
+// passed downstream. Those mocks survived to subsequent test files and
+// turned Log.Default.* into no-ops, breaking any later test that depended
+// on real logger behaviour.
+//
+// Fix: src/cli/cmd/tui/thread.ts now exposes the directory-resolution logic
+// as a pure helper `resolveProjectDirectory(project, pwd, cwd)`. Tests call
+// it directly with controlled inputs — no mocks, no leakage.
+// altimate_change end
+import { describe, expect, test } from "bun:test"
 import fs from "fs/promises"
 import path from "path"
 import { tmpdir } from "../../fixture/fixture"
+import { resolveProjectDirectory } from "../../../src/cli/cmd/tui/thread"
 
-const stop = new Error("stop")
-const seen = {
-  tui: [] as string[],
-  inst: [] as string[],
-}
-
-mock.module("../../../src/cli/cmd/tui/app", () => ({
-  tui: async (input: { directory: string }) => {
-    seen.tui.push(input.directory)
-    throw stop
-  },
-}))
-
-mock.module("@/util/rpc", () => ({
-  Rpc: {
-    client: () => ({
-      call: async () => ({ url: "http://127.0.0.1" }),
-      on: () => {},
-    }),
-  },
-}))
-
-mock.module("@/cli/ui", () => ({
-  UI: {
-    error: () => {},
-  },
-}))
-
-mock.module("@/util/log", () => ({
-  Log: {
-    init: async () => {},
-    create: () => ({
-      error: () => {},
-      info: () => {},
-      warn: () => {},
-      debug: () => {},
-      time: () => ({ stop: () => {} }),
-    }),
-    Default: {
-      error: () => {},
-      info: () => {},
-      warn: () => {},
-      debug: () => {},
-    },
-  },
-}))
-
-mock.module("@/util/timeout", () => ({
-  withTimeout: <T>(input: Promise<T>) => input,
-}))
-
-mock.module("@/cli/network", () => ({
-  withNetworkOptions: <T>(input: T) => input,
-  resolveNetworkOptions: async () => ({
-    mdns: false,
-    port: 0,
-    hostname: "127.0.0.1",
-  }),
-}))
-
-mock.module("../../../src/cli/cmd/tui/win32", () => ({
-  win32DisableProcessedInput: () => {},
-  win32InstallCtrlCGuard: () => undefined,
-}))
-
-mock.module("@/config/tui", () => ({
-  TuiConfig: {
-    get: () => ({}),
-  },
-}))
-
-mock.module("@/project/instance", () => ({
-  Instance: {
-    provide: async (input: { directory: string; fn: () => Promise<unknown> | unknown }) => {
-      seen.inst.push(input.directory)
-      return input.fn()
-    },
-  },
-}))
-
-describe("tui thread", () => {
-  async function call(project?: string) {
-    const { TuiThreadCommand } = await import("../../../src/cli/cmd/tui/thread")
-    const args: Parameters<NonNullable<typeof TuiThreadCommand.handler>>[0] = {
-      _: [],
-      $0: "opencode",
-      project,
-      prompt: "hi",
-      model: undefined,
-      agent: undefined,
-      session: undefined,
-      continue: false,
-      fork: false,
-      port: 0,
-      hostname: "127.0.0.1",
-      mdns: false,
-      "mdns-domain": "opencode.local",
-      mdnsDomain: "opencode.local",
-      cors: [],
-    }
-    return TuiThreadCommand.handler(args)
-  }
-
-  async function check(project?: string) {
+describe("tui thread > resolveProjectDirectory", () => {
+  test("uses the real cwd when PWD points at a symlink", async () => {
     await using tmp = await tmpdir({ git: true })
-    const cwd = process.cwd()
-    const pwd = process.env.PWD
-    const worker = globalThis.Worker
-    const tty = Object.getOwnPropertyDescriptor(process.stdin, "isTTY")
     const link = path.join(path.dirname(tmp.path), path.basename(tmp.path) + "-link")
-    const type = process.platform === "win32" ? "junction" : "dir"
-    seen.tui.length = 0
-    seen.inst.length = 0
-    await fs.symlink(tmp.path, link, type)
-
-    Object.defineProperty(process.stdin, "isTTY", {
-      configurable: true,
-      value: true,
-    })
-    globalThis.Worker = class extends EventTarget {
-      onerror = null
-      onmessage = null
-      onmessageerror = null
-      postMessage() {}
-      terminate() {}
-    } as unknown as typeof Worker
-
+    const linkType = process.platform === "win32" ? "junction" : "dir"
+    await fs.symlink(tmp.path, link, linkType)
     try {
-      process.chdir(tmp.path)
-      process.env.PWD = link
-      await expect(call(project)).rejects.toBe(stop)
-      expect(seen.inst[0]).toBe(tmp.path)
-      expect(seen.tui[0]).toBe(tmp.path)
+      // PWD = symlink, cwd = real path. Without the implicit project arg
+      // the resolver should return realpath(cwd) = tmp.path.
+      const resolved = resolveProjectDirectory(undefined, link, tmp.path)
+      expect(resolved).toBe(tmp.path)
     } finally {
-      process.chdir(cwd)
-      if (pwd === undefined) delete process.env.PWD
-      else process.env.PWD = pwd
-      if (tty) Object.defineProperty(process.stdin, "isTTY", tty)
-      else delete (process.stdin as { isTTY?: boolean }).isTTY
-      globalThis.Worker = worker
       await fs.rm(link, { recursive: true, force: true }).catch(() => undefined)
     }
-  }
-
-  test("uses the real cwd when PWD points at a symlink", async () => {
-    await check()
   })
 
   test("uses the real cwd after resolving a relative project from PWD", async () => {
-    await check(".")
+    await using tmp = await tmpdir({ git: true })
+    const link = path.join(path.dirname(tmp.path), path.basename(tmp.path) + "-link")
+    const linkType = process.platform === "win32" ? "junction" : "dir"
+    await fs.symlink(tmp.path, link, linkType)
+    try {
+      // project = ".", PWD = symlink. The resolver should join PWD + "."
+      // and then realpath that, returning tmp.path.
+      const resolved = resolveProjectDirectory(".", link, tmp.path)
+      expect(resolved).toBe(tmp.path)
+    } finally {
+      await fs.rm(link, { recursive: true, force: true }).catch(() => undefined)
+    }
+  })
+
+  test("absolute --project bypasses PWD entirely", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const resolved = resolveProjectDirectory(tmp.path, "/some/unrelated/pwd", "/another/cwd")
+    expect(resolved).toBe(tmp.path)
+  })
+
+  test("falls back to cwd when both PWD and project are missing", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const resolved = resolveProjectDirectory(undefined, tmp.path, tmp.path)
+    expect(resolved).toBe(tmp.path)
   })
 })
