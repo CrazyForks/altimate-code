@@ -9,6 +9,12 @@ import { useToast } from "../ui/toast"
 import { useKeybind } from "../context/keybind"
 import { DialogSessionList } from "./workspace/dialog-session-list"
 import { setTimeout as sleep } from "node:timers/promises"
+// altimate_change start — upstream_fix: bridge merge replaced Log.Default with
+// console.log inside the TUI. console output corrupts the TUI render. There was
+// also a stray `console.log(JSON.stringify(result, null, 2))` debug-print of
+// every workspace creation result. Restore main's structured logging.
+import { Log } from "@/util/log"
+// altimate_change end
 
 function scoped(sdk: ReturnType<typeof useSDK>, sync: ReturnType<typeof useSync>, workspaceID?: string) {
   return createOpencodeClient({
@@ -116,10 +122,9 @@ function DialogWorkspaceCreate(props: { onSelect: (workspaceID: string) => Promi
     setCreating(type)
 
     const result = await sdk.client.experimental.workspace.create({ type, branch: null }).catch((err) => {
-      console.log(err)
+      Log.Default.error("workspace creation failed", { error: err })
       return undefined
     })
-    console.log(JSON.stringify(result, null, 2))
     const workspace = result?.data
     if (!workspace) {
       setCreating(undefined)
@@ -129,6 +134,7 @@ function DialogWorkspaceCreate(props: { onSelect: (workspaceID: string) => Promi
       })
       return
     }
+    Log.Default.info("workspace created", { workspaceId: workspace.id })
     await sync.workspace.sync()
     await props.onSelect(workspace.id)
     setCreating(undefined)

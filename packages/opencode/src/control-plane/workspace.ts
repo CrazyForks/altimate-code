@@ -114,12 +114,20 @@ export namespace Workspace {
   const log = Log.create({ service: "workspace-sync" })
 
   async function workspaceEventLoop(space: Info, stop: AbortSignal) {
+    // altimate_change start — upstream_fix: bridge merge replaced main's
+    // `adaptor.fetch(..., {signal}).catch(() => undefined)` defensive swallow
+    // with a bare `await fetch(...)` that throws on transient network blips and
+    // kills the loop forever. Local workspaces (target.type === "local") also
+    // hit `return` so the worker would never restart even if the workspace
+    // type later flipped to remote at runtime. Restore the defensive shape:
+    // continue (don't return) on local, swallow fetch errors and back off.
     while (!stop.aborted) {
       const adaptor = await getAdaptor(space.type)
       const target = await Promise.resolve(adaptor.target(space))
 
       if (target.type === "local") {
-        return
+        await sleep(1000)
+        continue
       }
 
       const baseURL = String(target.url).replace(/\/?$/, "/")
@@ -127,9 +135,9 @@ export namespace Workspace {
       const res = await fetch(new URL(baseURL + "/event"), {
         method: "GET",
         signal: stop,
-      })
+      }).catch(() => undefined)
 
-      if (!res.ok || !res.body) {
+      if (!res || !res.ok || !res.body) {
         await sleep(1000)
         continue
       }
@@ -144,6 +152,7 @@ export namespace Workspace {
       // Wait 250ms and retry if SSE connection fails
       await sleep(250)
     }
+    // altimate_change end
   }
 
   export function startSyncing(project: Project.Info) {

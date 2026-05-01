@@ -18,9 +18,15 @@ export function errorFormat(error: unknown): string {
 
 export function errorMessage(error: unknown): string {
   if (error instanceof Error) {
-    if (error.message) return error.message
-    // For Error instances with no message, surface stack location for context
-    // so callers don't see opaque "Error".
+    // altimate_change start — also augment messages that are non-empty but useless
+    // (the bare strings "Error" / "APIError" / matching error.name carry no info).
+    // Originally inlined in session/message-v2.ts (PR #118/#133) for the idle-timeout
+    // opaque-error class; centralized here so every caller benefits.
+    const useless = !error.message || error.message === "Error" || error.message === error.name
+    if (!useless) return error.message
+    const firstFrame = error.stack?.split("\n").find((line) => line.trim().startsWith("at "))?.trim()
+    if (firstFrame) return `${error.name || "Error"}: ${firstFrame}`
+    // altimate_change end
     const stack = error.stack?.split("\n").slice(1, 3).join(" | ").trim()
     if (stack) return `${error.name || "Error"} (no message): ${stack}`
     if (error.name && error.name !== "Error") return error.name

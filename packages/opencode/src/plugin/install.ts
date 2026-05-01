@@ -31,7 +31,7 @@ export type PatchDeps = {
   readText: (file: string) => Promise<string>
   write: (file: string, text: string) => Promise<void>
   exists: (file: string) => Promise<boolean>
-  files: (dir: string, name: "opencode" | "tui") => string[]
+  files: (dir: string, name: "altimate-code" | "opencode" | "tui") => string[]
 }
 
 export type PatchInput = {
@@ -334,11 +334,30 @@ function patchDir(input: PatchInput) {
   if (input.global) return input.config ?? Global.Path.config
   const git = input.vcs === "git" && input.worktree !== "/"
   const root = git ? input.worktree : input.directory
-  return path.join(root, ".opencode")
+  // altimate_change start — upstream_fix: new installs should land in
+  // `.altimate-code/`, not `.opencode/`. If `.opencode/` exists from a prior
+  // install we keep using it so we don't orphan existing plugins; otherwise
+  // we use `.altimate-code/`. Same pattern as ConfigPaths.directories.
+  const altimateDir = path.join(root, ".altimate-code")
+  const opencodeDir = path.join(root, ".opencode")
+  try {
+    if (require("fs").existsSync(opencodeDir) && !require("fs").existsSync(altimateDir)) {
+      return opencodeDir
+    }
+  } catch {
+    // fall through to default
+  }
+  return altimateDir
+  // altimate_change end
 }
 
-function patchName(kind: Kind): "opencode" | "tui" {
-  if (kind === "server") return "opencode"
+function patchName(kind: Kind): "altimate-code" | "opencode" | "tui" {
+  // altimate_change start — upstream_fix: new server-config files land as
+  // `altimate-code.json` (primary brand). The patchOne caller uses dep.files()
+  // to discover existing config files — both altimate-code.json and opencode.json
+  // are candidates so existing installs are picked up.
+  if (kind === "server") return "altimate-code"
+  // altimate_change end
   return "tui"
 }
 

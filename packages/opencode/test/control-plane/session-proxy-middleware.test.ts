@@ -35,6 +35,12 @@ type State = {
 const remote = { type: "testing", name: "remote-a" } as unknown as typeof WorkspaceTable.$inferInsert
 
 async function setup(state: State) {
+  // altimate_change start — upstream_fix: bridge merge renamed Adaptor.fetch →
+  // Adaptor.target() (returns local-or-remote target). The middleware now resolves
+  // target() then proxies via ServerProxy.http (which uses global fetch). Updated
+  // the test fixture: TestAdaptor.target returns a remote URL and we spy on global
+  // fetch to capture the proxy call into `state.calls` (replaces the old in-adaptor
+  // fetch callback).
   const TestAdaptor: Adaptor = {
     configure(config) {
       return config
@@ -43,22 +49,28 @@ async function setup(state: State) {
       throw new Error("not used")
     },
     async remove() {},
-
-    async fetch(_config: unknown, input: RequestInfo | URL, init?: RequestInit) {
-      const url =
-        input instanceof Request || input instanceof URL
-          ? input.toString()
-          : new URL(input, "http://workspace.test").toString()
-      const request = new Request(url, init)
-      const body = request.method === "GET" || request.method === "HEAD" ? undefined : await request.text()
-      state.calls.push({
-        method: request.method,
-        url: `${new URL(request.url).pathname}${new URL(request.url).search}`,
-        body,
-      })
-      return new Response("proxied", { status: 202 })
+    target() {
+      return { type: "remote", url: "http://workspace.test" }
     },
   }
+
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = (async (input: any, init?: RequestInit) => {
+    const request = input instanceof Request ? input : new Request(input, init)
+    const body = request.method === "GET" || request.method === "HEAD" ? undefined : await request.text()
+    state.calls.push({
+      method: request.method,
+      url: `${new URL(request.url).pathname}${new URL(request.url).search}`,
+      body,
+    })
+    return new Response("proxied", { status: 202 })
+  }) as typeof fetch
+  // restore on test exit (the test suite's afterEach mock.restore() doesn't
+  // catch the direct globalThis assignment, so guard it explicitly)
+  const restoreFetch = () => {
+    globalThis.fetch = originalFetch
+  }
+  // altimate_change end
 
   adaptors.installAdaptor("testing", TestAdaptor)
 
@@ -98,6 +110,7 @@ async function setup(state: State) {
     id1,
     id2,
     app,
+    restoreFetch,
     async request(input: RequestInfo | URL, init?: RequestInit) {
       return Instance.provide({
         directory: tmp.path,

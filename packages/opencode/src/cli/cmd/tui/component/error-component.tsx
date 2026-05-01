@@ -43,7 +43,10 @@ export function ErrorComponent(props: {
   }
 
   if (props.error.message) {
-    issueURL.searchParams.set("title", `opentui: fatal: ${props.error.message}`)
+    // altimate_change start — upstream_fix: prefix said "opentui: fatal:"; we file
+    // bugs against AltimateAI/altimate-code, so use that prefix instead.
+    issueURL.searchParams.set("title", `altimate-code: fatal: ${props.error.message}`)
+    // altimate_change end
   }
 
   if (props.error.stack) {

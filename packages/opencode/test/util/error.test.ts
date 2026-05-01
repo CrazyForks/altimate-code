@@ -35,4 +35,39 @@ describe("util.error", () => {
     expect(data.message).toBe("ResolveMessage: Cannot resolve module")
     expect(String(data.formatted)).toContain("ResolveMessage")
   })
+
+  // Regression: bare-name messages like "Error" or matching error.name carry
+  // no info — augment with the first stack frame so users don't see opaque
+  // "Error" in the TUI for the idle-timeout class of bugs (PR #118/#133).
+  test("augments bare 'Error' message with first stack frame", () => {
+    const err = new Error("Error")
+    const result = errorMessage(err)
+    expect(result.startsWith("Error: ")).toBe(true)
+    expect(result).toContain("at ")
+  })
+
+  test("augments message that matches error.name with first stack frame", () => {
+    class APIError extends Error {
+      override name = "APIError"
+    }
+    const err = new APIError("APIError")
+    const result = errorMessage(err)
+    expect(result.startsWith("APIError: ")).toBe(true)
+    expect(result).toContain("at ")
+  })
+
+  test("preserves real message when error.message is informative", () => {
+    const err = new Error("connection refused")
+    expect(errorMessage(err)).toBe("connection refused")
+  })
+
+  test("returns informative fallback when 'Error' message has no stack", () => {
+    const err = new Error("Error")
+    err.stack = undefined
+    // Without a stack we can't add context, but we still must not return the
+    // bare useless "Error" — return our descriptive fallback instead.
+    const result = errorMessage(err)
+    expect(result).not.toBe("Error")
+    expect(result.length).toBeGreaterThan("Error".length)
+  })
 })

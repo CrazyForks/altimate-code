@@ -24,7 +24,9 @@ interface RemovalTargets {
 
 export const UninstallCommand = {
   command: "uninstall",
-  describe: "uninstall opencode and remove all related files",
+  // altimate_change start — upstream_fix: branding regression in describe text
+  describe: "uninstall altimate-code and remove all related files",
+  // altimate_change end
   builder: (yargs: Argv) =>
     yargs
       .option("keep-config", {

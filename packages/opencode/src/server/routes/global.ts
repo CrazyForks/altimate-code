@@ -255,8 +255,10 @@ export const GlobalRoutes = lazy(() =>
     .post(
       "/upgrade",
       describeRoute({
-        summary: "Upgrade opencode",
-        description: "Upgrade opencode to the specified version or latest if not specified.",
+        // altimate_change start — upstream_fix: upstream describe text said "opencode"; this route is part of the public OpenAPI/SDK surface
+        summary: "Upgrade Altimate Code",
+        description: "Upgrade Altimate Code to the specified version or latest if not specified.",
+        // altimate_change end
         operationId: "global.upgrade",
         responses: {
           200: {

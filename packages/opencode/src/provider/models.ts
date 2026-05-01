@@ -152,11 +152,18 @@ export namespace ModelsDev {
 }
 
 if (!Flag.OPENCODE_DISABLE_MODELS_FETCH && !process.argv.includes("--get-yargs-completions")) {
-  ModelsDev.refresh()
-  setInterval(
-    async () => {
-      await ModelsDev.refresh()
-    },
-    60 * 1000 * 60,
-  ).unref()
+  // altimate_change start — upstream_fix: bridge merge removed the setTimeout(...,0)
+  // wrapper. Defer the initial refresh past the current microtask so that
+  // Installation.USER_AGENT (used inside refresh()) is fully initialized — we hit
+  // a circular-dep issue on cold start without this. See altimate commit 980efaab64.
+  setTimeout(() => {
+    ModelsDev.refresh()
+    setInterval(
+      async () => {
+        await ModelsDev.refresh()
+      },
+      60 * 1000 * 60,
+    ).unref()
+  }, 0)
+  // altimate_change end
 }

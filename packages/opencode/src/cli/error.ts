@@ -7,8 +7,9 @@ import { Provider } from "../provider/provider"
 import { UI } from "./ui"
 
 export function FormatError(input: unknown) {
+  // altimate_change start — upstream_fix: branding regressions in user-visible error strings
   if (MCP.Failed.isInstance(input))
-    return `MCP server "${input.data.name}" failed. Note, opencode does not support MCP authentication yet.`
+    return `MCP server "${input.data.name}" failed. Note, altimate-code does not support MCP authentication yet.`
   if (input instanceof AccountTransportError || input instanceof AccountServiceError) {
     return input.message
   }
@@ -17,10 +18,11 @@ export function FormatError(input: unknown) {
     return [
       `Model not found: ${providerID}/${modelID}`,
       ...(Array.isArray(suggestions) && suggestions.length ? ["Did you mean: " + suggestions.join(", ")] : []),
-      `Try: \`opencode models\` to list available models`,
-      `Or check your config (opencode.json) provider/model names`,
+      `Try: \`altimate models\` to list available models`,
+      `Or check your config (altimate-code.json) provider/model names`,
     ].join("\n")
   }
+  // altimate_change end
   if (Provider.InitError.isInstance(input)) {
     return `Failed to initialize provider "${input.data.providerID}". Check credentials and configuration.`
   }

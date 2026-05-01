@@ -168,7 +168,9 @@ export const McpAuthCommand = cmd({
 
         if (oauthServers.length === 0) {
           prompts.log.warn("No OAuth-capable MCP servers configured")
-          prompts.log.info("Remote MCP servers support OAuth by default. Add a remote server in opencode.json:")
+          // altimate_change start — upstream_fix: branding regression
+          prompts.log.info("Remote MCP servers support OAuth by default. Add a remote server in altimate-code.json:")
+          // altimate_change end
           prompts.log.info(`
   "mcp": {
     "my-server": {
@@ -387,12 +389,21 @@ export const McpLogoutCommand = cmd({
 })
 
 async function resolveConfigPath(baseDir: string, global = false) {
-  // Check for existing config files (prefer .jsonc over .json, check .opencode/ subdirectory too)
-  const candidates = [path.join(baseDir, "opencode.json"), path.join(baseDir, "opencode.jsonc")]
+  // altimate_change start — upstream_fix: bridge merge wrote new MCP entries to
+  // opencode.json. Mirror main's behavior: prefer altimate-code.json (primary),
+  // accept opencode.json (fallback) for existing installs that have it.
+  const CONFIG_FILENAMES = ["altimate-code.json", "opencode.json", "opencode.jsonc"]
+  const candidates: string[] = []
 
   if (!global) {
-    candidates.push(path.join(baseDir, ".opencode", "opencode.json"), path.join(baseDir, ".opencode", "opencode.jsonc"))
+    // Subdirectory configs first — that's where existing project configs typically live
+    candidates.push(
+      ...CONFIG_FILENAMES.map((f) => path.join(baseDir, ".altimate-code", f)),
+      ...CONFIG_FILENAMES.map((f) => path.join(baseDir, ".opencode", f)),
+    )
   }
+
+  candidates.push(...CONFIG_FILENAMES.map((f) => path.join(baseDir, f)))
 
   for (const candidate of candidates) {
     if (await Filesystem.exists(candidate)) {
@@ -400,8 +411,9 @@ async function resolveConfigPath(baseDir: string, global = false) {
     }
   }
 
-  // Default to opencode.json if none exist
+  // Default to altimate-code.json (root) when nothing exists yet
   return candidates[0]
+  // altimate_change end
 }
 
 async function addMcpToConfig(name: string, mcpConfig: Config.Mcp, configPath: string) {
@@ -565,7 +577,9 @@ export const McpAddCommand = cmd({
         if (type === "local") {
           const command = await prompts.text({
             message: "Enter command to run",
-            placeholder: "e.g., opencode x @modelcontextprotocol/server-filesystem",
+            // altimate_change start — upstream_fix: branding regression
+            placeholder: "e.g., altimate x @modelcontextprotocol/server-filesystem",
+            // altimate_change end
             validate: (x) => (x && x.length > 0 ? undefined : "Required"),
           })
           if (prompts.isCancel(command)) throw new UI.CancelledError()
@@ -799,7 +813,7 @@ export const McpDebugCommand = cmd({
               params: {
                 protocolVersion: "2024-11-05",
                 capabilities: {},
-                clientInfo: { name: "opencode-debug", version: Installation.VERSION },
+                clientInfo: { name: "altimate-code-debug", version: Installation.VERSION },
               },
               id: 1,
             }),
@@ -840,7 +854,7 @@ export const McpDebugCommand = cmd({
 
             try {
               const client = new Client({
-                name: "opencode-debug",
+                name: "altimate-code-debug",
                 version: Installation.VERSION,
               })
               await client.connect(transport)

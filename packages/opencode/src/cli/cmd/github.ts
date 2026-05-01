@@ -135,9 +135,13 @@ type IssueQueryResponse = {
   }
 }
 
-const AGENT_USERNAME = "opencode-agent[bot]"
+// altimate_change start — upstream_fix: bridge merge reverted these constants from
+// our altimate-code branding back to upstream. They affect the GitHub App identity,
+// the workflow filename committed to user repos, and the agent username we react as.
+const AGENT_USERNAME = "altimate-code-agent[bot]"
 const AGENT_REACTION = "eyes"
-const WORKFLOW_FILE = ".github/workflows/opencode.yml"
+const WORKFLOW_FILE = ".github/workflows/altimate-code.yml"
+// altimate_change end
 
 // Event categories for routing
 // USER_EVENTS: triggered by user actions, have actor/issueId, support reactions/comments
@@ -268,7 +272,9 @@ export const GithubInstallCommand = cmd({
 
           async function promptProvider() {
             const priority: Record<string, number> = {
-              opencode: 0,
+              // altimate_change start — upstream_fix: provider priority key was "altimate-code"
+              "altimate-code": 0,
+              // altimate_change end
               anthropic: 1,
               openai: 2,
               google: 3,
@@ -326,7 +332,9 @@ export const GithubInstallCommand = cmd({
             if (installation) return s.stop("GitHub app already installed")
 
             // Open browser
-            const url = "https://github.com/apps/opencode-agent"
+            // altimate_change start — upstream_fix: GitHub App slug is altimate-code-agent
+            const url = "https://github.com/apps/altimate-code-agent"
+            // altimate_change end
             const command =
               process.platform === "darwin"
                 ? `open "${url}"`
@@ -378,7 +386,9 @@ export const GithubInstallCommand = cmd({
 
             await Filesystem.write(
               path.join(app.root, WORKFLOW_FILE),
-              `name: opencode
+              // altimate_change start — upstream_fix: workflow yaml name + job +
+              // mention triggers should be altimate-code branded
+              `name: altimate-code
 
 on:
   issue_comment:
@@ -387,12 +397,12 @@ on:
     types: [created]
 
 jobs:
-  opencode:
+  altimate-code:
     if: |
       contains(github.event.comment.body, ' /oc') ||
       startsWith(github.event.comment.body, '/oc') ||
-      contains(github.event.comment.body, ' /opencode') ||
-      startsWith(github.event.comment.body, '/opencode')
+      contains(github.event.comment.body, ' /altimate-code') ||
+      startsWith(github.event.comment.body, '/altimate-code')
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -405,10 +415,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Run opencode
+      - name: Run altimate-code
         uses: AltimateAI/altimate-code/github@latest${envStr}
         with:
           model: ${provider}/${model}`,
+              // altimate_change end
             )
 
             prompts.log.success(`Added workflow file: "${WORKFLOW_FILE}"`)
@@ -544,7 +555,7 @@ export const GithubRunCommand = cmd({
           await addReaction(commentType)
         }
 
-        // Setup opencode session
+        // Setup altimate-code session
         const repoData = await fetchRepo()
         session = await Session.create({
           permission: [
@@ -562,7 +573,7 @@ export const GithubRunCommand = cmd({
           await Session.share(session.id)
           return session.id.slice(-8)
         })()
-        console.log("opencode session", session.id)
+        console.log("altimate-code session", session.id)
 
         // Handle event types:
         // REPO_EVENTS (schedule, workflow_dispatch): no issue/PR context, output to logs/PR only
@@ -784,7 +795,7 @@ export const GithubRunCommand = cmd({
         }
 
         const reviewContext = getReviewCommentContext()
-        const mentions = (process.env["MENTIONS"] || "/opencode,/oc")
+        const mentions = (process.env["MENTIONS"] || "/altimate-code,/oc")
           .split(",")
           .map((m) => m.trim().toLowerCase())
           .filter(Boolean)
@@ -930,7 +941,7 @@ export const GithubRunCommand = cmd({
       }
 
       async function chat(message: string, files: PromptFiles = []) {
-        console.log("Sending message to opencode...")
+        console.log("Sending message to altimate-code...")
 
         const result = await SessionPrompt.prompt({
           sessionID: session.id,
@@ -1026,7 +1037,7 @@ export const GithubRunCommand = cmd({
 
       async function getOidcToken() {
         try {
-          return await core.getIDToken("opencode-github-action")
+          return await core.getIDToken("altimate-code-github-action")
         } catch (error) {
           console.error("Failed to get OIDC token:", error instanceof Error ? error.message : error)
           throw new Error(
@@ -1128,9 +1139,9 @@ export const GithubRunCommand = cmd({
           .join("")
         if (type === "schedule" || type === "dispatch") {
           const hex = crypto.randomUUID().slice(0, 6)
-          return `opencode/${type}-${hex}-${timestamp}`
+          return `altimate-code/${type}-${hex}-${timestamp}`
         }
-        return `opencode/${type}${issueId}-${timestamp}`
+        return `altimate-code/${type}${issueId}-${timestamp}`
       }
 
       async function pushToNewBranch(summary: string, branch: string, commit: boolean, isSchedule: boolean) {
@@ -1402,9 +1413,9 @@ export const GithubRunCommand = cmd({
           const titleAlt = encodeURIComponent(session.title.substring(0, 50))
           const title64 = Buffer.from(session.title.substring(0, 700), "utf8").toString("base64")
 
-          return `<a href="${shareBaseUrl}/s/${shareId}"><img width="200" alt="${titleAlt}" src="https://social-cards.sst.dev/opencode-share/${title64}.png?model=${providerID}/${modelID}&version=${session.version}&id=${shareId}" /></a>\n`
+          return `<a href="${shareBaseUrl}/s/${shareId}"><img width="200" alt="${titleAlt}" src="https://social-cards.sst.dev/altimate-code-share/${title64}.png?model=${providerID}/${modelID}&version=${session.version}&id=${shareId}" /></a>\n`
         })()
-        const shareUrl = shareId ? `[opencode session](${shareBaseUrl}/s/${shareId})&nbsp;&nbsp;|&nbsp;&nbsp;` : ""
+        const shareUrl = shareId ? `[altimate-code session](${shareBaseUrl}/s/${shareId})&nbsp;&nbsp;|&nbsp;&nbsp;` : ""
         return `\n\n${image}${shareUrl}[github run](${runUrl})`
       }
 
@@ -1465,7 +1476,7 @@ query($owner: String!, $repo: String!, $number: Int!) {
         return [
           "<github_action_context>",
           "You are running as a GitHub Action. Important:",
-          "- Git push and PR creation are handled AUTOMATICALLY by the opencode infrastructure after your response",
+          "- Git push and PR creation are handled AUTOMATICALLY by the altimate-code infrastructure after your response",
           "- Do NOT include warnings or disclaimers about GitHub tokens, workflow permissions, or PR creation capabilities",
           "- Do NOT suggest manual steps for creating PRs or pushing code - this happens automatically",
           "- Focus only on the code changes and your analysis/response",
@@ -1603,7 +1614,7 @@ query($owner: String!, $repo: String!, $number: Int!) {
         return [
           "<github_action_context>",
           "You are running as a GitHub Action. Important:",
-          "- Git push and PR creation are handled AUTOMATICALLY by the opencode infrastructure after your response",
+          "- Git push and PR creation are handled AUTOMATICALLY by the altimate-code infrastructure after your response",
           "- Do NOT include warnings or disclaimers about GitHub tokens, workflow permissions, or PR creation capabilities",
           "- Do NOT suggest manual steps for creating PRs or pushing code - this happens automatically",
           "- Focus only on the code changes and your analysis/response",

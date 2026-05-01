@@ -130,19 +130,41 @@ async function exchangeCodeForTokens(code: string, redirectUri: string, pkce: Pk
 }
 
 async function refreshAccessToken(refreshToken: string): Promise<TokenResponse> {
-  const response = await fetch(`${ISSUER}/oauth/token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: refreshToken,
-      client_id: CLIENT_ID,
-    }).toString(),
-  })
-  if (!response.ok) {
-    throw new Error(`Token refresh failed: ${response.status}`)
+  // altimate_change start — upstream_fix: bridge merge dropped the 3-attempt retry
+  // loop with 4xx-vs-5xx awareness. Without it transient network blips during OAuth
+  // refresh hard-fail user sessions. Restore the loop and the descriptive error
+  // message that points at `altimate-code auth login openai` for permanent failures.
+  let lastError: Error | undefined
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const response = await fetch(`${ISSUER}/oauth/token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "refresh_token",
+          refresh_token: refreshToken,
+          client_id: CLIENT_ID,
+        }).toString(),
+      })
+      if (!response.ok) {
+        const body = await response.text().catch(() => "")
+        throw new Error(
+          `Codex OAuth token refresh failed (HTTP ${response.status}). ` +
+            `Try re-authenticating: altimate-code auth login openai` +
+            (body ? ` — ${body.slice(0, 200)}` : ""),
+        )
+      }
+      return response.json()
+    } catch (e) {
+      lastError = e instanceof Error ? e : new Error(String(e))
+      // Don't retry on 4xx (permanent auth failures) — only retry on network errors / 5xx
+      const is4xx = lastError.message.includes("HTTP 4")
+      if (is4xx || attempt >= 2) break
+      await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)))
+    }
   }
-  return response.json()
+  throw lastError ?? new Error("Codex OAuth token refresh failed")
+  // altimate_change end
 }
 
 const HTML_SUCCESS = `<!doctype html>
@@ -424,8 +446,13 @@ export async function CodexAuthPlugin(input: PluginInput): Promise<Hooks> {
             // Cast to include accountId field
             const authWithAccount = currentAuth as typeof currentAuth & { accountId?: string }
 
-            // Check if token needs refresh
-            if (!currentAuth.access || currentAuth.expires < Date.now()) {
+            // altimate_change start — upstream_fix: bridge merge dropped the 30s skew
+            // buffer. Without it, requests that span the expiry boundary mid-flight
+            // race to a 401 from the API even though we just verified the token. The
+            // 30s buffer gives in-flight requests headroom to finish before the token
+            // becomes invalid.
+            if (!currentAuth.access || currentAuth.expires < Date.now() + 30_000) {
+              // altimate_change end
               log.info("refreshing codex access token")
               const tokens = await refreshAccessToken(currentAuth.refresh)
               const newAccountId = extractAccountId(tokens) || authWithAccount.accountId
@@ -523,7 +550,7 @@ export async function CodexAuthPlugin(input: PluginInput): Promise<Hooks> {
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
-                "User-Agent": `opencode/${Installation.VERSION}`,
+                "User-Agent": `altimate-code/${Installation.VERSION}`,
               },
               body: JSON.stringify({ client_id: CLIENT_ID }),
             })
@@ -547,7 +574,7 @@ export async function CodexAuthPlugin(input: PluginInput): Promise<Hooks> {
                     method: "POST",
                     headers: {
                       "Content-Type": "application/json",
-                      "User-Agent": `opencode/${Installation.VERSION}`,
+                      "User-Agent": `altimate-code/${Installation.VERSION}`,
                     },
                     body: JSON.stringify({
                       device_auth_id: deviceData.device_auth_id,
@@ -607,7 +634,7 @@ export async function CodexAuthPlugin(input: PluginInput): Promise<Hooks> {
     "chat.headers": async (input, output) => {
       if (input.model.providerID !== "openai") return
       output.headers.originator = "altimate"
-      output.headers["User-Agent"] = `opencode/${Installation.VERSION} (${os.platform()} ${os.release()}; ${os.arch()})`
+      output.headers["User-Agent"] = `altimate/${Installation.VERSION} (${os.platform()} ${os.release()}; ${os.arch()})`
       output.headers.session_id = input.sessionID
     },
     "chat.params": async (input, output) => {

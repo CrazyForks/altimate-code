@@ -7,6 +7,11 @@ import { useTheme } from "../context/theme"
 import { Keybind } from "@/util/keybind"
 import { TextAttributes } from "@opentui/core"
 import { useSDK } from "@tui/context/sdk"
+// altimate_change start — upstream_fix: bridge merge replaced Log.Default.error
+// with console.error inside the TUI process. console output corrupts the TUI
+// render. Restore main's structured logger.
+import { Log } from "@/util/log"
+// altimate_change end
 
 function Status(props: { enabled: boolean; loading: boolean }) {
   const { theme } = useTheme()
@@ -61,10 +66,10 @@ export function DialogMcp() {
           if (status.data) {
             sync.set("mcp", status.data)
           } else {
-            console.error("Failed to refresh MCP status: no data returned")
+            Log.Default.error("Failed to refresh MCP status: no data returned")
           }
         } catch (error) {
-          console.error("Failed to toggle MCP:", error)
+          Log.Default.error("Failed to toggle MCP", { error })
         } finally {
           setLoading(null)
         }

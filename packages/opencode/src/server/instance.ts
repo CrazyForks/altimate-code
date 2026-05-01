@@ -31,10 +31,15 @@ import { errorHandler } from "./middleware"
 
 const log = Log.create({ service: "server" })
 
+// altimate_change start — upstream_fix: this gen file is never produced by our build
+// (we don't ship an embedded web UI; the route below proxies to app.altimate.ai).
+// The dynamic import always rejects and embeddedUIPromise resolves to null, which is
+// the intended path. Marker so the next bridge merge re-evaluates this code.
 const embeddedUIPromise = Flag.OPENCODE_DISABLE_EMBEDDED_WEB_UI
   ? Promise.resolve(null)
   : // @ts-expect-error - generated file at build time
     import("opencode-web-ui.gen.ts").then((module) => module.default as Record<string, string>).catch(() => null)
+// altimate_change end
 
 const DEFAULT_CSP =
   "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; media-src 'self' data:; connect-src 'self' data:"
