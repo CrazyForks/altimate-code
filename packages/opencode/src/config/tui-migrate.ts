@@ -12,7 +12,9 @@ import { Global } from "@/global"
 
 const log = Log.create({ service: "tui.migrate" })
 
+// altimate_change start — schema URL points to altimate.ai (was opencode.ai)
 const TUI_SCHEMA_URL = "https://altimate.ai/tui.json"
+// altimate_change end
 
 const LegacyTheme = TuiInfo.shape.theme.optional()
 const LegacyRecord = z.record(z.string(), z.unknown()).optional()

@@ -28,7 +28,9 @@ export type PlugDeps = {
   readText: (file: string) => Promise<string>
   write: (file: string, text: string) => Promise<void>
   exists: (file: string) => Promise<boolean>
+  // altimate_change start — accept altimate-code in addition to opencode/tui
   files: (dir: string, name: "altimate-code" | "opencode" | "tui") => string[]
+  // altimate_change end
   global: string
 }
 

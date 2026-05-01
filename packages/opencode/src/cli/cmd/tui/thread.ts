@@ -64,13 +64,17 @@ async function input(value?: string) {
 
 export const TuiThreadCommand = cmd({
   command: "$0 [project]",
+  // altimate_change start — branding (describe text was "opencode" upstream)
   describe: "start altimate-code tui",
+  // altimate_change end
   builder: (yargs) =>
     withNetworkOptions(yargs)
+      // altimate_change start — branding (positional describe was "opencode" upstream)
       .positional("project", {
         type: "string",
         describe: "path to start altimate-code in",
       })
+      // altimate_change end
       .option("model", {
         type: "string",
         alias: ["m"],
@@ -189,7 +193,9 @@ export const TuiThreadCommand = cmd({
             events: undefined,
           }
         : {
+            // altimate_change start — internal worker URL (was opencode.internal)
             url: "http://altimate-code.internal",
+            // altimate_change end
             fetch: createWorkerFetch(client),
             events: createEventSource(client),
           }

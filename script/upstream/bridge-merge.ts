@@ -244,6 +244,19 @@ function reapplyMarkers(ourContent: string, upstreamContent: string): ApplyResul
 interface Plan {
   takeUpstream: string[]
   keepOurs: string[]
+  /**
+   * Files in config.requireMarkers that we treat as keep-ours regardless of
+   * whether they currently have markers. They hold known altimate behavioral
+   * patches; the bridge tool MUST NOT overlay upstream content on them. Humans
+   * merge any upstream improvements manually so the patches survive.
+   */
+  requireMarkers: string[]
+  /**
+   * Sub-list of requireMarkers where the file has zero altimate_change blocks.
+   * The patches were either lost (regression — must restore before merging) or
+   * never marked in the first place. Block the merge until resolved.
+   */
+  requireMarkersMissing: string[]
   skipFile: string[]
   upstreamDeletedSkip: string[]
   upstreamDeletedKeepOurs: string[]
@@ -274,17 +287,29 @@ function buildPlan(upstreamFiles: Set<string>, ourFiles: Set<string>, config: Me
   const plan: Plan = {
     takeUpstream: [],
     keepOurs: [],
+    requireMarkers: [],
+    requireMarkersMissing: [],
     skipFile: [],
     upstreamDeletedSkip: [],
     upstreamDeletedKeepOurs: [],
     upstreamDeletedHasMarkers: [],
     upstreamDeletedReview: [],
   }
+  // Pre-compute the requireMarkers set as exact paths (not globs).
+  const requireMarkersSet = new Set(config.requireMarkers)
   for (const file of upstreamFiles) {
     if (config.keepOurs.some((p) => minimatch(file, p, { dot: true }))) {
       plan.keepOurs.push(file)
     } else if (config.skipFiles.some((p) => minimatch(file, p, { dot: true }))) {
       plan.skipFile.push(file)
+    } else if (requireMarkersSet.has(file)) {
+      // Defense in depth: never overlay upstream content on these files.
+      // The list is curated in config.requireMarkers and contains every file
+      // known to hold altimate behavioral patches (UA strings, retry loops,
+      // OAuth skew buffers, etc.). Humans merge upstream improvements into
+      // these files manually so the patches survive.
+      plan.requireMarkers.push(file)
+      if (!fileHasMarkers(file)) plan.requireMarkersMissing.push(file)
     } else {
       plan.takeUpstream.push(file)
     }
@@ -502,16 +527,36 @@ async function main(): Promise<void> {
   const plan = buildPlan(upstreamFiles, ourFiles, config, minimatch)
   logger.info(`take upstream:                    ${plan.takeUpstream.length}`)
   logger.info(`keep ours (keepOurs):             ${plan.keepOurs.length}`)
+  logger.info(`keep ours (requireMarkers):       ${plan.requireMarkers.length}  → must merge upstream changes manually`)
   logger.info(`skip (skipFiles):                 ${plan.skipFile.length}`)
   logger.info(`upstream deleted (skipFiles):     ${plan.upstreamDeletedSkip.length}  → delete`)
   logger.info(`upstream deleted (keepOurs):      ${plan.upstreamDeletedKeepOurs.length}  → keep`)
   logger.info(`upstream deleted (has markers):   ${plan.upstreamDeletedHasMarkers.length}  → keep (altimate code)`)
   logger.info(`upstream deleted (REVIEW):        ${plan.upstreamDeletedReview.length}  → keep + flag`)
+
+  // Hard abort if a requireMarkers file is missing markers entirely. Either the
+  // patches were lost (regression — restore before merging) or never marked
+  // (run a marker sweep first). Pushing through would silently re-introduce
+  // the v1.4.0 regression class.
+  if (plan.requireMarkersMissing.length > 0) {
+    logger.error(
+      `${plan.requireMarkersMissing.length} requireMarkers file(s) have NO altimate_change blocks — bridge merge aborted to prevent silent loss of altimate behavioral patches:`,
+    )
+    for (const f of plan.requireMarkersMissing) logger.error(`  ${f}`)
+    logger.info("")
+    logger.info("Run `bun run script/upstream/analyze.ts --require-markers --strict` for details.")
+    logger.info("Resolve by either:")
+    logger.info("  (a) Restoring missing altimate_change blocks around the patches,")
+    logger.info("  (b) Removing the file from config.requireMarkers if it no longer holds patches.")
+    process.exit(1)
+  }
+
   report.push(`## Plan summary\n`)
   report.push(`| Category | Action | Count |`)
   report.push(`|---|---|---|`)
   report.push(`| In v1.4.0 — Take upstream | overwrite | ${plan.takeUpstream.length} |`)
   report.push(`| In v1.4.0 — keepOurs glob | leave main's version | ${plan.keepOurs.length} |`)
+  report.push(`| In v1.4.0 — requireMarkers list | leave main's version (review for upstream changes) | ${plan.requireMarkers.length} |`)
   report.push(`| In v1.4.0 — skipFiles glob | exclude | ${plan.skipFile.length} |`)
   report.push(`| Not in v1.4.0 — skipFiles glob | delete | ${plan.upstreamDeletedSkip.length} |`)
   report.push(`| Not in v1.4.0 — keepOurs glob | keep | ${plan.upstreamDeletedKeepOurs.length} |`)

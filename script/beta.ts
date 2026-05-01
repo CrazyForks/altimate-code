@@ -96,7 +96,9 @@ async function install() {
 }
 
 async function fix(pr: PR, files: string[], prs: PR[], applied: number[], idx: number) {
-  console.log(`  Trying to auto-resolve ${files.length} conflict(s) with opencode...`)
+  // altimate_change start — upstream_fix: branding + spawn the right binary
+  console.log(`  Trying to auto-resolve ${files.length} conflict(s) with altimate-code...`)
+  // altimate_change end
 
   const done = lines(prs.filter((x) => applied.includes(x.number)))
   const next = lines(prs.slice(idx + 1))
@@ -122,10 +124,12 @@ async function fix(pr: PR, files: string[], prs: PR[], applied: number[], idx: n
   ].join("\n")
 
   try {
-    await $`opencode run -m ${model} ${prompt}`
+    // altimate_change start — upstream_fix: spawn the altimate-code binary
+    await $`altimate-code run -m ${model} ${prompt}`
   } catch (err) {
-    console.log(`  opencode failed: ${err}`)
+    console.log(`  altimate-code failed: ${err}`)
     return false
+    // altimate_change end
   }
 
   const left = await conflicts()
@@ -138,12 +142,16 @@ async function fix(pr: PR, files: string[], prs: PR[], applied: number[], idx: n
 
   if (!(await typecheck())) return false
 
-  console.log("  Conflicts resolved with opencode")
+  // altimate_change start — branding
+  console.log("  Conflicts resolved with altimate-code")
+  // altimate_change end
   return true
 }
 
 async function smoke(prs: PR[], applied: number[]) {
-  console.log("\nRunning final smoke check with opencode...")
+  // altimate_change start — branding
+  console.log("\nRunning final smoke check with altimate-code...")
+  // altimate_change end
 
   const done = lines(prs.filter((x) => applied.includes(x.number)))
   const prompt = [
@@ -156,7 +164,9 @@ async function smoke(prs: PR[], applied: number[]) {
   ].join("\n")
 
   try {
-    await $`opencode run -m ${model} ${prompt}`
+    // altimate_change start — upstream_fix: spawn altimate-code binary
+    await $`altimate-code run -m ${model} ${prompt}`
+    // altimate_change end
   } catch (err) {
     console.log(`Smoke fix failed: ${err}`)
     return false

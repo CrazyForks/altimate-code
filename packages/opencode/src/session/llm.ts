@@ -227,7 +227,9 @@ export namespace LLM {
             }
           : input.model.providerID !== "anthropic"
             ? {
-                "User-Agent": `opencode/${Installation.VERSION}`,
+                // altimate_change start — upstream_fix: UA brand
+                "User-Agent": `altimate-code/${Installation.VERSION}`,
+                // altimate_change end
               }
             : undefined),
         ...input.model.headers,

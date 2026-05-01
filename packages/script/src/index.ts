@@ -47,7 +47,13 @@ const VERSION = await (async () => {
   return `${major}.${minor}.${patch + 1}`
 })()
 
-const bot = ["actions-user", "opencode", "opencode-agent[bot]"]
+// altimate_change start — intentional: this list filters out upstream/CI bot
+// identities when generating changelogs. The "opencode" / "opencode-agent[bot]"
+// entries match upstream's GitHub App so its commits are excluded from our
+// release notes. NOT a brand leak — these are the literal upstream identities
+// we're filtering AGAINST.
+const bot = ["actions-user", "opencode", "opencode-agent[bot]", "altimate-code-agent[bot]"]
+// altimate_change end
 const teamPath = path.resolve(import.meta.dir, "../../../.github/TEAM_MEMBERS")
 const team = [
   ...(await Bun.file(teamPath)
@@ -74,4 +80,6 @@ export const Script = {
     return team
   },
 }
-console.log(`opencode script`, JSON.stringify(Script, null, 2))
+// altimate_change start — branding regression
+console.log(`altimate-code script`, JSON.stringify(Script, null, 2))
+// altimate_change end

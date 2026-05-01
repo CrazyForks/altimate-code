@@ -227,16 +227,28 @@ describe("bridge merge: branding leaks", () => {
     /import.*opencode/, // import paths within @opencode-ai/util
   ]
 
+  // Skip lines inside `altimate_change start ... altimate_change end` blocks.
+  // Those are intentional altimate customizations and may legitimately reference
+  // upstream identifiers in explanatory comments (e.g. "branding fix: was opencode.ai").
+  function* nonMarkerLines(content: string): Generator<{ line: string; index: number }> {
+    const lines = content.split("\n")
+    let inside = false
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]
+      if (line.includes("altimate_change start")) inside = true
+      if (!inside) yield { line, index: i }
+      if (line.includes("altimate_change end")) inside = false
+    }
+  }
+
   test("no opencode.ai URLs in shipped source", async () => {
     const files = await walkSource(srcDir)
     const violations: string[] = []
     for (const file of files) {
       const content = await readText(file)
-      const lines = content.split("\n")
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i]
+      for (const { line, index } of nonMarkerLines(content)) {
         if (/opencode\.ai/i.test(line)) {
-          violations.push(`${path.relative(repoRoot, file)}:${i + 1}: ${line.trim()}`)
+          violations.push(`${path.relative(repoRoot, file)}:${index + 1}: ${line.trim()}`)
         }
       }
     }
@@ -248,11 +260,9 @@ describe("bridge merge: branding leaks", () => {
     const violations: string[] = []
     for (const file of files) {
       const content = await readText(file)
-      const lines = content.split("\n")
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i]
+      for (const { line, index } of nonMarkerLines(content)) {
         if (/anomalyco/i.test(line)) {
-          violations.push(`${path.relative(repoRoot, file)}:${i + 1}: ${line.trim()}`)
+          violations.push(`${path.relative(repoRoot, file)}:${index + 1}: ${line.trim()}`)
         }
       }
     }

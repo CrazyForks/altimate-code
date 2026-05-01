@@ -3,7 +3,11 @@ import { modify, applyEdits, parseTree, findNodeAtLocation } from "jsonc-parser"
 import { Filesystem } from "../util/filesystem"
 import type { Config } from "../config/config"
 
+// altimate_change start — primary config filename is altimate-code.json; opencode.json
+// is fallback for users with pre-existing upstream installs. New writes land in
+// altimate-code.json (first entry of the list).
 const CONFIG_FILENAMES = ["altimate-code.json", "opencode.json", "opencode.jsonc"]
+// altimate_change end
 
 export async function resolveConfigPath(baseDir: string, global = false) {
   const candidates: string[] = []

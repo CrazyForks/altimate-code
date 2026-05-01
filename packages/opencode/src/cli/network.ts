@@ -17,11 +17,15 @@ const options = {
     describe: "enable mDNS service discovery (defaults hostname to 0.0.0.0)",
     default: false,
   },
+  // altimate_change start — upstream_fix: mDNS service identifier shipped to the
+  // local network. Brand to altimate-code so users see "altimate-code.local"
+  // instead of "opencode.local" in Bonjour/Avahi browsers.
   "mdns-domain": {
     type: "string" as const,
-    describe: "custom domain name for mDNS service (default: opencode.local)",
-    default: "opencode.local",
+    describe: "custom domain name for mDNS service (default: altimate-code.local)",
+    default: "altimate-code.local",
   },
+  // altimate_change end
   cors: {
     type: "string" as const,
     array: true,

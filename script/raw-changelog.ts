@@ -23,7 +23,11 @@ type Diff = {
 }
 
 const repo = process.env.GH_REPO ?? "AltimateAI/altimate-code"
-const bot = ["actions-user", "opencode", "opencode-agent[bot]"]
+// altimate_change start — intentional: filters upstream/CI bot identities out
+// of changelog generation. NOT a brand leak — these are the literal upstream
+// identities we're excluding. Adds altimate-code-agent[bot] for our own bot.
+const bot = ["actions-user", "opencode", "opencode-agent[bot]", "altimate-code-agent[bot]"]
+// altimate_change end
 const team = [
   ...(await Bun.file(new URL("../.github/TEAM_MEMBERS", import.meta.url))
     .text()

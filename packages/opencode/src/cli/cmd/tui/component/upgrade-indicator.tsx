@@ -21,7 +21,9 @@ export function UpgradeIndicator(props: { fallback?: JSX.Element }) {
           <Show when={!isCompact()}>
             <text fg={theme.textMuted}>update available ·</text>
           </Show>
+          {/* altimate_change start — upgrade hint shows the altimate-code CLI command */}
           <text fg={theme.textMuted}>altimate upgrade</text>
+          {/* altimate_change end */}
         </box>
       )}
     </Show>
