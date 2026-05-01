@@ -793,6 +793,16 @@ export class Trace {
   }
 
   /**
+   * Wait for any pending async snapshot to complete.
+   * Use from tests that need to read the trace file deterministically after
+   * a span completion (instead of `await sleep(50)` which races on slow CI runners).
+   * No-op if no snapshot is in flight.
+   */
+  async flush(): Promise<void> {
+    if (this.snapshotPromise) await this.snapshotPromise.catch(() => {})
+  }
+
+  /**
    * Attach domain-specific attributes to a span.
    *
    * Merges into the span's `attributes` map. Safe to call at any time —

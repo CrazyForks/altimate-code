@@ -211,7 +211,9 @@ describe("Initial snapshot from startTrace", () => {
     const tracer = Recap.withExporters([new FileExporter(tmpDir)])
     tracer.startTrace("s-initial", { prompt: "hello" })
 
-    await new Promise((r) => setTimeout(r, 50))
+    // Wait for the async snapshot to complete (deterministic vs sleep(50)
+    // which flakes on slow CI runners).
+    await tracer.flush()
 
     const filePath = tracer.getTracePath()!
     const exists = await fs.stat(filePath).then(() => true).catch(() => false)
@@ -236,7 +238,7 @@ describe("Initial snapshot from startTrace", () => {
       agent: "builder",
       tags: ["test"],
     })
-    await new Promise((r) => setTimeout(r, 50))
+    await tracer.flush()
 
     const traceFile: TraceFile = JSON.parse(await fs.readFile(tracer.getTracePath()!, "utf-8"))
     expect(traceFile.metadata.title).toBe("My Task")
