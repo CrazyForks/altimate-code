@@ -348,6 +348,19 @@ export const defaultConfig: MergeConfig = {
     // PR #18186 deleted this; we do not restore it. If upstream resurrects
     // this filename, skipFiles ensures the overlay drops it.
     "packages/opencode/src/session/prompt/anthropic-20250930.txt",
+    // Upstream contributor-management metadata — not relevant to our fork.
+    // We maintain our own TEAM_MEMBERS / pull_request_template.md (kept via
+    // keepOurs above). These specific files are upstream-only and were
+    // accidentally pulled in by the v1.4.0 bridge merge.
+    ".github/CODEOWNERS",
+    ".github/VOUCHED.td",
+    // Upstream's GitHub-stars download tracker — we have our own analytics.
+    "STATS.md",
+    "script/stats.ts",
+    // Upstream Zed editor settings — leaks editor preferences from upstream.
+    ".zed/settings.json",
+    // Upstream changelog command — we have our own bridge-merge / release process.
+    ".opencode/command/changelog.md",
   ],
 
   brandingRules: [
