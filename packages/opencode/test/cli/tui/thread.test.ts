@@ -25,8 +25,9 @@ describe("tui thread > resolveProjectDirectory", () => {
     const linkType = process.platform === "win32" ? "junction" : "dir"
     await fs.symlink(tmp.path, link, linkType)
     try {
-      // PWD = symlink, cwd = real path. Without the implicit project arg
-      // the resolver should return realpath(cwd) = tmp.path.
+      // The first arg is the symlink path (acting as the env var pointing at
+      // the symlink); the second arg is the real cwd. With no project arg the
+      // resolver should return realpath(cwd) which equals tmp.path.
       const resolved = resolveProjectDirectory(undefined, link, tmp.path)
       expect(resolved).toBe(tmp.path)
     } finally {
@@ -40,8 +41,8 @@ describe("tui thread > resolveProjectDirectory", () => {
     const linkType = process.platform === "win32" ? "junction" : "dir"
     await fs.symlink(tmp.path, link, linkType)
     try {
-      // project = ".", PWD = symlink. The resolver should join PWD + "."
-      // and then realpath that, returning tmp.path.
+      // project arg is ".", second arg is the symlink path. The resolver
+      // joins them and runs realpath, which should return tmp.path.
       const resolved = resolveProjectDirectory(".", link, tmp.path)
       expect(resolved).toBe(tmp.path)
     } finally {
@@ -49,13 +50,13 @@ describe("tui thread > resolveProjectDirectory", () => {
     }
   })
 
-  test("absolute --project bypasses PWD entirely", async () => {
+  test("absolute --project bypasses the env-supplied root entirely", async () => {
     await using tmp = await tmpdir({ git: true })
-    const resolved = resolveProjectDirectory(tmp.path, "/some/unrelated/pwd", "/another/cwd")
+    const resolved = resolveProjectDirectory(tmp.path, "/some/unrelated/root", "/another/cwd")
     expect(resolved).toBe(tmp.path)
   })
 
-  test("falls back to cwd when both PWD and project are missing", async () => {
+  test("falls back to cwd when project is missing", async () => {
     await using tmp = await tmpdir({ git: true })
     const resolved = resolveProjectDirectory(undefined, tmp.path, tmp.path)
     expect(resolved).toBe(tmp.path)

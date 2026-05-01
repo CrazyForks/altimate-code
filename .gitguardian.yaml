@@ -16,3 +16,7 @@ paths-ignore:
   - packages/opencode/test/upstream/v140-merge-adversarial.test.ts
   - packages/opencode/test/upstream/v140-merge-fuzz.test.ts
   - packages/opencode/test/upstream/v140-merge-chaos.test.ts
+  # `PWD` references in comments trip GG's "Generic Password" detector
+  # (PWD here is the unix env var for present working directory, not a
+  # password). Test exercises symlink/cwd resolution.
+  - packages/opencode/test/cli/tui/thread.test.ts
