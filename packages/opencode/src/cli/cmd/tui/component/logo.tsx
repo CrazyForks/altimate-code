@@ -75,8 +75,11 @@ export function Logo() {
       <For each={logo.left}>
         {(line, index) => (
           <box flexDirection="row" gap={1}>
-            <box flexDirection="row">{renderLine(line, theme.textMuted, false)}</box>
-            <box flexDirection="row">{renderLine(logo.right[index()], theme.text, true)}</box>
+            {/* altimate_change start — upstream merge replaced primary/accent with textMuted/text,
+                killing the altimate-code brand colors. Restore main's colored rendering. */}
+            <box flexDirection="row">{renderLine(line, theme.primary, false)}</box>
+            <box flexDirection="row">{renderLine(logo.right[index()], theme.accent, true)}</box>
+            {/* altimate_change end */}
           </box>
         )}
       </For>

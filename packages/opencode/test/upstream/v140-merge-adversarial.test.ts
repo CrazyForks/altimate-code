@@ -277,6 +277,20 @@ describe("v1.4.0 merge — permission system handles new flags + settings (PR #2
     expect(cfg).toMatch(/variant_list:\s*z\.string\(\)/)
   })
 
+  // Brand regression: upstream rewrote logo.tsx to render with theme.textMuted +
+  // theme.text (monochrome). Our brand uses theme.primary (warm orange) +
+  // theme.accent (purple) per the altimate-code theme. If anyone resets the
+  // colors back to upstream's, the startup screen turns black-and-white again
+  // and ships without altimate-code branding.
+  test("Logo renders with brand colors (theme.primary + theme.accent), not upstream's monochrome", async () => {
+    const logo = await readText(path.join(srcDir, "cli", "cmd", "tui", "component", "logo.tsx"))
+    expect(logo).toMatch(/renderLine\([^)]*line[^)]*theme\.primary/)
+    expect(logo).toMatch(/renderLine\([^)]*logo\.right\[[^\]]+\][^)]*theme\.accent/)
+    // Must NOT use upstream's monochrome rendering.
+    expect(logo).not.toMatch(/renderLine\([^)]*line[^)]*theme\.textMuted[^)]*\)/)
+    expect(logo).not.toMatch(/renderLine\([^)]*logo\.right\[[^\]]+\][^)]*theme\.text\b[^)]*\)/)
+  })
+
   // Regression: bridge merge brought in upstream's Effect-TS Permission service
   // (src/permission/index.ts) but every runtime ask in session/processor and
   // session/prompt still calls PermissionNext. If the HTTP routes route replies
