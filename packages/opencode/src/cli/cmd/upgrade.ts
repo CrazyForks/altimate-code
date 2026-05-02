@@ -6,7 +6,9 @@ import { extractChangelog } from "../changelog"
 
 export const UpgradeCommand = {
   command: "upgrade [target]",
+  // altimate_change start — branding (was "opencode" in upstream)
   describe: "upgrade altimate to the latest or a specific version",
+  // altimate_change end
   builder: (yargs: Argv) => {
     return yargs
       .positional("target", {
@@ -28,7 +30,9 @@ export const UpgradeCommand = {
     const detectedMethod = await Installation.method()
     const method = (args.method as Installation.Method) ?? detectedMethod
     if (method === "unknown") {
+      // altimate_change start — branding
       prompts.log.error(`altimate is installed to ${process.execPath} and may be managed by a package manager`)
+      // altimate_change end
       const install = await prompts.select({
         message: "Install anyways?",
         options: [
@@ -46,7 +50,9 @@ export const UpgradeCommand = {
     const target = args.target ? args.target.replace(/^v/, "") : await Installation.latest()
 
     if (Installation.VERSION === target) {
+      // altimate_change start — branding
       prompts.log.warn(`altimate upgrade skipped: ${target} is already installed`)
+      // altimate_change end
       prompts.outro("Done")
       return
     }

@@ -29,7 +29,7 @@ We collect the following categories of events:
 | `tool_outputs_pruned` | Tool outputs are pruned during compaction (count) |
 | `environment_census` | Environment snapshot on project scan (warehouse types, dbt presence, dbt materialization distribution, snapshot/seed counts, feature flags, but no hostnames or project names) |
 | `context_utilization` | Context window usage per generation (token counts, utilization percentage, cache hit ratio) |
-| `agent_outcome` | Agent session outcome (agent type, tool/generation counts, cost, outcome status) |
+| `agent_outcome` | Agent session outcome (agent type, tool/generation counts, cost, outcome status). Also includes diagnostic fields populated for non-completed outcomes: `final_tool` (last tool name, including MCP-namespaced like `mcp__atlassian__getJiraIssue`), `error_class` (classified via `classifyError` patterns or `unknown`), and `reason` (PII-masked error message — capped at 500 chars for `error`, 200 chars for `aborted`; `no_tools_invoked` for `abandoned`; `user_cancelled` fallback when no explicit reason). API key prefixes (`sk-`, `sk-ant-`, `Bearer …`) are redacted at extraction. |
 | `error_recovered` | Successful recovery from a transient error (error type, strategy, attempt count) |
 | `mcp_server_census` | MCP server capabilities after connect (tool and resource counts, but no tool names) |
 | `context_overflow_recovered` | Context overflow is handled (strategy) |

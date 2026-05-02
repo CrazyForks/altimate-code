@@ -290,6 +290,11 @@ export namespace Telemetry {
         cost: number
         compactions: number
         outcome: "completed" | "abandoned" | "aborted" | "error"
+        // altimate_change start — agent_outcome diagnostic fields
+        final_tool: string
+        error_class: string
+        reason: string
+        // altimate_change end
       }
     | {
         type: "error_recovered"
@@ -475,7 +480,20 @@ export namespace Telemetry {
         session_id: string
         tool_name: string
         tool_category: string
-        error_class: "parse_error" | "connection" | "timeout" | "validation" | "internal" | "permission" | "http_error" | "file_not_found" | "file_stale" | "edit_mismatch" | "not_configured" | "resource_exhausted" | "unknown"
+        error_class:
+          | "parse_error"
+          | "connection"
+          | "timeout"
+          | "validation"
+          | "internal"
+          | "permission"
+          | "http_error"
+          | "file_not_found"
+          | "file_stale"
+          | "edit_mismatch"
+          | "not_configured"
+          | "resource_exhausted"
+          | "unknown"
         error_message: string
         input_signature: string
         masked_args?: string
@@ -636,7 +654,7 @@ export namespace Telemetry {
         /** Total LLM cost */
         total_cost: number
       }
-  // altimate_change end
+    // altimate_change end
     // altimate_change start — pre-execution SQL validation telemetry
     | {
         type: "sql_pre_validation"
@@ -690,7 +708,7 @@ export namespace Telemetry {
         /** output tokens on the stop-without-tools generation — helps distinguish "refused" (low) from "wrote a long text plan" (high) */
         tokens_output: number
       }
-    // altimate_change end
+  // altimate_change end
 
   /** SHA256 hash a masked error message for anonymous grouping. */
   export function hashError(maskedMessage: string): string {
@@ -699,9 +717,7 @@ export namespace Telemetry {
 
   /** Classify user intent from the first message text.
    *  Pure regex/keyword matcher — zero LLM cost, <1ms. */
-  export function classifyTaskIntent(
-    text: string,
-  ): { intent: string; confidence: number } {
+  export function classifyTaskIntent(text: string): { intent: string; confidence: number } {
     const lower = text.slice(0, 2000).toLowerCase()
 
     // Order matters: more specific patterns first
@@ -713,7 +729,10 @@ export namespace Telemetry {
       },
       {
         intent: "build_model",
-        strong: [/(?:create|build|write|add|new)\s+.*?(?:dbt\s+)?model/, /(?:create|build)\s+.*?(?:staging|mart|dim|fact)/],
+        strong: [
+          /(?:create|build|write|add|new)\s+.*?(?:dbt\s+)?model/,
+          /(?:create|build)\s+.*?(?:staging|mart|dim|fact)/,
+        ],
         weak: [/\bmodel\b/, /materialization/, /incremental/],
       },
       {
@@ -723,7 +742,10 @@ export namespace Telemetry {
       },
       {
         intent: "write_sql",
-        strong: [/(?:write|create|build|generate)\s+(?:a\s+)?(?:sql|query)/, /(?:write|create)\s+(?:a\s+)?(?:select|insert|update|delete)/],
+        strong: [
+          /(?:write|create|build|generate)\s+(?:a\s+)?(?:sql|query)/,
+          /(?:write|create)\s+(?:a\s+)?(?:select|insert|update|delete)/,
+        ],
         weak: [/\bsql\b/, /\bquery\b/, /\bjoin\b/, /\bwhere\b/],
       },
       {
@@ -733,17 +755,26 @@ export namespace Telemetry {
       },
       {
         intent: "explore_schema",
-        strong: [/(?:show|list|describe|inspect|explore)\s+.*?(?:schema|tables?|columns?|database)/, /what\s+.*?(?:tables|columns|schemas)/],
+        strong: [
+          /(?:show|list|describe|inspect|explore)\s+.*?(?:schema|tables?|columns?|database)/,
+          /what\s+.*?(?:tables|columns|schemas)/,
+        ],
         weak: [/\bschema\b/, /\btable\b/, /\bcolumn\b/, /introspect/],
       },
       {
         intent: "migrate_sql",
-        strong: [/migrat|convert.*(?:to|from)\s+.*?(?:snowflake|bigquery|postgres|redshift|databricks)/, /translate.*(?:sql|dialect)/],
+        strong: [
+          /migrat|convert.*(?:to|from)\s+.*?(?:snowflake|bigquery|postgres|redshift|databricks)/,
+          /translate.*(?:sql|dialect)/,
+        ],
         weak: [/dialect|transpile|port\s+(?:to|from)/],
       },
       {
         intent: "manage_warehouse",
-        strong: [/(?:connect|setup|configure|add|test)\s+.*?(?:warehouse|connection|database)/, /warehouse.*(?:config|setting)/],
+        strong: [
+          /(?:connect|setup|configure|add|test)\s+.*?(?:warehouse|connection|database)/,
+          /warehouse.*(?:config|setting)/,
+        ],
         weak: [/\bwarehouse\b/, /connection\s+string/, /\bcredentials\b/],
       },
       {
@@ -779,6 +810,46 @@ export namespace Telemetry {
         return "accepted"
     }
   }
+
+  // altimate_change start — agent_outcome diagnostic field derivation
+  /** Derive diagnostic fields for the agent_outcome telemetry event.
+   *  Pure helper so the logic is unit-testable without standing up a full session.
+   *
+   *  Why: today the agent_outcome event ships with empty reason/final_tool/error_class
+   *  for every non-completed outcome, leaving ~30% of builder failures undiagnosable
+   *  in telemetry. This concentrates the rules in one place and gives us a guarantee
+   *  that the three fields are always populated (with explicit empty strings when
+   *  the outcome carries no diagnostic info — e.g. completed sessions).
+   */
+  export function deriveAgentOutcomeReason(input: {
+    outcome: "completed" | "abandoned" | "aborted" | "error"
+    lastToolName: string | null
+    lastMessageError: string | null
+    abortReason: string | null
+    lastErrorClass: string
+  }): { final_tool: string; error_class: string; reason: string } {
+    const final_tool = input.lastToolName ?? ""
+    switch (input.outcome) {
+      case "completed":
+        return { final_tool, error_class: "", reason: "" }
+      case "abandoned":
+        return { final_tool, error_class: "", reason: "no_tools_invoked" }
+      case "aborted": {
+        const reason = maskString(input.abortReason ?? "user_cancelled").slice(0, 200)
+        return { final_tool, error_class: input.lastErrorClass, reason }
+      }
+      case "error": {
+        const msg = input.lastMessageError ?? ""
+        const masked = maskString(msg).slice(0, 500)
+        return {
+          final_tool,
+          error_class: msg ? classifyError(msg) : "unknown",
+          reason: masked,
+        }
+      }
+    }
+  }
+  // altimate_change end
 
   // altimate_change start — expanded error classification patterns for better triage
   // Order matters: earlier patterns take priority. Use specific phrases, not
@@ -834,53 +905,55 @@ export namespace Telemetry {
     // altimate_change start — edit_mismatch class for edit tool failures
     {
       class: "edit_mismatch",
-      keywords: [
-        "could not find oldstring",
-        "no changes to apply",
-        "oldstring and newstring are identical",
-      ],
+      keywords: ["could not find oldstring", "no changes to apply", "oldstring and newstring are identical"],
     },
     // altimate_change end
     { class: "timeout", keywords: ["timeout", "etimedout", "bridge timeout", "timed out"] },
-    { class: "permission", keywords: ["permission", "access denied", "permission denied", "unauthorized", "forbidden", "authentication"] },
+    {
+      class: "permission",
+      keywords: ["permission", "access denied", "permission denied", "unauthorized", "forbidden", "authentication"],
+    },
     // altimate_change start — http_error before validation to prevent "HTTP 404" matching "invalid"/"missing"
     {
       class: "http_error",
-      keywords: ["status code: 4", "status code: 5", "request failed with status", "http 404", "http 410", "http 429", "http 451", "http 403"],
+      keywords: [
+        "status code: 4",
+        "status code: 5",
+        "request failed with status",
+        "http 404",
+        "http 410",
+        "http 429",
+        "http 451",
+        "http 403",
+        // R3 audit: real provider 5xx + rate-limit messages don't carry "status code:" prefix.
+        // Add bare phrases so 503 / 502 / 504 + Retry-After / "rate limit exceeded" classify
+        // out of "unknown" into http_error (preserving diagnostic specificity in agent_outcome.error_class).
+        "service unavailable",
+        "rate limit",
+        "rate_limit",
+        "retry after",
+        "too many requests",
+        "503",
+        "502",
+        "504",
+      ],
     },
     // altimate_change end
     // altimate_change start — split file_stale out of validation for cleaner triage
     {
       class: "file_stale",
-      keywords: [
-        "must read file",
-        "has been modified since",
-        "before overwriting",
-      ],
+      keywords: ["must read file", "has been modified since", "before overwriting"],
     },
     {
       class: "validation",
-      keywords: [
-        "invalid params",
-        "invalid",
-        "missing",
-        "required",
-        "does not exist",
-      ],
+      keywords: ["invalid params", "invalid", "missing", "required", "does not exist"],
     },
     // altimate_change end
     { class: "internal", keywords: ["internal", "assertion"] },
     // altimate_change start — resource_exhausted class for OOM/quota errors
     {
       class: "resource_exhausted",
-      keywords: [
-        "out of memory",
-        "resource limit",
-        "quota exceeded",
-        "disk i/o",
-        "enomem",
-        "heap out of memory",
-      ],
+      keywords: ["out of memory", "resource limit", "quota exceeded", "disk i/o", "enomem", "heap out of memory"],
     },
     // altimate_change end
   ]
@@ -974,8 +1047,19 @@ export namespace Telemetry {
     return SENSITIVE_KEYS.some((k) => lower === k || lower.endsWith(`_${k}`) || lower.startsWith(`${k}_`))
   }
 
+  // Order matters: strip API-key/bearer patterns BEFORE quote masking so a
+  // key inside quotes still gets normalized (the quote rule replaces the
+  // whole quoted span with `?`, but a key in an unquoted error message would
+  // otherwise survive). Patterns chosen for the providers we ship:
+  //   sk-ant-…   Anthropic
+  //   sk-…       OpenAI / OpenRouter (any 20+ char trailing token)
+  //   Bearer …   Authorization headers leaked in error text
+  // Each match replaces with a fixed redaction so length-based fingerprinting
+  // can't reconstruct the original token.
   export function maskString(s: string): string {
     return s
+      .replace(/sk-(?:ant-)?[A-Za-z0-9_-]{20,}/g, "sk-***")
+      .replace(/Bearer\s+[A-Za-z0-9._-]{20,}/gi, "Bearer ***")
       .replace(/'(?:[^'\\]|\\.)*'/g, "?")
       .replace(/"(?:[^"\\]|\\.)*"/g, "?")
       .replace(/\s+/g, " ")
@@ -1044,7 +1128,9 @@ export namespace Telemetry {
   }
 
   // altimate_change start — classify how a skill was triggered for discovery analytics
-  export function classifySkillTrigger(extra?: { [key: string]: any }): "user_command" | "llm_selected" | "auto_suggested" | "unknown" {
+  export function classifySkillTrigger(extra?: {
+    [key: string]: any
+  }): "user_command" | "llm_selected" | "auto_suggested" | "unknown" {
     if (!extra) return "llm_selected"
     if (extra.trigger === "user_command") return "user_command"
     if (extra.trigger === "auto_suggested") return "auto_suggested"
@@ -1183,10 +1269,12 @@ export namespace Telemetry {
       }
       appInsights = cfg
       try {
-        const account = Account.active()
-        if (account) {
+        // altimate_change start — bridge merge: Account.active() became async in v1.4.0
+        const account = await Account.active()
+        if (account?.email) {
           userEmail = createHash("sha256").update(account.email.toLowerCase().trim()).digest("hex")
         }
+        // altimate_change end
       } catch {
         // Account unavailable — proceed without user ID
       }

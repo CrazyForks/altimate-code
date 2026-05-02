@@ -11,6 +11,10 @@ import { iife } from "@/util/iife"
 import { defer } from "@/util/defer"
 import { Config } from "../config/config"
 import { PermissionNext } from "@/permission/next"
+// altimate_change start — log unhandled cancel rejections
+import { Log } from "@/util/log"
+const log = Log.create({ service: "tool.task" })
+// altimate_change end
 
 const parameters = z.object({
   description: z.string().describe("A short (3-5 words) description of the task"),
@@ -120,7 +124,12 @@ export const TaskTool = Tool.define("task", async (ctx) => {
       const messageID = MessageID.ascending()
 
       function cancel() {
-        SessionPrompt.cancel(session.id)
+        // altimate_change start — SessionPrompt.cancel became async; fire-and-forget OK in abort handler
+        // but log unhandled rejections so silent failures surface
+        SessionPrompt.cancel(session.id).catch((err) => {
+          log.warn("cancel failed", { sessionID: session.id, err })
+        })
+        // altimate_change end
       }
       ctx.abort.addEventListener("abort", cancel)
       using _ = defer(() => ctx.abort.removeEventListener("abort", cancel))

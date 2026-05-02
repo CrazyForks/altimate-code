@@ -1,15 +1,18 @@
 import z from "zod"
 import type { ZodType } from "zod"
-import { Log } from "../util/log"
 
 export namespace BusEvent {
-  const log = Log.create({ service: "event" })
-
   export type Definition = ReturnType<typeof define>
 
   const registry = new Map<string, Definition>()
 
   export function define<Type extends string, Properties extends ZodType>(type: Type, properties: Properties) {
+    // altimate_change start — make idempotent so SyncEvent.define (cycle 3 bridge) and
+    // SyncEvent.init can both safely call this without duplicate-registration concerns.
+    // First registration wins to keep schema stable across re-imports/test resets.
+    const existing = registry.get(type) as { type: Type; properties: Properties } | undefined
+    if (existing) return existing
+    // altimate_change end
     const result = {
       type,
       properties,

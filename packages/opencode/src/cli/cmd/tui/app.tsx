@@ -21,6 +21,9 @@ import { DialogThemeList } from "@tui/component/dialog-theme-list"
 import { DialogHelp } from "./ui/dialog-help"
 import { CommandProvider, useCommandDialog } from "@tui/component/dialog-command"
 import { DialogAgent } from "@tui/component/dialog-agent"
+// altimate_change start — backport upstream PR #21185 (variant_list keybind)
+import { DialogVariant } from "@tui/component/dialog-variant"
+// altimate_change end
 import { DialogSessionList } from "@tui/component/dialog-session-list"
 import { DialogWorkspaceList } from "@tui/component/dialog-workspace-list"
 import { KeybindProvider } from "@tui/context/keybind"
@@ -280,7 +283,10 @@ function App() {
   const route = useRoute()
   const dimensions = useTerminalDimensions()
   const renderer = useRenderer()
-  renderer.disableStdoutInterception()
+  // altimate_change start — bridge merge: disableStdoutInterception was removed in opentui 0.1.97;
+  // call removed (no-op in current renderer version).
+  ;(renderer as any).disableStdoutInterception?.()
+  // altimate_change end
   const dialog = useDialog()
   const local = useLocal()
   const kv = useKV()
@@ -304,6 +310,7 @@ function App() {
       // Config failure should not prevent TUI from working
     }
   })
+  // altimate_change end
 
   // altimate_change start — trace: open trace in browser
   async function openTraceInBrowser(sessionID: string) {
@@ -311,7 +318,10 @@ function App() {
       // Check if trace file exists on disk before opening browser
       const safeId = sessionID.replace(/[/\\.:]/g, "_")
       const traceFilePath = `${Trace.getTracesDir(tracesDir())}/${safeId}.json`
-      const exists = await fsAsync.access(traceFilePath).then(() => true).catch(() => false)
+      const exists = await fsAsync
+        .access(traceFilePath)
+        .then(() => true)
+        .catch(() => false)
       if (!exists) {
         toast.show({ variant: "warning", message: "Trace not available yet — send a prompt first", duration: 4000 })
         return
@@ -321,7 +331,11 @@ function App() {
       toast.show({ variant: "info", message: `Trace viewer: ${url}`, duration: 6000 })
     } catch (err) {
       Log.Default.error(`Failed to open trace viewer: ${err}`)
-      toast.show({ variant: "warning", message: `Failed to open browser. Trace files: ${Trace.getTracesDir(tracesDir())}`, duration: 8000 })
+      toast.show({
+        variant: "warning",
+        message: `Failed to open browser. Trace files: ${Trace.getTracesDir(tracesDir())}`,
+        duration: 8000,
+      })
     }
   }
   // altimate_change end
@@ -619,6 +633,21 @@ function App() {
         local.model.variant.cycle()
       },
     },
+    // altimate_change start — backport upstream PR #21185 (variant_list keybind)
+    {
+      title: "Switch model variant",
+      value: "variant.list",
+      keybind: "variant_list",
+      category: "Agent",
+      hidden: local.model.variant.list().length === 0,
+      slash: {
+        name: "variants",
+      },
+      onSelect: () => {
+        dialog.replace(() => <DialogVariant />)
+      },
+    },
+    // altimate_change end
     {
       title: "Agent cycle reverse",
       value: "agent.cycle.reverse",
@@ -718,11 +747,7 @@ function App() {
       onSelect: (dialog) => {
         const currentSessionID = route.data.type === "session" ? route.data.sessionID : undefined
         dialog.replace(() => (
-          <DialogTraceList
-            currentSessionID={currentSessionID}
-            tracesDir={tracesDir()}
-            onSelect={openTraceInBrowser}
-          />
+          <DialogTraceList currentSessionID={currentSessionID} tracesDir={tracesDir()} onSelect={openTraceInBrowser} />
         ))
       },
     },

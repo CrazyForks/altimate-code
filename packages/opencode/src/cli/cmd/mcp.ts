@@ -12,8 +12,12 @@ import { Instance } from "../../project/instance"
 import { Installation } from "../../installation"
 import path from "path"
 import { Global } from "../../global"
+import { modify, applyEdits } from "jsonc-parser"
+import { Filesystem } from "../../util/filesystem"
 import { Bus } from "../../bus"
-import { resolveConfigPath, addMcpToConfig, removeMcpFromConfig } from "../../mcp/config"
+// altimate_change start — restore removeMcpFromConfig helper used by McpRemoveCommand
+import { removeMcpFromConfig } from "../../mcp/config"
+// altimate_change end
 
 function getAuthStatusIcon(status: MCP.AuthStatus): string {
   switch (status) {
@@ -55,10 +59,12 @@ export const McpCommand = cmd({
   builder: (yargs) =>
     yargs
       .command(McpAddCommand)
-      .command(McpRemoveCommand)
       .command(McpListCommand)
       .command(McpAuthCommand)
       .command(McpLogoutCommand)
+      // altimate_change start — restore `mcp remove` removed during v1.4.0 bridge merge
+      .command(McpRemoveCommand)
+      // altimate_change end
       .command(McpDebugCommand)
       .demandCommand(),
   async handler() {},
@@ -162,7 +168,9 @@ export const McpAuthCommand = cmd({
 
         if (oauthServers.length === 0) {
           prompts.log.warn("No OAuth-capable MCP servers configured")
+          // altimate_change start — upstream_fix: branding regression
           prompts.log.info("Remote MCP servers support OAuth by default. Add a remote server in altimate-code.json:")
+          // altimate_change end
           prompts.log.info(`
   "mcp": {
     "my-server": {
@@ -380,9 +388,60 @@ export const McpLogoutCommand = cmd({
   },
 })
 
+async function resolveConfigPath(baseDir: string, global = false) {
+  // altimate_change start — upstream_fix: bridge merge wrote new MCP entries to
+  // opencode.json. Mirror main's behavior: prefer altimate-code.json (primary),
+  // accept opencode.json (fallback) for existing installs that have it.
+  const CONFIG_FILENAMES = ["altimate-code.json", "opencode.json", "opencode.jsonc"]
+  const candidates: string[] = []
+
+  if (!global) {
+    // Subdirectory configs first — that's where existing project configs typically live
+    candidates.push(
+      ...CONFIG_FILENAMES.map((f) => path.join(baseDir, ".altimate-code", f)),
+      ...CONFIG_FILENAMES.map((f) => path.join(baseDir, ".opencode", f)),
+    )
+  }
+
+  candidates.push(...CONFIG_FILENAMES.map((f) => path.join(baseDir, f)))
+
+  for (const candidate of candidates) {
+    if (await Filesystem.exists(candidate)) {
+      return candidate
+    }
+  }
+
+  // Default to altimate-code.json (root) when nothing exists yet
+  return candidates[0]
+  // altimate_change end
+}
+
+async function addMcpToConfig(name: string, mcpConfig: Config.Mcp, configPath: string) {
+  let text = "{}"
+  if (await Filesystem.exists(configPath)) {
+    text = await Filesystem.readText(configPath)
+  }
+
+  // Use jsonc-parser to modify while preserving comments
+  const edits = modify(text, ["mcp", name], mcpConfig, {
+    formattingOptions: { tabSize: 2, insertSpaces: true },
+  })
+  const result = applyEdits(text, edits)
+
+  await Filesystem.write(configPath, result)
+
+  return configPath
+}
+
 export const McpAddCommand = cmd({
   command: "add",
   describe: "add an MCP server",
+  // altimate_change start — restore non-interactive mode (--name/--type/--url/--command/--header/--oauth/--global)
+  // overwritten by v1.4.0 bridge merge. Scripts/CI rely on these flags to add MCP servers
+  // without TTY prompts; without them, `mcp add --name foo --type remote --url ...` falls
+  // through to interactive prompts and either hangs (no TTY) or ignores the args entirely.
+  // PR #53 originally added this on main; restore it as altimate_change so future merges
+  // don't silently drop it again.
   builder: (yargs) =>
     yargs
       .option("name", { type: "string", describe: "MCP server name" })
@@ -400,21 +459,20 @@ export const McpAddCommand = cmd({
         if (args.name && args.type) {
           if (!args.name.trim()) {
             console.error("MCP server name cannot be empty")
-            process.exit(1)
+            process.exitCode = 1
+            return
           }
 
           const useGlobal = args.global || Instance.project.vcs !== "git"
-          const configPath = await resolveConfigPath(
-            useGlobal ? Global.Path.config : Instance.worktree,
-            useGlobal,
-          )
+          const configPath = await resolveConfigPath(useGlobal ? Global.Path.config : Instance.worktree, useGlobal)
 
           let mcpConfig: Config.Mcp
 
           if (args.type === "local") {
             if (!args.command?.trim()) {
               console.error("--command is required for local type")
-              process.exit(1)
+              process.exitCode = 1
+              return
             }
             mcpConfig = {
               type: "local",
@@ -423,20 +481,23 @@ export const McpAddCommand = cmd({
           } else {
             if (!args.url) {
               console.error("--url is required for remote type")
-              process.exit(1)
+              process.exitCode = 1
+              return
             }
             if (!URL.canParse(args.url)) {
               console.error(`Invalid URL: ${args.url}`)
-              process.exit(1)
+              process.exitCode = 1
+              return
             }
 
             const headers: Record<string, string> = {}
             if (args.header) {
-              for (const h of args.header) {
+              for (const h of args.header as string[]) {
                 const eq = h.indexOf("=")
                 if (eq === -1) {
                   console.error(`Invalid header format: ${h} (expected key=value)`)
-                  process.exit(1)
+                  process.exitCode = 1
+                  return
                 }
                 headers[h.substring(0, eq)] = h.substring(eq + 1)
               }
@@ -455,7 +516,8 @@ export const McpAddCommand = cmd({
           return
         }
 
-        // Interactive mode
+        // Interactive mode (fallback when flags not provided)
+        // altimate_change end
         UI.empty()
         prompts.intro("Add MCP server")
 
@@ -515,7 +577,9 @@ export const McpAddCommand = cmd({
         if (type === "local") {
           const command = await prompts.text({
             message: "Enter command to run",
+            // altimate_change start — upstream_fix: branding regression
             placeholder: "e.g., altimate x @modelcontextprotocol/server-filesystem",
+            // altimate_change end
             validate: (x) => (x && x.length > 0 ? undefined : "Required"),
           })
           if (prompts.isCancel(command)) throw new UI.CancelledError()
@@ -613,6 +677,7 @@ export const McpAddCommand = cmd({
   },
 })
 
+// altimate_change start — restore `mcp remove` command removed during v1.4.0 bridge merge
 export const McpRemoveCommand = cmd({
   command: "remove <name>",
   aliases: ["rm"],
@@ -630,10 +695,7 @@ export const McpRemoveCommand = cmd({
       directory: process.cwd(),
       async fn() {
         const useGlobal = args.global || Instance.project.vcs !== "git"
-        const configPath = await resolveConfigPath(
-          useGlobal ? Global.Path.config : Instance.worktree,
-          useGlobal,
-        )
+        const configPath = await resolveConfigPath(useGlobal ? Global.Path.config : Instance.worktree, useGlobal)
 
         const removed = await removeMcpFromConfig(args.name, configPath)
         if (removed) {
@@ -645,7 +707,8 @@ export const McpRemoveCommand = cmd({
             console.log(`MCP server "${args.name}" removed from ${globalPath}`)
           } else {
             console.error(`MCP server "${args.name}" not found in any config`)
-            process.exit(1)
+            process.exitCode = 1
+            return
           }
         } else if (args.global && Instance.project.vcs === "git") {
           const localPath = await resolveConfigPath(Instance.worktree, false)
@@ -654,7 +717,8 @@ export const McpRemoveCommand = cmd({
             console.log(`MCP server "${args.name}" removed from ${localPath}`)
           } else {
             console.error(`MCP server "${args.name}" not found in any config`)
-            process.exit(1)
+            process.exitCode = 1
+            return
           }
         } else {
           console.error(`MCP server "${args.name}" not found in any config`)
@@ -664,6 +728,7 @@ export const McpRemoveCommand = cmd({
     })
   },
 })
+// altimate_change end
 
 export const McpDebugCommand = cmd({
   command: "debug <name>",

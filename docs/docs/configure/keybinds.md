@@ -130,7 +130,7 @@ All configurable keybind identifiers:
 
 ### Models & Agents
 
-`model_list`, `model_cycle_recent`, `model_cycle_favorite`, `model_favorite_toggle`, `model_provider_list`, `variant_cycle`, `agent_list`, `agent_cycle`, `agent_cycle_reverse`
+`model_list`, `model_cycle_recent`, `model_cycle_favorite`, `model_favorite_toggle`, `model_provider_list`, `variant_cycle`, `variant_list`, `agent_list`, `agent_cycle`, `agent_cycle_reverse`
 
 ### Misc
 

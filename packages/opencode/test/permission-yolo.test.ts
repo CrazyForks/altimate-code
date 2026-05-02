@@ -182,17 +182,13 @@ describe("yolo mode: permission evaluation is unchanged", () => {
   })
 
   test("evaluate returns allow for explicitly allowed permissions", () => {
-    const rules: PermissionNext.Ruleset = [
-      { permission: "*", pattern: "*", action: "allow" },
-    ]
+    const rules: PermissionNext.Ruleset = [{ permission: "*", pattern: "*", action: "allow" }]
     expect(PermissionNext.evaluate("bash", "dbt run", rules).action).toBe("allow")
     expect(PermissionNext.evaluate("edit", "any-file.ts", rules).action).toBe("allow")
   })
 
   test("disabled() is unaffected by yolo mode (it checks ruleset, not env)", () => {
-    const rules: PermissionNext.Ruleset = [
-      { permission: "bash", pattern: "*", action: "deny" },
-    ]
+    const rules: PermissionNext.Ruleset = [{ permission: "bash", pattern: "*", action: "deny" }]
     const disabled = PermissionNext.disabled(["bash", "read", "edit"], rules)
     expect(disabled.has("bash")).toBe(true)
     expect(disabled.has("read")).toBe(false)
@@ -237,9 +233,7 @@ describe("yolo mode: edge cases and adversarial scenarios", () => {
       { permission: "bash", pattern: "*", action: "ask" },
       { permission: "bash", pattern: "DROP *", action: "deny" },
     ]
-    const userOverride: PermissionNext.Ruleset = [
-      { permission: "bash", pattern: "*", action: "allow" },
-    ]
+    const userOverride: PermissionNext.Ruleset = [{ permission: "bash", pattern: "*", action: "allow" }]
     // User allow-all comes AFTER default deny, so it wins for everything
     expect(PermissionNext.evaluate("bash", "DROP TABLE x", defaults, userOverride).action).toBe("allow")
     // But if user doesn't override, deny still works
@@ -255,9 +249,7 @@ describe("yolo mode: edge cases and adversarial scenarios", () => {
       // Simulate what ask() does when it encounters deny
       const result = PermissionNext.evaluate("bash", "DROP TABLE users", rules)
       if (result.action === "deny") {
-        throw new PermissionNext.DeniedError(
-          rules.filter((r) => r.permission === "bash"),
-        )
+        throw new PermissionNext.DeniedError(rules.filter((r) => r.permission === "bash"))
       }
     } catch (e) {
       expect(e).toBeInstanceOf(PermissionNext.DeniedError)
@@ -344,7 +336,7 @@ describe("yolo mode E2E: permission ask/reply flow", () => {
         })
 
         const pending = await PermissionNext.list()
-        expect(pending.some((p) => p.id === "per_yolo_e2e")).toBe(true)
+        expect(pending.some((p) => String(p.id) === "per_yolo_e2e")).toBe(true)
 
         await PermissionNext.reply({
           requestID: PermissionID.make("per_yolo_e2e"),

@@ -1,8 +1,8 @@
 {
   "openapi": "3.1.1",
   "info": {
-    "title": "opencode",
-    "description": "opencode api",
+    "title": "altimate-code",
+    "description": "altimate-code api",
     "version": "1.0.0"
   },
   "paths": {
@@ -62,6 +62,31 @@
           {
             "lang": "js",
             "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.global.event({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/global/sync-event": {
+      "get": {
+        "operationId": "global.sync-event.subscribe",
+        "summary": "Subscribe to global sync events",
+        "description": "Get global sync events",
+        "responses": {
+          "200": {
+            "description": "Event stream",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncEvent"
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.global.sync-event.subscribe({\n  ...\n})"
           }
         ]
       }
@@ -154,6 +179,82 @@
           {
             "lang": "js",
             "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.global.dispose({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/global/upgrade": {
+      "post": {
+        "operationId": "global.upgrade",
+        "summary": "Upgrade opencode",
+        "description": "Upgrade opencode to the specified version or latest if not specified.",
+        "responses": {
+          "200": {
+            "description": "Upgrade result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "success": {
+                          "type": "boolean",
+                          "const": true
+                        },
+                        "version": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["success", "version"]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "success": {
+                          "type": "boolean",
+                          "const": false
+                        },
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["success", "error"]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "target": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.global.upgrade({\n  ...\n})"
           }
         ]
       }
@@ -7272,6 +7373,9 @@
               },
               "modelID": {
                 "type": "string"
+              },
+              "variant": {
+                "type": "string"
               }
             },
             "required": ["providerID", "modelID"]
@@ -7617,11 +7721,15 @@
           "properties": {
             "type": "object",
             "properties": {
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses.*"
+              },
               "info": {
                 "$ref": "#/components/schemas/Message"
               }
             },
-            "required": ["info"]
+            "required": ["sessionID", "info"]
           }
         },
         "required": ["type", "properties"]
@@ -8449,11 +8557,18 @@
           "properties": {
             "type": "object",
             "properties": {
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses.*"
+              },
               "part": {
                 "$ref": "#/components/schemas/Part"
+              },
+              "time": {
+                "type": "number"
               }
             },
-            "required": ["part"]
+            "required": ["sessionID", "part", "time"]
           }
         },
         "required": ["type", "properties"]
@@ -9748,13 +9863,139 @@
         },
         "required": ["directory", "payload"]
       },
+      "SyncEvent.message.updated": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "message.updated.1"
+          },
+          "aggregate": {
+            "type": "string",
+            "const": "sessionID"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses.*"
+              },
+              "info": {
+                "$ref": "#/components/schemas/Message"
+              }
+            },
+            "required": ["sessionID", "info"]
+          }
+        },
+        "required": ["type", "aggregate", "data"]
+      },
+      "SyncEvent.message.removed": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "message.removed.1"
+          },
+          "aggregate": {
+            "type": "string",
+            "const": "sessionID"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses.*"
+              },
+              "messageID": {
+                "type": "string",
+                "pattern": "^msg.*"
+              }
+            },
+            "required": ["sessionID", "messageID"]
+          }
+        },
+        "required": ["type", "aggregate", "data"]
+      },
+      "SyncEvent.message.part.updated": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "message.part.updated.1"
+          },
+          "aggregate": {
+            "type": "string",
+            "const": "sessionID"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses.*"
+              },
+              "part": {
+                "$ref": "#/components/schemas/Part"
+              },
+              "time": {
+                "type": "number"
+              }
+            },
+            "required": ["sessionID", "part", "time"]
+          }
+        },
+        "required": ["type", "aggregate", "data"]
+      },
+      "SyncEvent.message.part.removed": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "message.part.removed.1"
+          },
+          "aggregate": {
+            "type": "string",
+            "const": "sessionID"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses.*"
+              },
+              "messageID": {
+                "type": "string",
+                "pattern": "^msg.*"
+              },
+              "partID": {
+                "type": "string",
+                "pattern": "^prt.*"
+              }
+            },
+            "required": ["sessionID", "messageID", "partID"]
+          }
+        },
+        "required": ["type", "aggregate", "data"]
+      },
+      "SyncEvent": {
+        "type": "object",
+        "properties": {
+          "payload": {
+            "$ref": "#/components/schemas/SyncEvent"
+          }
+        },
+        "required": ["payload"]
+      },
       "LogLevel": {
         "description": "Log level",
         "type": "string",
         "enum": ["DEBUG", "INFO", "WARN", "ERROR"]
       },
       "ServerConfig": {
-        "description": "Server configuration for opencode serve and web commands",
+        "description": "Server configuration for altimate-code serve and web commands",
         "type": "object",
         "properties": {
           "port": {
@@ -10702,6 +10943,54 @@
               }
             }
           },
+          "tracing": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "description": "Enable session tracing (default: true). Traces are saved locally and can be viewed with `altimate-code trace`.",
+                "type": "boolean"
+              },
+              "dir": {
+                "description": "Custom directory for trace files (default: ~/.local/share/altimate-code/traces/)",
+                "type": "string"
+              },
+              "maxFiles": {
+                "description": "Maximum number of trace files to keep. 0 for unlimited. Oldest files are removed when exceeded (default: 100).",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "exporters": {
+                "description": "Additional trace exporters. Each receives the full trace JSON via HTTP POST.",
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "description": "Exporter identifier",
+                      "type": "string"
+                    },
+                    "endpoint": {
+                      "description": "HTTP endpoint to POST trace data to",
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "headers": {
+                      "description": "Custom headers (e.g., Authorization)",
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": ["name", "endpoint"]
+                }
+              }
+            }
+          },
           "experimental": {
             "type": "object",
             "properties": {
@@ -10732,6 +11021,19 @@
                 "type": "integer",
                 "exclusiveMinimum": 0,
                 "maximum": 9007199254740991
+              },
+              "auto_enhance_prompt": {
+                "description": "Automatically enhance prompts with AI before sending (default: false). Uses a small model to rewrite rough prompts into clearer versions.",
+                "type": "boolean"
+              },
+              "env_fingerprint_skill_selection": {
+                "description": "Use environment fingerprint to select relevant skills once per session (default: false). Set to true to enable LLM-based skill filtering.",
+                "type": "boolean"
+              },
+              "auto_mcp_discovery": {
+                "description": "Auto-discover MCP servers from VS Code, Claude Code, Copilot, and Gemini configs at startup. Set to false to disable.",
+                "default": true,
+                "type": "boolean"
               }
             }
           }
@@ -10793,6 +11095,15 @@
           },
           "key": {
             "type": "string"
+          },
+          "metadata": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
           }
         },
         "required": ["type", "key"]
@@ -11809,9 +12120,11 @@
         "properties": {
           "branch": {
             "type": "string"
+          },
+          "default_branch": {
+            "type": "string"
           }
-        },
-        "required": ["branch"]
+        }
       },
       "Command": {
         "type": "object",

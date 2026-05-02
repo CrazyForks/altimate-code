@@ -28,9 +28,9 @@ import { Provider } from "../../provider/provider"
 import { Bus } from "../../bus"
 import { MessageV2 } from "../../session/message-v2"
 import { SessionPrompt } from "@/session/prompt"
+import { Git } from "@/git"
 import { setTimeout as sleep } from "node:timers/promises"
 import { Process } from "@/util/process"
-import { git } from "@/util/git"
 
 type GitHubAuthor = {
   login: string
@@ -135,9 +135,13 @@ type IssueQueryResponse = {
   }
 }
 
+// altimate_change start — upstream_fix: bridge merge reverted these constants from
+// our altimate-code branding back to upstream. They affect the GitHub App identity,
+// the workflow filename committed to user repos, and the agent username we react as.
 const AGENT_USERNAME = "altimate-code-agent[bot]"
 const AGENT_REACTION = "eyes"
 const WORKFLOW_FILE = ".github/workflows/altimate-code.yml"
+// altimate_change end
 
 // Event categories for routing
 // USER_EVENTS: triggered by user actions, have actor/issueId, support reactions/comments
@@ -244,7 +248,7 @@ export const GithubInstallCommand = cmd({
                 "",
                 "    3. Go to a GitHub issue and comment `/oc summarize` to see the agent in action",
                 "",
-                "   Learn more about the GitHub agent - https://altimate-code.dev/docs/github/#usage-examples",
+                "   Learn more about the GitHub agent - https://altimate.ai/docs/github/#usage-examples",
               ].join("\n"),
             )
           }
@@ -257,7 +261,7 @@ export const GithubInstallCommand = cmd({
             }
 
             // Get repo info
-            const info = (await git(["remote", "get-url", "origin"], { cwd: Instance.worktree })).text().trim()
+            const info = (await Git.run(["remote", "get-url", "origin"], { cwd: Instance.worktree })).text().trim()
             const parsed = parseGitHubRemote(info)
             if (!parsed) {
               prompts.log.error(`Could not find git repository. Please run this command from a git repository.`)
@@ -268,7 +272,9 @@ export const GithubInstallCommand = cmd({
 
           async function promptProvider() {
             const priority: Record<string, number> = {
+              // altimate_change start — upstream_fix: provider priority key was "altimate-code"
               "altimate-code": 0,
+              // altimate_change end
               anthropic: 1,
               openai: 2,
               google: 3,
@@ -326,7 +332,9 @@ export const GithubInstallCommand = cmd({
             if (installation) return s.stop("GitHub app already installed")
 
             // Open browser
+            // altimate_change start — upstream_fix: GitHub App slug is altimate-code-agent
             const url = "https://github.com/apps/altimate-code-agent"
+            // altimate_change end
             const command =
               process.platform === "darwin"
                 ? `open "${url}"`
@@ -363,7 +371,7 @@ export const GithubInstallCommand = cmd({
 
             async function getInstallation() {
               return await fetch(
-                `https://api.altimate-code.dev/get_github_app_installation?owner=${app.owner}&repo=${app.repo}`,
+                `https://api.altimate.ai/get_github_app_installation?owner=${app.owner}&repo=${app.repo}`,
               )
                 .then((res) => res.json())
                 .then((data) => data.installation)
@@ -378,6 +386,8 @@ export const GithubInstallCommand = cmd({
 
             await Filesystem.write(
               path.join(app.root, WORKFLOW_FILE),
+              // altimate_change start — upstream_fix: workflow yaml name + job +
+              // mention triggers should be altimate-code branded
               `name: altimate-code
 
 on:
@@ -406,9 +416,10 @@ jobs:
           persist-credentials: false
 
       - name: Run altimate-code
-        uses: altimate/altimate-code/github@latest${envStr}
+        uses: AltimateAI/altimate-code/github@latest${envStr}
         with:
           model: ${provider}/${model}`,
+              // altimate_change end
             )
 
             prompts.log.success(`Added workflow file: "${WORKFLOW_FILE}"`)
@@ -476,7 +487,7 @@ export const GithubRunCommand = cmd({
           ? (payload as IssueCommentEvent | IssuesEvent).issue.number
           : (payload as PullRequestEvent | PullRequestReviewCommentEvent).pull_request.number
       const runUrl = `/${owner}/${repo}/actions/runs/${runId}`
-      const shareBaseUrl = isMock ? "https://dev.altimate-code.dev" : "https://altimate-code.dev"
+      const shareBaseUrl = isMock ? "https://dev.altimate.ai" : "https://altimate.ai"
 
       let appToken: string
       let octoRest: Octokit
@@ -496,20 +507,20 @@ export const GithubRunCommand = cmd({
           : "issue"
         : undefined
       const gitText = async (args: string[]) => {
-        const result = await git(args, { cwd: Instance.worktree })
+        const result = await Git.run(args, { cwd: Instance.worktree })
         if (result.exitCode !== 0) {
           throw new Process.RunFailedError(["git", ...args], result.exitCode, result.stdout, result.stderr)
         }
         return result.text().trim()
       }
       const gitRun = async (args: string[]) => {
-        const result = await git(args, { cwd: Instance.worktree })
+        const result = await Git.run(args, { cwd: Instance.worktree })
         if (result.exitCode !== 0) {
           throw new Process.RunFailedError(["git", ...args], result.exitCode, result.stdout, result.stderr)
         }
         return result
       }
-      const gitStatus = (args: string[]) => git(args, { cwd: Instance.worktree })
+      const gitStatus = (args: string[]) => Git.run(args, { cwd: Instance.worktree })
       const commitChanges = async (summary: string, actor?: string) => {
         const args = ["commit", "-m", summary]
         if (actor) args.push("-m", `Co-authored-by: ${actor} <${actor}@users.noreply.github.com>`)
@@ -735,7 +746,7 @@ export const GithubRunCommand = cmd({
 
       function normalizeOidcBaseUrl(): string {
         const value = process.env["OIDC_BASE_URL"]
-        if (!value) return "https://api.altimate-code.dev"
+        if (!value) return "https://api.altimate.ai"
         return value.replace(/\/+$/, "")
       }
 
@@ -869,7 +880,6 @@ export const GithubRunCommand = cmd({
       function subscribeSessionEvents() {
         const TOOL: Record<string, [string, string]> = {
           todowrite: ["Todo", UI.Style.TEXT_WARNING_BOLD],
-          todoread: ["Todo", UI.Style.TEXT_WARNING_BOLD],
           bash: ["Bash", UI.Style.TEXT_DANGER_BOLD],
           edit: ["Edit", UI.Style.TEXT_SUCCESS_BOLD],
           glob: ["Glob", UI.Style.TEXT_INFO_BOLD],
@@ -890,7 +900,7 @@ export const GithubRunCommand = cmd({
         }
 
         let text = ""
-        Bus.subscribe(MessageV2.Event.PartUpdated, async (evt) => {
+        Bus.subscribe(MessageV2.Event.PartUpdated, (evt) => {
           if (evt.properties.part.sessionID !== session.id) return
           //if (evt.properties.part.messageID === messageID) return
           const part = evt.properties.part

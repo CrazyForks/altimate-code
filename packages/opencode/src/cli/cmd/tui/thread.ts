@@ -62,15 +62,35 @@ async function input(value?: string) {
   return piped + "\n" + value
 }
 
+/**
+ * Resolves the project directory from --project arg, PWD, and cwd.
+ * Pulls realpath via Filesystem.resolve so the caller can safely chdir to
+ * the result and share the directory key with workers / Instance.provide.
+ *
+ * Pure function — extracted from TuiThreadCommand.handler so it can be
+ * unit-tested without mock.module() (which leaks across test files in
+ * Bun's multi-file runner; see the related thread.test.ts comment).
+ */
+export function resolveProjectDirectory(project: string | undefined, pwdOrCwd: string, cwd: string): string {
+  const root = Filesystem.resolve(pwdOrCwd)
+  return project
+    ? Filesystem.resolve(path.isAbsolute(project) ? project : path.join(root, project))
+    : Filesystem.resolve(cwd)
+}
+
 export const TuiThreadCommand = cmd({
   command: "$0 [project]",
+  // altimate_change start — branding (describe text was "opencode" upstream)
   describe: "start altimate-code tui",
+  // altimate_change end
   builder: (yargs) =>
     withNetworkOptions(yargs)
+      // altimate_change start — branding (positional describe was "opencode" upstream)
       .positional("project", {
         type: "string",
         describe: "path to start altimate-code in",
       })
+      // altimate_change end
       .option("model", {
         type: "string",
         alias: ["m"],
@@ -115,10 +135,7 @@ export const TuiThreadCommand = cmd({
 
       // Resolve relative --project paths from PWD, then use the real cwd after
       // chdir so the thread and worker share the same directory key.
-      const root = Filesystem.resolve(process.env.PWD ?? process.cwd())
-      const next = args.project
-        ? Filesystem.resolve(path.isAbsolute(args.project) ? args.project : path.join(root, args.project))
-        : Filesystem.resolve(process.cwd())
+      const next = resolveProjectDirectory(args.project, process.env.PWD ?? process.cwd(), process.cwd())
       const file = await target()
       try {
         process.chdir(next)
@@ -189,7 +206,9 @@ export const TuiThreadCommand = cmd({
             events: undefined,
           }
         : {
+            // altimate_change start — internal worker URL (was opencode.internal)
             url: "http://altimate-code.internal",
+            // altimate_change end
             fetch: createWorkerFetch(client),
             events: createEventSource(client),
           }

@@ -41,6 +41,25 @@ export namespace UI {
   }
 
   export function logo(pad?: string) {
+    // altimate_change start — upstream_fix: the non-TTY branch used a hardcoded
+    // "opencode" wordmark, leaking the upstream brand into CI logs / piped output
+    // / WebCommand banner. Use the same ALTIMATE | CODE glyphs as the TTY path,
+    // but render shadow markers as plain glyphs without ANSI escapes.
+    if (!process.stdout.isTTY && !process.stderr.isTTY) {
+      const stripMarkers = (line: string) =>
+        line.replace(/[_^~]/g, (m) => (m === "_" ? " " : "▀"))
+      const result: string[] = []
+      glyphs.left.forEach((row, index) => {
+        if (pad) result.push(pad)
+        result.push(stripMarkers(row))
+        result.push(" ")
+        result.push(stripMarkers(glyphs.right[index] ?? ""))
+        result.push(EOL)
+      })
+      return result.join("").trimEnd()
+    }
+    // altimate_change end
+
     const result: string[] = []
     const reset = "\x1b[0m"
     const left = {

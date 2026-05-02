@@ -31,13 +31,15 @@ function getNetworkIPs() {
 export const WebCommand = cmd({
   command: "web",
   builder: (yargs) => withNetworkOptions(yargs),
-  describe: "start altimate server and open web interface",
+  // altimate_change start — upstream_fix: branding regression in describe text
+  describe: "start altimate-code server and open web interface",
+  // altimate_change end
   handler: async (args) => {
     if (!Flag.OPENCODE_SERVER_PASSWORD) {
       UI.println(UI.Style.TEXT_WARNING_BOLD + "!  " + "OPENCODE_SERVER_PASSWORD is not set; server is unsecured.")
     }
     const opts = await resolveNetworkOptions(args)
-    const server = Server.listen(opts)
+    const server = await Server.listen(opts)
     UI.empty()
     UI.println(UI.logo("  "))
     UI.empty()

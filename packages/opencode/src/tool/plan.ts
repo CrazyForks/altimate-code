@@ -39,7 +39,10 @@ export const PlanExitTool = Tool.define("plan_exit", {
     })
 
     const answer = answers[0]?.[0]
+    // altimate_change start — reject on anything other than explicit "Yes" (covers cancel/dismiss/network drop).
+    // v1.4.0 changed this to `answer === "No"` which silently confirms on dismiss — unsafe for agent transitions.
     if (answer !== "Yes") throw new Question.RejectedError()
+    // altimate_change end
 
     const model = await getLastModel(ctx.sessionID)
 
@@ -97,7 +100,7 @@ export const PlanEnterTool = Tool.define("plan_enter", {
 
     const answer = answers[0]?.[0]
 
-    if (answer !== "Yes") throw new Question.RejectedError()
+    if (answer === "No") throw new Question.RejectedError()
 
     const model = await getLastModel(ctx.sessionID)
 

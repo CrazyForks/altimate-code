@@ -41,7 +41,7 @@ export namespace LLM {
     toolChoice?: "auto" | "required" | "none"
   }
 
-  export type StreamOutput = StreamTextResult<ToolSet, unknown>
+  export type StreamOutput = StreamTextResult<ToolSet, never>
 
   export async function stream(input: StreamInput) {
     const l = log
@@ -111,6 +111,12 @@ export namespace LLM {
       options.instructions = SystemPrompt.instructions()
     }
 
+    // altimate_change start — pass maxOutputTokens INTO chat.params hook so plugins
+    // (codex, github-copilot, third-party) can override it. Upstream PRs #21220 + #21225
+    // moved the codex/copilot exclusion logic into plugin chat.params hooks, but
+    // session/llm.ts wasn't updated to plumb maxOutputTokens through the hook —
+    // plugin overrides were silently a no-op. Compute the default first, let the hook
+    // mutate it, then read back from params.maxOutputTokens (line 208).
     const params = await Plugin.trigger(
       "chat.params",
       {
@@ -126,9 +132,14 @@ export namespace LLM {
           : undefined,
         topP: input.agent.topP ?? ProviderTransform.topP(input.model),
         topK: ProviderTransform.topK(input.model),
+        maxOutputTokens:
+          isCodex || provider.id.includes("github-copilot")
+            ? undefined
+            : ProviderTransform.maxOutputTokens(input.model),
         options,
       },
     )
+    // altimate_change end
 
     const { headers } = await Plugin.trigger(
       "chat.headers",
@@ -143,9 +154,6 @@ export namespace LLM {
         headers: {},
       },
     )
-
-    const maxOutputTokens =
-      isCodex || provider.id.includes("github-copilot") ? undefined : ProviderTransform.maxOutputTokens(input.model)
 
     const tools = await resolveTools(input)
 
@@ -205,7 +213,9 @@ export namespace LLM {
       activeTools: Object.keys(tools).filter((x) => x !== "invalid"),
       tools,
       toolChoice: input.toolChoice,
-      maxOutputTokens,
+      // altimate_change start — read maxOutputTokens from params (now plumbed through chat.params hook)
+      maxOutputTokens: params.maxOutputTokens,
+      // altimate_change end
       abortSignal: input.abort,
       headers: {
         ...(input.model.providerID.startsWith("opencode")
@@ -217,7 +227,9 @@ export namespace LLM {
             }
           : input.model.providerID !== "anthropic"
             ? {
-                "User-Agent": `opencode/${Installation.VERSION}`,
+                // altimate_change start — upstream_fix: UA brand
+                "User-Agent": `altimate-code/${Installation.VERSION}`,
+                // altimate_change end
               }
             : undefined),
         ...input.model.headers,

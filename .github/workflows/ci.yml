@@ -84,6 +84,15 @@ jobs:
       - name: Install dependencies
         run: bun install
 
+      - name: Install merge tooling deps (script/upstream)
+        # The script/upstream/ workspace is its own bun project (depends on
+        # minimatch). Root `bun install` doesn't reach it. Tests in
+        # test/upstream/bridge-merge-e2e.test.ts shell out to
+        # `bun run script/upstream/analyze.ts --branding` which requires this.
+        # Mirrors the install step in the marker-guard job below.
+        run: bun install
+        working-directory: script/upstream
+
       - name: Run tests
         working-directory: packages/opencode
         # Cloud E2E tests (Snowflake, BigQuery, Databricks) auto-skip when
@@ -440,3 +449,17 @@ jobs:
           else
             bun run script/upstream/analyze.ts --markers --base ${{ github.event.pull_request.base.ref }} --strict
           fi
+
+      - name: Branding leak audit (broadened scan, see analyze.ts LEAK_PATTERNS)
+        # Catches user-visible bare "opencode" strings that markers alone miss —
+        # yargs describe text, console output, MCP client identity, workflow YAML,
+        # User-Agent strings, OIDC audience, infrastructure identifiers.
+        # Caught 13 of 16 v1.4.0 bridge merge regressions in retrospective testing.
+        run: bun run script/upstream/analyze.ts --branding
+
+      - name: Require-markers regression backstop
+        # Verifies every file in config.requireMarkers (38 files known to hold
+        # altimate behavioral patches) has at least one altimate_change block.
+        # If any patches were silently lost (refactor, accidental delete, bridge
+        # merge oversight), CI fails here BEFORE the bug reaches production.
+        run: bun run script/upstream/analyze.ts --require-markers --strict

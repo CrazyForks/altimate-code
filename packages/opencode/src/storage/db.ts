@@ -84,9 +84,9 @@ export namespace Database {
   function backfillMigrationNames(sqlite: BunDatabase, entries: Journal) {
     try {
       // Check if the migrations table exists and has the name column
-      const tableInfo = sqlite
-        .prepare("SELECT name FROM pragma_table_info('__drizzle_migrations')")
-        .all() as { name: string }[]
+      const tableInfo = sqlite.prepare("SELECT name FROM pragma_table_info('__drizzle_migrations')").all() as {
+        name: string
+      }[]
       if (!tableInfo.length || !tableInfo.some((c) => c.name === "name")) return
 
       // Find entries with NULL or empty names
@@ -194,7 +194,12 @@ export namespace Database {
     }
   }
 
-  export function transaction<T>(callback: (tx: TxOrDb) => T): T {
+  // altimate_change start — pass-through `behavior` option (deferred|immediate|exclusive).
+  // SyncEvent.run requires "immediate" to safely read-then-write the event sequence.
+  export type TransactionConfig = { behavior?: "deferred" | "immediate" | "exclusive" }
+  // altimate_change end
+
+  export function transaction<T>(callback: (tx: TxOrDb) => T, config?: TransactionConfig): T {
     try {
       return callback(ctx.use().tx)
     } catch (err) {
@@ -202,7 +207,7 @@ export namespace Database {
         const effects: (() => void | Promise<void>)[] = []
         const result = (Client().transaction as any)((tx: TxOrDb) => {
           return ctx.provide({ tx, effects }, () => callback(tx))
-        })
+        }, config)
         for (const effect of effects) effect()
         return result
       }

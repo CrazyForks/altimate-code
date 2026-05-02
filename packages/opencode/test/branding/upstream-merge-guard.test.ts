@@ -260,6 +260,8 @@ describe("No opencode.ai domain leaks in src/", () => {
     if (/['"]\.opencode['"]/.test(trimmed)) return true
     if (/\.opencode/.test(trimmed) && !/opencode\.ai/i.test(trimmed)) return true
     if (filePath.includes("/test/")) return true
+    // Generated models snapshot — contains real product URLs from external API (OpenCode Zen/Go)
+    if (filePath.includes("provider/models-snapshot.ts")) return true
     return false
   }
 

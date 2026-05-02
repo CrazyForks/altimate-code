@@ -2,10 +2,15 @@ import { cmd } from "../cmd"
 import { UI } from "@/cli/ui"
 import { tui } from "./app"
 import { win32DisableProcessedInput, win32InstallCtrlCGuard } from "./win32"
+import { TuiConfig } from "@/config/tui"
+import { Instance } from "@/project/instance"
+import { existsSync } from "fs"
 
 export const AttachCommand = cmd({
   command: "attach <url>",
-  describe: "attach to a running altimate server",
+  // altimate_change start — branding (was "opencode" in upstream)
+  describe: "attach to a running altimate-code server",
+  // altimate_change end
   builder: (yargs) =>
     yargs
       .positional("url", {
@@ -60,17 +65,25 @@ export const AttachCommand = cmd({
       const headers = (() => {
         const password = args.password ?? process.env.OPENCODE_SERVER_PASSWORD
         if (!password) return undefined
+        // altimate_change start — Basic-auth username must match the server's
+        // expected username ("altimate"). Upstream's was "opencode"; restoring
+        // it would break the attach handshake against altimate-code servers.
         const auth = `Basic ${Buffer.from(`altimate:${password}`).toString("base64")}`
+        // altimate_change end
         return { Authorization: auth }
       })()
+      const config = await Instance.provide({
+        directory: directory && existsSync(directory) ? directory : process.cwd(),
+        fn: () => TuiConfig.get(),
+      })
       await tui({
         url: args.url,
+        config,
         args: {
           continue: args.continue,
           sessionID: args.session,
           fork: args.fork,
         },
-        config: {},
         directory,
         headers,
       })

@@ -49,27 +49,30 @@ describe("BusEvent.payloads", () => {
 })
 
 describe("BusEvent.define duplicate handling", () => {
-  test("last define() wins when same type is registered twice", () => {
-    // First definition: requires { a: string }
+  test("first define() wins (idempotent registration)", () => {
+    // altimate_change start — bridge cycle 4 made BusEvent.define idempotent so SyncEvent.define
+    // (cycle 3 bridge) and SyncEvent.init can both safely register the same type without
+    // schema shadowing surprises. First registration wins to keep schema stable.
     BusEvent.define("__test_duplicate_overwrite", z.object({ a: z.string() }))
-    // Second definition: requires { b: number }
+    // Second call with different schema is a no-op
     BusEvent.define("__test_duplicate_overwrite", z.object({ b: z.number() }))
 
     const union = BusEvent.payloads()
 
-    // Payload matching second schema should succeed
+    // First schema still wins
     const valid = union.safeParse({
-      type: "__test_duplicate_overwrite",
-      properties: { b: 42 },
-    })
-    expect(valid.success).toBe(true)
-
-    // Payload matching ONLY first schema (missing b) should fail
-    const invalid = union.safeParse({
       type: "__test_duplicate_overwrite",
       properties: { a: "hello" },
     })
+    expect(valid.success).toBe(true)
+
+    // Second schema does NOT replace the first
+    const invalid = union.safeParse({
+      type: "__test_duplicate_overwrite",
+      properties: { b: 42 },
+    })
     expect(invalid.success).toBe(false)
+    // altimate_change end
   })
 })
 // altimate_change end

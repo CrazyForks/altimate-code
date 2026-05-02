@@ -1,0 +1,22 @@
+version: 2
+
+# Files explicitly listing credential/secret file *names* for defensive purposes
+# (so the agent's protected-file checks know not to read/write them). These
+# string literals are file paths, not secrets — false positives.
+#
+# Plus: the v1.4.0 bridge merge regression test suite uses synthetic
+# Bearer/JWT-shaped fixtures to verify maskString() actually scrubs them
+# from telemetry. The fixtures are deliberately shaped to match the regex
+# (20+ alphanumeric chars after `Bearer`); they're not real credentials.
+# We've already swapped out JWT-prefix shapes once (commit 0a9a67d242);
+# rather than play whack-a-mole with GG's generic-token detector, ignore
+# these specific test files entirely.
+paths-ignore:
+  - packages/opencode/src/file/protected.ts
+  - packages/opencode/test/upstream/v140-merge-adversarial.test.ts
+  - packages/opencode/test/upstream/v140-merge-fuzz.test.ts
+  - packages/opencode/test/upstream/v140-merge-chaos.test.ts
+  # `PWD` references in comments trip GG's "Generic Password" detector
+  # (PWD here is the unix env var for present working directory, not a
+  # password). Test exercises symlink/cwd resolution.
+  - packages/opencode/test/cli/tui/thread.test.ts

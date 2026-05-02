@@ -69,8 +69,8 @@ Add to your Zed configuration (`~/.config/zed/settings.json`):
 ```json
 {
   "agent_servers": {
-    "Altimate Code": {
-      "command": "opencode",
+    "AltimateCode": {
+      "command": "altimate",
       "args": ["acp"]
     }
   }
@@ -160,7 +160,7 @@ This makes the codebase maintainable and testable.
 
 ### Mapping to Altimate Code
 
-ACP sessions map cleanly to opencode's internal session model:
+ACP sessions map cleanly to altimate-code's internal session model:
 
 - ACP `session/new` → creates internal Session
 - ACP `session/prompt` → uses SessionPrompt.prompt()

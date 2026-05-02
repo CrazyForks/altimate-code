@@ -6,6 +6,7 @@ import os from "os"
 import { ProviderTransform } from "@/provider/transform"
 import { ModelID, ProviderID } from "@/provider/schema"
 import { setTimeout as sleep } from "node:timers/promises"
+import { createServer } from "http"
 
 const log = Log.create({ service: "plugin.codex" })
 
@@ -129,6 +130,10 @@ async function exchangeCodeForTokens(code: string, redirectUri: string, pkce: Pk
 }
 
 async function refreshAccessToken(refreshToken: string): Promise<TokenResponse> {
+  // altimate_change start — upstream_fix: bridge merge dropped the 3-attempt retry
+  // loop with 4xx-vs-5xx awareness. Without it transient network blips during OAuth
+  // refresh hard-fail user sessions. Restore the loop and the descriptive error
+  // message that points at `altimate-code auth login openai` for permanent failures.
   let lastError: Error | undefined
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
@@ -158,7 +163,8 @@ async function refreshAccessToken(refreshToken: string): Promise<TokenResponse> 
       await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)))
     }
   }
-  throw lastError ?? new Error("Token refresh failed after retries")
+  throw lastError ?? new Error("Codex OAuth token refresh failed")
+  // altimate_change end
 }
 
 const HTML_SUCCESS = `<!doctype html>
@@ -203,6 +209,17 @@ const HTML_SUCCESS = `<!doctype html>
   </body>
 </html>`
 
+// altimate_change start — escape user-controlled error text before interpolating into HTML
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+}
+// altimate_change end
+
 const HTML_ERROR = (error: string) => `<!doctype html>
 <html>
   <head>
@@ -246,7 +263,7 @@ const HTML_ERROR = (error: string) => `<!doctype html>
     <div class="container">
       <h1>Authorization Failed</h1>
       <p>An error occurred during authorization.</p>
-      <div class="error">${error}</div>
+      <div class="error">${escapeHtml(error)}</div>
     </div>
   </body>
 </html>`
@@ -258,7 +275,7 @@ interface PendingOAuth {
   reject: (error: Error) => void
 }
 
-let oauthServer: ReturnType<typeof Bun.serve> | undefined
+let oauthServer: ReturnType<typeof createServer> | undefined
 let pendingOAuth: PendingOAuth | undefined
 
 async function startOAuthServer(): Promise<{ port: number; redirectUri: string }> {
@@ -266,77 +283,83 @@ async function startOAuthServer(): Promise<{ port: number; redirectUri: string }
     return { port: OAUTH_PORT, redirectUri: `http://localhost:${OAUTH_PORT}/auth/callback` }
   }
 
-  oauthServer = Bun.serve({
-    port: OAUTH_PORT,
-    fetch(req) {
-      const url = new URL(req.url)
+  oauthServer = createServer((req, res) => {
+    const url = new URL(req.url || "/", `http://localhost:${OAUTH_PORT}`)
 
-      if (url.pathname === "/auth/callback") {
-        const code = url.searchParams.get("code")
-        const state = url.searchParams.get("state")
-        const error = url.searchParams.get("error")
-        const errorDescription = url.searchParams.get("error_description")
+    if (url.pathname === "/auth/callback") {
+      const code = url.searchParams.get("code")
+      const state = url.searchParams.get("state")
+      const error = url.searchParams.get("error")
+      const errorDescription = url.searchParams.get("error_description")
 
-        if (error) {
-          const errorMsg = errorDescription || error
-          pendingOAuth?.reject(new Error(errorMsg))
-          pendingOAuth = undefined
-          return new Response(HTML_ERROR(errorMsg), {
-            headers: { "Content-Type": "text/html" },
-          })
-        }
-
-        if (!code) {
-          const errorMsg = "Missing authorization code"
-          pendingOAuth?.reject(new Error(errorMsg))
-          pendingOAuth = undefined
-          return new Response(HTML_ERROR(errorMsg), {
-            status: 400,
-            headers: { "Content-Type": "text/html" },
-          })
-        }
-
-        if (!pendingOAuth || state !== pendingOAuth.state) {
-          const errorMsg = "Invalid state - potential CSRF attack"
-          pendingOAuth?.reject(new Error(errorMsg))
-          pendingOAuth = undefined
-          return new Response(HTML_ERROR(errorMsg), {
-            status: 400,
-            headers: { "Content-Type": "text/html" },
-          })
-        }
-
-        const current = pendingOAuth
+      if (error) {
+        const errorMsg = errorDescription || error
+        pendingOAuth?.reject(new Error(errorMsg))
         pendingOAuth = undefined
-
-        exchangeCodeForTokens(code, `http://localhost:${OAUTH_PORT}/auth/callback`, current.pkce)
-          .then((tokens) => current.resolve(tokens))
-          .catch((err) => current.reject(err))
-
-        return new Response(HTML_SUCCESS, {
-          headers: { "Content-Type": "text/html" },
-        })
+        res.writeHead(200, { "Content-Type": "text/html" })
+        res.end(HTML_ERROR(errorMsg))
+        return
       }
 
-      if (url.pathname === "/cancel") {
-        pendingOAuth?.reject(new Error("Login cancelled"))
+      if (!code) {
+        const errorMsg = "Missing authorization code"
+        pendingOAuth?.reject(new Error(errorMsg))
         pendingOAuth = undefined
-        return new Response("Login cancelled", { status: 200 })
+        res.writeHead(400, { "Content-Type": "text/html" })
+        res.end(HTML_ERROR(errorMsg))
+        return
       }
 
-      return new Response("Not found", { status: 404 })
-    },
+      if (!pendingOAuth || state !== pendingOAuth.state) {
+        const errorMsg = "Invalid state - potential CSRF attack"
+        pendingOAuth?.reject(new Error(errorMsg))
+        pendingOAuth = undefined
+        res.writeHead(400, { "Content-Type": "text/html" })
+        res.end(HTML_ERROR(errorMsg))
+        return
+      }
+
+      const current = pendingOAuth
+      pendingOAuth = undefined
+
+      exchangeCodeForTokens(code, `http://localhost:${OAUTH_PORT}/auth/callback`, current.pkce)
+        .then((tokens) => current.resolve(tokens))
+        .catch((err) => current.reject(err))
+
+      res.writeHead(200, { "Content-Type": "text/html" })
+      res.end(HTML_SUCCESS)
+      return
+    }
+
+    if (url.pathname === "/cancel") {
+      pendingOAuth?.reject(new Error("Login cancelled"))
+      pendingOAuth = undefined
+      res.writeHead(200)
+      res.end("Login cancelled")
+      return
+    }
+
+    res.writeHead(404)
+    res.end("Not found")
   })
 
-  log.info("codex oauth server started", { port: OAUTH_PORT })
+  await new Promise<void>((resolve, reject) => {
+    oauthServer!.listen(OAUTH_PORT, () => {
+      log.info("codex oauth server started", { port: OAUTH_PORT })
+      resolve()
+    })
+    oauthServer!.on("error", reject)
+  })
+
   return { port: OAUTH_PORT, redirectUri: `http://localhost:${OAUTH_PORT}/auth/callback` }
 }
 
 function stopOAuthServer() {
   if (oauthServer) {
-    oauthServer.stop()
+    oauthServer.close(() => {
+      log.info("codex oauth server stopped")
+    })
     oauthServer = undefined
-    log.info("codex oauth server stopped")
   }
 }
 
@@ -377,50 +400,19 @@ export async function CodexAuthPlugin(input: PluginInput): Promise<Hooks> {
 
         // Filter models to only allowed Codex models for OAuth
         const allowedModels = new Set([
+          "gpt-5.1-codex",
           "gpt-5.1-codex-max",
           "gpt-5.1-codex-mini",
           "gpt-5.2",
-          "gpt-5.4",
           "gpt-5.2-codex",
           "gpt-5.3-codex",
-          "gpt-5.1-codex",
+          "gpt-5.4",
+          "gpt-5.4-mini",
         ])
         for (const modelId of Object.keys(provider.models)) {
           if (modelId.includes("codex")) continue
           if (allowedModels.has(modelId)) continue
           delete provider.models[modelId]
-        }
-
-        if (!provider.models["gpt-5.3-codex"]) {
-          const model = {
-            id: ModelID.make("gpt-5.3-codex"),
-            providerID: ProviderID.openai,
-            api: {
-              id: "gpt-5.3-codex",
-              url: "https://chatgpt.com/backend-api/codex",
-              npm: "@ai-sdk/openai",
-            },
-            name: "GPT-5.3 Codex",
-            capabilities: {
-              temperature: false,
-              reasoning: true,
-              attachment: true,
-              toolcall: true,
-              input: { text: true, audio: false, image: true, video: false, pdf: false },
-              output: { text: true, audio: false, image: false, video: false, pdf: false },
-              interleaved: false,
-            },
-            cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
-            limit: { context: 400_000, input: 272_000, output: 128_000 },
-            status: "active" as const,
-            options: {},
-            headers: {},
-            release_date: "2026-02-05",
-            variants: {} as Record<string, Record<string, any>>,
-            family: "gpt-codex",
-          }
-          model.variants = ProviderTransform.variants(model)
-          provider.models["gpt-5.3-codex"] = model
         }
 
         // Zero out costs for Codex (included with ChatGPT subscription)
@@ -454,8 +446,13 @@ export async function CodexAuthPlugin(input: PluginInput): Promise<Hooks> {
             // Cast to include accountId field
             const authWithAccount = currentAuth as typeof currentAuth & { accountId?: string }
 
-            // Check if token needs refresh (30s buffer to avoid edge-case expiry during request)
+            // altimate_change start — upstream_fix: bridge merge dropped the 30s skew
+            // buffer. Without it, requests that span the expiry boundary mid-flight
+            // race to a 401 from the API even though we just verified the token. The
+            // 30s buffer gives in-flight requests headroom to finish before the token
+            // becomes invalid.
             if (!currentAuth.access || currentAuth.expires < Date.now() + 30_000) {
+              // altimate_change end
               log.info("refreshing codex access token")
               const tokens = await refreshAccessToken(currentAuth.refresh)
               const newAccountId = extractAccountId(tokens) || authWithAccount.accountId
@@ -639,6 +636,11 @@ export async function CodexAuthPlugin(input: PluginInput): Promise<Hooks> {
       output.headers.originator = "altimate"
       output.headers["User-Agent"] = `altimate/${Installation.VERSION} (${os.platform()} ${os.release()}; ${os.arch()})`
       output.headers.session_id = input.sessionID
+    },
+    "chat.params": async (input, output) => {
+      if (input.model.providerID !== "openai") return
+      // Match codex cli
+      output.maxOutputTokens = undefined
     },
   }
 }

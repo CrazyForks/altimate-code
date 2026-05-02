@@ -14,11 +14,17 @@ import { Todo } from "../../session/todo"
 import { Agent } from "../../agent/agent"
 import { Snapshot } from "@/snapshot"
 import { Log } from "../../util/log"
+// altimate_change start — upstream_fix: bridge merge wired routes to Effect-TS Permission, but the runtime
+// asks come from PermissionNext. Use PermissionNext here so this deprecated reply route hits the same
+// pending map. See packages/opencode/src/server/routes/permission.ts for the full explanation.
 import { PermissionNext } from "@/permission/next"
+// altimate_change end
 import { PermissionID } from "@/permission/schema"
 import { ModelID, ProviderID } from "@/provider/schema"
 import { errors } from "../error"
 import { lazy } from "../../util/lazy"
+import { Bus } from "../../bus"
+import { NamedError } from "@opencode-ai/util/error"
 
 const log = Log.create({ service: "server" })
 
@@ -88,8 +94,8 @@ export const SessionRoutes = lazy(() =>
         },
       }),
       async (c) => {
-        const result = SessionStatus.list()
-        return c.json(result)
+        const result = await SessionStatus.list()
+        return c.json(Object.fromEntries(result))
       },
     )
     .get(
@@ -189,7 +195,8 @@ export const SessionRoutes = lazy(() =>
       "/",
       describeRoute({
         summary: "Create session",
-        description: "Create a new Altimate Code session for interacting with AI assistants and managing conversations.",
+        description:
+          "Create a new Altimate Code session for interacting with AI assistants and managing conversations.",
         operationId: "session.create",
         responses: {
           ...errors(400),
@@ -279,14 +286,14 @@ export const SessionRoutes = lazy(() =>
         const sessionID = c.req.valid("param").sessionID
         const updates = c.req.valid("json")
 
-        let session = await Session.get(sessionID)
         if (updates.title !== undefined) {
-          session = await Session.setTitle({ sessionID, title: updates.title })
+          await Session.setTitle({ sessionID, title: updates.title })
         }
         if (updates.time?.archived !== undefined) {
-          session = await Session.setArchived({ sessionID, time: updates.time.archived })
+          await Session.setArchived({ sessionID, time: updates.time.archived })
         }
 
+        const session = await Session.get(sessionID)
         return c.json(session)
       },
     )
@@ -379,7 +386,7 @@ export const SessionRoutes = lazy(() =>
         }),
       ),
       async (c) => {
-        SessionPrompt.cancel(c.req.valid("param").sessionID)
+        await SessionPrompt.cancel(c.req.valid("param").sessionID)
         return c.json(true)
       },
     )
@@ -434,13 +441,15 @@ export const SessionRoutes = lazy(() =>
       validator(
         "param",
         z.object({
-          sessionID: SessionSummary.diff.schema.shape.sessionID,
+          sessionID: SessionID.zod,
         }),
       ),
       validator(
         "query",
         z.object({
-          messageID: SessionSummary.diff.schema.shape.messageID,
+          // altimate_change start — messageID optional matches SessionSummary.diff impl + sync.tsx callers
+          messageID: MessageID.zod.optional(),
+          // altimate_change end
         }),
       ),
       async (c) => {
@@ -697,7 +706,7 @@ export const SessionRoutes = lazy(() =>
       ),
       async (c) => {
         const params = c.req.valid("param")
-        SessionPrompt.assertNotBusy(params.sessionID)
+        await SessionPrompt.assertNotBusy(params.sessionID)
         await Session.removeMessage({
           sessionID: params.sessionID,
           messageID: params.messageID,
@@ -846,7 +855,13 @@ export const SessionRoutes = lazy(() =>
         return stream(c, async () => {
           const sessionID = c.req.valid("param").sessionID
           const body = c.req.valid("json")
-          SessionPrompt.prompt({ ...body, sessionID })
+          SessionPrompt.prompt({ ...body, sessionID }).catch((err) => {
+            log.error("prompt_async failed", { sessionID, error: err })
+            Bus.publish(Session.Event.Error, {
+              sessionID,
+              error: new NamedError.Unknown({ message: err instanceof Error ? err.message : String(err) }).toObject(),
+            })
+          })
         })
       },
     )
@@ -1010,6 +1025,7 @@ export const SessionRoutes = lazy(() =>
           permissionID: PermissionID.zod,
         }),
       ),
+      // altimate_change start — upstream_fix: route to PermissionNext so this matches the runtime ask side
       validator("json", z.object({ response: PermissionNext.Reply })),
       async (c) => {
         const params = c.req.valid("param")
@@ -1019,5 +1035,6 @@ export const SessionRoutes = lazy(() =>
         })
         return c.json(true)
       },
+      // altimate_change end
     ),
 )

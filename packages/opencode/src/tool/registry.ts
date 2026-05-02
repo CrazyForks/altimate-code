@@ -4,7 +4,12 @@ import { BashTool } from "./bash"
 import { EditTool } from "./edit"
 import { GlobTool } from "./glob"
 import { GrepTool } from "./grep"
+// altimate_change start — keep BatchTool: upstream deleted batch.ts in #21052 (tool system
+// refactor) but we still ship it under the experimental.batch_tool flag. Marker added so a
+// future upstream merge that removes batch.ts doesn't silently delete this import without
+// surfacing in the analyzer.
 import { BatchTool } from "./batch"
+// altimate_change end
 import { ReadTool } from "./read"
 import { TaskTool } from "./task"
 import { TodoWriteTool, TodoReadTool } from "./todo"
@@ -66,7 +71,11 @@ import { FinopsAnalyzeCreditsTool } from "../altimate/tools/finops-analyze-credi
 import { FinopsExpensiveQueriesTool } from "../altimate/tools/finops-expensive-queries"
 import { FinopsWarehouseAdviceTool } from "../altimate/tools/finops-warehouse-advice"
 import { FinopsUnusedResourcesTool } from "../altimate/tools/finops-unused-resources"
-import { FinopsRoleGrantsTool, FinopsRoleHierarchyTool, FinopsUserRolesTool } from "../altimate/tools/finops-role-access"
+import {
+  FinopsRoleGrantsTool,
+  FinopsRoleHierarchyTool,
+  FinopsUserRolesTool,
+} from "../altimate/tools/finops-role-access"
 import { SchemaDetectPiiTool } from "../altimate/tools/schema-detect-pii"
 import { SchemaTagsTool, SchemaTagsListTool } from "../altimate/tools/schema-tags"
 import { SqlRewriteTool } from "../altimate/tools/sql-rewrite"
@@ -208,7 +217,9 @@ export namespace ToolRegistry {
       SkillTool,
       ApplyPatchTool,
       ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [LspTool] : []),
+      // altimate_change start — see import marker; conditional on experimental.batch_tool
       ...(config.experimental?.batch_tool === true ? [BatchTool] : []),
+      // altimate_change end
       ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [PlanExitTool] : []),
       // altimate_change start - register custom data engineering tools
       SqlExecuteTool,
@@ -289,10 +300,20 @@ export namespace ToolRegistry {
       FeedbackSubmitTool,
       // altimate_change end
       // altimate_change start - register altimate persistent memory tools
-      ...(!Flag.ALTIMATE_DISABLE_MEMORY ? [MemoryReadTool, MemoryWriteTool, MemoryDeleteTool, MemoryAuditTool, ...(Flag.ALTIMATE_MEMORY_AUTO_EXTRACT ? [MemoryExtractTool] : [])] : []),
+      ...(!Flag.ALTIMATE_DISABLE_MEMORY
+        ? [
+            MemoryReadTool,
+            MemoryWriteTool,
+            MemoryDeleteTool,
+            MemoryAuditTool,
+            ...(Flag.ALTIMATE_MEMORY_AUTO_EXTRACT ? [MemoryExtractTool] : []),
+          ]
+        : []),
       // altimate_change end
       // altimate_change start - register training tools for AI teammate
-      ...(!Flag.ALTIMATE_DISABLE_TRAINING ? [TrainingSaveTool, TrainingListTool, TrainingRemoveTool, TrainingImportTool] : []),
+      ...(!Flag.ALTIMATE_DISABLE_TRAINING
+        ? [TrainingSaveTool, TrainingListTool, TrainingRemoveTool, TrainingImportTool]
+        : []),
       // altimate_change end
       // altimate_change start - register impact analysis tool
       ImpactAnalysisTool,

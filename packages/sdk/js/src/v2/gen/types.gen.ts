@@ -132,6 +132,7 @@ export type UserMessage = {
   model: {
     providerID: string
     modelID: string
+    variant?: string
   }
   system?: string
   tools?: {
@@ -248,6 +249,7 @@ export type Message = UserMessage | AssistantMessage
 export type EventMessageUpdated = {
   type: "message.updated"
   properties: {
+    sessionID: string
     info: Message
   }
 }
@@ -525,7 +527,9 @@ export type Part =
 export type EventMessagePartUpdated = {
   type: "message.part.updated"
   properties: {
+    sessionID: string
     part: Part
+    time: number
   }
 }
 
@@ -1009,13 +1013,55 @@ export type GlobalEvent = {
   payload: Event
 }
 
+export type SyncEventMessageUpdated = {
+  type: "message.updated.1"
+  aggregate: "sessionID"
+  data: {
+    sessionID: string
+    info: Message
+  }
+}
+
+export type SyncEventMessageRemoved = {
+  type: "message.removed.1"
+  aggregate: "sessionID"
+  data: {
+    sessionID: string
+    messageID: string
+  }
+}
+
+export type SyncEventMessagePartUpdated = {
+  type: "message.part.updated.1"
+  aggregate: "sessionID"
+  data: {
+    sessionID: string
+    part: Part
+    time: number
+  }
+}
+
+export type SyncEventMessagePartRemoved = {
+  type: "message.part.removed.1"
+  aggregate: "sessionID"
+  data: {
+    sessionID: string
+    messageID: string
+    partID: string
+  }
+}
+
+export type SyncEvent = {
+  payload: SyncEvent
+}
+
 /**
  * Log level
  */
 export type LogLevel = "DEBUG" | "INFO" | "WARN" | "ERROR"
 
 /**
- * Server configuration for opencode serve and web commands
+ * Server configuration for altimate-code serve and web commands
  */
 export type ServerConfig = {
   /**
@@ -1478,6 +1524,39 @@ export type Config = {
      */
     reserved?: number
   }
+  tracing?: {
+    /**
+     * Enable session tracing (default: true). Traces are saved locally and can be viewed with `altimate-code trace`.
+     */
+    enabled?: boolean
+    /**
+     * Custom directory for trace files (default: ~/.local/share/altimate-code/traces/)
+     */
+    dir?: string
+    /**
+     * Maximum number of trace files to keep. 0 for unlimited. Oldest files are removed when exceeded (default: 100).
+     */
+    maxFiles?: number
+    /**
+     * Additional trace exporters. Each receives the full trace JSON via HTTP POST.
+     */
+    exporters?: Array<{
+      /**
+       * Exporter identifier
+       */
+      name: string
+      /**
+       * HTTP endpoint to POST trace data to
+       */
+      endpoint: string
+      /**
+       * Custom headers (e.g., Authorization)
+       */
+      headers?: {
+        [key: string]: string
+      }
+    }>
+  }
   experimental?: {
     disable_paste_summary?: boolean
     /**
@@ -1500,6 +1579,18 @@ export type Config = {
      * Timeout in milliseconds for model context protocol (MCP) requests
      */
     mcp_timeout?: number
+    /**
+     * Automatically enhance prompts with AI before sending (default: false). Uses a small model to rewrite rough prompts into clearer versions.
+     */
+    auto_enhance_prompt?: boolean
+    /**
+     * Use environment fingerprint to select relevant skills once per session (default: false). Set to true to enable LLM-based skill filtering.
+     */
+    env_fingerprint_skill_selection?: boolean
+    /**
+     * Auto-discover MCP servers from VS Code, Claude Code, Copilot, and Gemini configs at startup. Set to false to disable.
+     */
+    auto_mcp_discovery?: boolean
   }
 }
 
@@ -1523,6 +1614,9 @@ export type OAuth = {
 export type ApiAuth = {
   type: "api"
   key: string
+  metadata?: {
+    [key: string]: string
+  }
 }
 
 export type WellKnownAuth = {
@@ -1858,7 +1952,8 @@ export type Path = {
 }
 
 export type VcsInfo = {
-  branch: string
+  branch?: string
+  default_branch?: string
 }
 
 export type Command = {
@@ -1942,6 +2037,23 @@ export type GlobalEventResponses = {
 
 export type GlobalEventResponse = GlobalEventResponses[keyof GlobalEventResponses]
 
+export type GlobalSyncEventSubscribeData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/sync-event"
+}
+
+export type GlobalSyncEventSubscribeResponses = {
+  /**
+   * Event stream
+   */
+  200: SyncEvent
+}
+
+export type GlobalSyncEventSubscribeResponse =
+  GlobalSyncEventSubscribeResponses[keyof GlobalSyncEventSubscribeResponses]
+
 export type GlobalConfigGetData = {
   body?: never
   path?: never
@@ -1998,6 +2110,41 @@ export type GlobalDisposeResponses = {
 }
 
 export type GlobalDisposeResponse = GlobalDisposeResponses[keyof GlobalDisposeResponses]
+
+export type GlobalUpgradeData = {
+  body?: {
+    target?: string
+  }
+  path?: never
+  query?: never
+  url: "/global/upgrade"
+}
+
+export type GlobalUpgradeErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalUpgradeError = GlobalUpgradeErrors[keyof GlobalUpgradeErrors]
+
+export type GlobalUpgradeResponses = {
+  /**
+   * Upgrade result
+   */
+  200:
+    | {
+        success: true
+        version: string
+      }
+    | {
+        success: false
+        error: string
+      }
+}
+
+export type GlobalUpgradeResponse = GlobalUpgradeResponses[keyof GlobalUpgradeResponses]
 
 export type AuthRemoveData = {
   body?: never

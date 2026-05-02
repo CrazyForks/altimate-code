@@ -115,10 +115,19 @@ export namespace MCP {
     })
   export type Status = z.infer<typeof Status>
 
+  // altimate_change start — bridge merge: per-client tool cache so MCP.tools()
+  // doesn't re-call listTools() on every invocation. Invalidated on
+  // tool-list-changed notifications.
+  const toolListCache = new Map<string, MCPToolDef[]>()
+  // altimate_change end
+
   // Register notification handlers for MCP client
   function registerNotificationHandlers(client: MCPClient, serverName: string) {
     client.setNotificationHandler(ToolListChangedNotificationSchema, async () => {
       log.info("tools list changed notification received", { server: serverName })
+      // altimate_change start — invalidate cache on change
+      toolListCache.delete(serverName)
+      // altimate_change end
       Bus.publish(ToolsChanged, { server: serverName })
     })
   }
@@ -300,6 +309,9 @@ export namespace MCP {
 
   export async function add(name: string, mcp: Config.Mcp) {
     const s = await state()
+    // altimate_change start — bridge merge: clear stale cache before new connect attempt
+    toolListCache.delete(name)
+    // altimate_change end
     const result = await create(name, mcp)
     if (!result) {
       const status = {
@@ -416,22 +428,29 @@ export namespace MCP {
             status: "connected",
             duration_ms: Date.now() - connectStart,
           })
-          // Census: collect tool and resource counts (fire-and-forget, never block connect)
-          const remoteTransport = name === "SSE" ? "sse" as const : "streamable-http" as const
+          // altimate_change start — bridge merge: prefetch tool list synchronously
+          // for cache so MCP.tools() doesn't re-call listTools.
+          const toolsList = await client.listTools().catch(() => undefined)
+          if (toolsList) toolListCache.set(key, toolsList.tools)
+          // altimate_change end
+          // Census: collect resource counts (fire-and-forget, never block connect)
+          const remoteTransport = name === "SSE" ? ("sse" as const) : ("streamable-http" as const)
           void Promise.all([
-            client.listTools().catch(() => ({ tools: [] })),
+            Promise.resolve(toolsList ?? { tools: [] }),
             client.listResources().catch(() => ({ resources: [] })),
-          ]).then(([toolsList, resourcesList]) => {
-            Telemetry.track({
-              type: "mcp_server_census",
-              timestamp: Date.now(),
-              session_id: Telemetry.getContext().sessionId,
-              server_name: key,
-              transport: remoteTransport,
-              tool_count: toolsList.tools.length,
-              resource_count: resourcesList.resources.length,
+          ])
+            .then(([toolsList, resourcesList]) => {
+              Telemetry.track({
+                type: "mcp_server_census",
+                timestamp: Date.now(),
+                session_id: Telemetry.getContext().sessionId,
+                server_name: key,
+                transport: remoteTransport,
+                tool_count: toolsList.tools.length,
+                resource_count: resourcesList.resources.length,
+              })
             })
-          }).catch(() => {})
+            .catch(() => {})
           break
         } catch (error) {
           lastError = error instanceof Error ? error : new Error(String(error))
@@ -480,6 +499,8 @@ export namespace MCP {
             url: mcp.url,
             error: lastError.message,
           })
+          // Close the failed transport to avoid leaked HTTP connections (#19168).
+          await transport.close().catch(() => {})
           Telemetry.track({
             type: "mcp_server_status",
             timestamp: Date.now(),
@@ -545,21 +566,28 @@ export namespace MCP {
           status: "connected",
           duration_ms: Date.now() - localConnectStart,
         })
-        // Census: collect tool and resource counts (fire-and-forget, never block connect)
+        // altimate_change start — bridge merge: prefetch tool list synchronously
+        // for cache so MCP.tools() doesn't re-call listTools.
+        const toolsListSync = await client.listTools().catch(() => undefined)
+        if (toolsListSync) toolListCache.set(key, toolsListSync.tools)
+        // altimate_change end
+        // Census: collect resource counts (fire-and-forget, never block connect)
         void Promise.all([
-          client.listTools().catch(() => ({ tools: [] })),
+          Promise.resolve(toolsListSync ?? { tools: [] }),
           client.listResources().catch(() => ({ resources: [] })),
-        ]).then(([toolsList, resourcesList]) => {
-          Telemetry.track({
-            type: "mcp_server_census",
-            timestamp: Date.now(),
-            session_id: Telemetry.getContext().sessionId,
-            server_name: key,
-            transport: "stdio",
-            tool_count: toolsList.tools.length,
-            resource_count: resourcesList.resources.length,
+        ])
+          .then(([toolsList, resourcesList]) => {
+            Telemetry.track({
+              type: "mcp_server_census",
+              timestamp: Date.now(),
+              session_id: Telemetry.getContext().sessionId,
+              server_name: key,
+              transport: "stdio",
+              tool_count: toolsList.tools.length,
+              resource_count: resourcesList.resources.length,
+            })
           })
-        }).catch(() => {})
+          .catch(() => {})
       } catch (error) {
         log.error("local mcp startup failed", {
           key,
@@ -567,6 +595,8 @@ export namespace MCP {
           cwd,
           error: error instanceof Error ? error.message : String(error),
         })
+        // Close the failed transport to avoid leaked child processes (#19168).
+        await transport.close().catch(() => {})
         const errorMsg = error instanceof Error ? error.message : String(error)
         Telemetry.track({
           type: "mcp_server_status",
@@ -599,10 +629,18 @@ export namespace MCP {
       }
     }
 
-    const result = await withTimeout(mcpClient.listTools(), mcp.timeout ?? DEFAULT_TIMEOUT).catch((err) => {
-      log.error("failed to get tools from client", { key, error: err })
-      return undefined
-    })
+    // altimate_change start — bridge merge: use cached tool list (populated above)
+    // instead of re-calling listTools(). Cache invalidated by tool-list-changed
+    // notifications.
+    const cachedTools = toolListCache.get(key)
+    const result = cachedTools
+      ? { tools: cachedTools }
+      : await withTimeout(mcpClient.listTools(), mcp.timeout ?? DEFAULT_TIMEOUT).catch((err) => {
+          log.error("failed to get tools from client", { key, error: err })
+          return undefined
+        })
+    if (result && !cachedTools) toolListCache.set(key, result.tools)
+    // altimate_change end
     if (!result) {
       await mcpClient.close().catch((error) => {
         log.error("Failed to close MCP client", {
@@ -740,6 +778,12 @@ export namespace MCP {
 
     const toolsResults = await Promise.all(
       connectedClients.map(async ([clientName, client]) => {
+        // altimate_change start — bridge merge: serve from cache when present;
+        // populate cache on cache miss. Tool list change notifications invalidate.
+        const cached = toolListCache.get(clientName)
+        if (cached) {
+          return { clientName, client, toolsResult: { tools: cached } }
+        }
         const toolsResult = await client.listTools().catch((e) => {
           log.error("failed to get tools", { clientName, error: e.message })
           const failedStatus = {
@@ -750,6 +794,8 @@ export namespace MCP {
           delete s.clients[clientName]
           return undefined
         })
+        if (toolsResult) toolListCache.set(clientName, toolsResult.tools)
+        // altimate_change end
         return { clientName, client, toolsResult }
       }),
     )

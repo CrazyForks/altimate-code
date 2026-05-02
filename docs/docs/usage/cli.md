@@ -47,6 +47,7 @@ altimate --agent analyst
 | `--model <provider/model>` | Override the default model |
 | `--agent <name>` | Start with a specific agent |
 | `--yolo` | Auto-approve all permission prompts (explicit `deny` rules still enforced) |
+| `--dangerously-skip-permissions` | Same as `--yolo` (alias for upstream compatibility); auto-approves prompts that aren't explicitly denied. `run` subcommand only. |
 | `--print-logs` | Print logs to stderr |
 | `--log-level <level>` | Set log level: `DEBUG`, `INFO`, `WARN`, `ERROR` |
 | `--help`, `-h` | Show help |

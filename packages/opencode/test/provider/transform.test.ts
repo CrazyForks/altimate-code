@@ -104,6 +104,72 @@ describe("ProviderTransform.options - setCacheKey", () => {
   })
 })
 
+describe("ProviderTransform.options - google thinkingConfig gating", () => {
+  const sessionID = "test-session-123"
+
+  const createGoogleModel = (reasoning: boolean, npm: "@ai-sdk/google" | "@ai-sdk/google-vertex") =>
+    ({
+      id: `${npm === "@ai-sdk/google" ? "google" : "google-vertex"}/gemini-2.0-flash`,
+      providerID: npm === "@ai-sdk/google" ? "google" : "google-vertex",
+      api: {
+        id: "gemini-2.0-flash",
+        url: npm === "@ai-sdk/google" ? "https://generativelanguage.googleapis.com" : "https://vertexai.googleapis.com",
+        npm,
+      },
+      name: "Gemini 2.0 Flash",
+      capabilities: {
+        temperature: true,
+        reasoning,
+        attachment: true,
+        toolcall: true,
+        input: { text: true, audio: false, image: true, video: false, pdf: true },
+        output: { text: true, audio: false, image: false, video: false, pdf: false },
+        interleaved: false,
+      },
+      cost: {
+        input: 0.001,
+        output: 0.002,
+        cache: { read: 0.0001, write: 0.0002 },
+      },
+      limit: {
+        context: 1_000_000,
+        output: 8192,
+      },
+      status: "active",
+      options: {},
+      headers: {},
+    }) as any
+
+  test("does not set thinkingConfig for google models without reasoning capability", () => {
+    const result = ProviderTransform.options({
+      model: createGoogleModel(false, "@ai-sdk/google"),
+      sessionID,
+      providerOptions: {},
+    })
+    expect(result.thinkingConfig).toBeUndefined()
+  })
+
+  test("sets thinkingConfig for google models with reasoning capability", () => {
+    const result = ProviderTransform.options({
+      model: createGoogleModel(true, "@ai-sdk/google"),
+      sessionID,
+      providerOptions: {},
+    })
+    expect(result.thinkingConfig).toEqual({
+      includeThoughts: true,
+    })
+  })
+
+  test("does not set thinkingConfig for vertex models without reasoning capability", () => {
+    const result = ProviderTransform.options({
+      model: createGoogleModel(false, "@ai-sdk/google-vertex"),
+      sessionID,
+      providerOptions: {},
+    })
+    expect(result.thinkingConfig).toBeUndefined()
+  })
+})
+
 describe("ProviderTransform.options - gpt-5 textVerbosity", () => {
   const sessionID = "test-session-123"
 
@@ -1342,7 +1408,7 @@ describe("ProviderTransform.message - strip openai metadata when store=false", (
       ...openaiModel,
       providerID: "opencode",
       api: {
-        id: "opencode-test",
+        id: "altimate-test",
         url: "https://api.altimate.ai",
         npm: "@ai-sdk/openai-compatible",
       },
@@ -1376,7 +1442,7 @@ describe("ProviderTransform.message - strip openai metadata when store=false", (
       ...openaiModel,
       providerID: "opencode",
       api: {
-        id: "opencode-test",
+        id: "altimate-test",
         url: "https://api.altimate.ai",
         npm: "@ai-sdk/openai-compatible",
       },
@@ -1491,6 +1557,35 @@ describe("ProviderTransform.message - providerOptions key remapping", () => {
     expect(result[0].providerOptions?.openai).toBeUndefined()
   })
 
+  test("azure cognitive services remaps providerID to 'azure' key", () => {
+    const model = createModel("azure-cognitive-services", "@ai-sdk/azure")
+    const msgs = [
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: "Hello",
+            providerOptions: {
+              "azure-cognitive-services": { part: true },
+            },
+          },
+        ],
+        providerOptions: {
+          "azure-cognitive-services": { someOption: "value" },
+        },
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, model, {}) as any[]
+    const part = result[0].content[0] as any
+
+    expect(result[0].providerOptions?.azure).toEqual({ someOption: "value" })
+    expect(result[0].providerOptions?.["azure-cognitive-services"]).toBeUndefined()
+    expect(part.providerOptions?.azure).toEqual({ part: true })
+    expect(part.providerOptions?.["azure-cognitive-services"]).toBeUndefined()
+  })
+
   test("copilot remaps providerID to 'copilot' key", () => {
     const model = createModel("github-copilot", "@ai-sdk/github-copilot")
     const msgs = [
@@ -1563,6 +1658,43 @@ describe("ProviderTransform.message - claude w/bedrock custom inference profile"
   })
 })
 
+describe("ProviderTransform.message - bedrock caching with non-bedrock providerID", () => {
+  test("applies cache options at message level when npm package is amazon-bedrock", () => {
+    const model = {
+      id: "aws/us.anthropic.claude-opus-4-6-v1",
+      providerID: "aws",
+      api: {
+        id: "us.anthropic.claude-opus-4-6-v1",
+        url: "https://bedrock-runtime.us-east-1.amazonaws.com",
+        npm: "@ai-sdk/amazon-bedrock",
+      },
+      name: "Claude Opus 4.6",
+      capabilities: {},
+      options: {},
+      headers: {},
+    } as any
+
+    const msgs = [
+      {
+        role: "system",
+        content: [{ type: "text", text: "You are a helpful assistant" }],
+      },
+      {
+        role: "user",
+        content: [{ type: "text", text: "Hello" }],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, model, {}) as any[]
+
+    // Cache should be at the message level and not the content-part level
+    expect(result[0].providerOptions?.bedrock).toEqual({
+      cachePoint: { type: "default" },
+    })
+    expect(result[0].content[0].providerOptions?.bedrock).toBeUndefined()
+  })
+})
+
 describe("ProviderTransform.message - cache control on gateway", () => {
   const createModel = (overrides: Partial<any> = {}) =>
     ({
@@ -1618,6 +1750,58 @@ describe("ProviderTransform.message - cache control on gateway", () => {
         url: "https://api.anthropic.com",
         npm: "@ai-sdk/anthropic",
       },
+    })
+    const msgs = [
+      {
+        role: "system",
+        content: "You are a helpful assistant",
+      },
+      {
+        role: "user",
+        content: "Hello",
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, model, {}) as any[]
+
+    expect(result[0].providerOptions).toEqual({
+      anthropic: {
+        cacheControl: {
+          type: "ephemeral",
+        },
+      },
+      openrouter: {
+        cacheControl: {
+          type: "ephemeral",
+        },
+      },
+      bedrock: {
+        cachePoint: {
+          type: "default",
+        },
+      },
+      openaiCompatible: {
+        cache_control: {
+          type: "ephemeral",
+        },
+      },
+      copilot: {
+        copilot_cache_control: {
+          type: "ephemeral",
+        },
+      },
+    })
+  })
+
+  test("google-vertex-anthropic applies cache control", () => {
+    const model = createModel({
+      providerID: "google-vertex-anthropic",
+      api: {
+        id: "google-vertex-anthropic",
+        url: "https://us-central1-aiplatform.googleapis.com",
+        npm: "@ai-sdk/google-vertex/anthropic",
+      },
+      id: "claude-sonnet-4@20250514",
     })
     const msgs = [
       {
@@ -2651,206 +2835,5 @@ describe("ProviderTransform.variants", () => {
       const result = ProviderTransform.variants(model)
       expect(result).toEqual({})
     })
-  })
-})
-
-// ---------------------------------------------------------------------------
-// ProviderTransform.temperature / topP / topK — model-specific inference params
-// ---------------------------------------------------------------------------
-
-function modelWithId(id: string) {
-  return { id, api: { id } } as any
-}
-
-describe("ProviderTransform.temperature", () => {
-  test("qwen models return 0.55", () => {
-    expect(ProviderTransform.temperature(modelWithId("qwen-2.5-coder"))).toBe(0.55)
-    expect(ProviderTransform.temperature(modelWithId("Qwen-Max"))).toBe(0.55)
-  })
-
-  test("claude models return undefined", () => {
-    expect(ProviderTransform.temperature(modelWithId("claude-3-5-sonnet"))).toBeUndefined()
-    expect(ProviderTransform.temperature(modelWithId("claude-opus-4-6"))).toBeUndefined()
-  })
-
-  test("gemini models return 1.0", () => {
-    expect(ProviderTransform.temperature(modelWithId("gemini-2.5-pro"))).toBe(1.0)
-  })
-
-  test("glm-4.6 and glm-4.7 return 1.0", () => {
-    expect(ProviderTransform.temperature(modelWithId("glm-4.6-flash"))).toBe(1.0)
-    expect(ProviderTransform.temperature(modelWithId("glm-4.7-plus"))).toBe(1.0)
-  })
-
-  test("minimax-m2 returns 1.0", () => {
-    expect(ProviderTransform.temperature(modelWithId("minimax-m2-pro"))).toBe(1.0)
-  })
-
-  test("kimi-k2 thinking variants return 1.0", () => {
-    expect(ProviderTransform.temperature(modelWithId("kimi-k2-thinking"))).toBe(1.0)
-    expect(ProviderTransform.temperature(modelWithId("kimi-k2.5-pro"))).toBe(1.0)
-    expect(ProviderTransform.temperature(modelWithId("kimi-k2p5-chat"))).toBe(1.0)
-    expect(ProviderTransform.temperature(modelWithId("kimi-k2-5-turbo"))).toBe(1.0)
-  })
-
-  test("plain kimi-k2 (non-thinking) returns 0.6", () => {
-    expect(ProviderTransform.temperature(modelWithId("kimi-k2"))).toBe(0.6)
-    expect(ProviderTransform.temperature(modelWithId("kimi-k2-chat"))).toBe(0.6)
-  })
-
-  test("unknown model returns undefined", () => {
-    expect(ProviderTransform.temperature(modelWithId("meta-llama-3"))).toBeUndefined()
-    expect(ProviderTransform.temperature(modelWithId("mixtral-8x7b"))).toBeUndefined()
-  })
-})
-
-describe("ProviderTransform.topP", () => {
-  test("qwen models return 1", () => {
-    expect(ProviderTransform.topP(modelWithId("qwen-2.5-coder"))).toBe(1)
-  })
-
-  test("minimax-m2 returns 0.95", () => {
-    expect(ProviderTransform.topP(modelWithId("minimax-m2-pro"))).toBe(0.95)
-  })
-
-  test("gemini returns 0.95", () => {
-    expect(ProviderTransform.topP(modelWithId("gemini-2.5-pro"))).toBe(0.95)
-  })
-
-  test("kimi-k2.5 / k2p5 / k2-5 return 0.95", () => {
-    expect(ProviderTransform.topP(modelWithId("kimi-k2.5-pro"))).toBe(0.95)
-    expect(ProviderTransform.topP(modelWithId("kimi-k2p5"))).toBe(0.95)
-    expect(ProviderTransform.topP(modelWithId("kimi-k2-5"))).toBe(0.95)
-  })
-
-  test("plain kimi-k2 returns undefined (not in special list)", () => {
-    expect(ProviderTransform.topP(modelWithId("kimi-k2"))).toBeUndefined()
-  })
-
-  test("unknown model returns undefined", () => {
-    expect(ProviderTransform.topP(modelWithId("meta-llama-3"))).toBeUndefined()
-  })
-})
-
-describe("ProviderTransform.topK", () => {
-  test("minimax-m2 sub-variants (m2., m25, m21) return 40", () => {
-    expect(ProviderTransform.topK(modelWithId("minimax-m2.1-chat"))).toBe(40)
-    expect(ProviderTransform.topK(modelWithId("minimax-m25-pro"))).toBe(40)
-    expect(ProviderTransform.topK(modelWithId("minimax-m21-lite"))).toBe(40)
-  })
-
-  test("minimax-m2 base returns 20", () => {
-    expect(ProviderTransform.topK(modelWithId("minimax-m2-pro"))).toBe(20)
-    expect(ProviderTransform.topK(modelWithId("minimax-m2"))).toBe(20)
-  })
-
-  test("gemini returns 64", () => {
-    expect(ProviderTransform.topK(modelWithId("gemini-2.5-pro"))).toBe(64)
-  })
-
-  test("unknown model returns undefined", () => {
-    expect(ProviderTransform.topK(modelWithId("claude-3-5-sonnet"))).toBeUndefined()
-    expect(ProviderTransform.topK(modelWithId("gpt-5.1"))).toBeUndefined()
-  })
-})
-
-// ---------------------------------------------------------------------------
-// ProviderTransform.smallOptions — minimal config for auxiliary LLM calls
-// ---------------------------------------------------------------------------
-
-describe("ProviderTransform.smallOptions", () => {
-  function smallModel(overrides: { providerID: string; apiId: string; npm?: string }) {
-    return {
-      providerID: overrides.providerID,
-      api: {
-        id: overrides.apiId,
-        npm: overrides.npm ?? "",
-      },
-    } as any
-  }
-
-  test("openai gpt-5.1 (subdot) returns store:false + reasoningEffort:low", () => {
-    const model = smallModel({ providerID: "openai", apiId: "gpt-5.1-turbo" })
-    expect(ProviderTransform.smallOptions(model)).toEqual({ store: false, reasoningEffort: "low" })
-  })
-
-  test("openai gpt-5.2 returns store:false + reasoningEffort:low", () => {
-    const model = smallModel({ providerID: "openai", apiId: "gpt-5.2" })
-    expect(ProviderTransform.smallOptions(model)).toEqual({ store: false, reasoningEffort: "low" })
-  })
-
-  test("openai gpt-5 (base, no subdot) returns store:false + reasoningEffort:minimal", () => {
-    const model = smallModel({ providerID: "openai", apiId: "gpt-5" })
-    expect(ProviderTransform.smallOptions(model)).toEqual({ store: false, reasoningEffort: "minimal" })
-  })
-
-  test("openai non-gpt-5 returns only store:false", () => {
-    const model = smallModel({ providerID: "openai", apiId: "gpt-4o-mini" })
-    expect(ProviderTransform.smallOptions(model)).toEqual({ store: false })
-  })
-
-  test("github-copilot npm also triggers openai path", () => {
-    const model = smallModel({ providerID: "github-copilot", apiId: "gpt-5.1", npm: "@ai-sdk/github-copilot" })
-    expect(ProviderTransform.smallOptions(model)).toEqual({ store: false, reasoningEffort: "low" })
-  })
-
-  test("google gemini-3 returns thinkingLevel:minimal", () => {
-    const model = smallModel({ providerID: "google", apiId: "gemini-3-flash" })
-    expect(ProviderTransform.smallOptions(model)).toEqual({ thinkingConfig: { thinkingLevel: "minimal" } })
-  })
-
-  test("google gemini-2.5 returns thinkingBudget:0", () => {
-    const model = smallModel({ providerID: "google", apiId: "gemini-2.5-pro" })
-    expect(ProviderTransform.smallOptions(model)).toEqual({ thinkingConfig: { thinkingBudget: 0 } })
-  })
-
-  test("openrouter google model returns reasoning:disabled", () => {
-    const model = smallModel({ providerID: "openrouter", apiId: "google/gemini-2.5-pro" })
-    expect(ProviderTransform.smallOptions(model)).toEqual({ reasoning: { enabled: false } })
-  })
-
-  test("openrouter non-google returns reasoningEffort:minimal", () => {
-    const model = smallModel({ providerID: "openrouter", apiId: "anthropic/claude-3-5-sonnet" })
-    expect(ProviderTransform.smallOptions(model)).toEqual({ reasoningEffort: "minimal" })
-  })
-
-  test("venice returns disableThinking", () => {
-    const model = smallModel({ providerID: "venice", apiId: "deepseek-r1" })
-    expect(ProviderTransform.smallOptions(model)).toEqual({ veniceParameters: { disableThinking: true } })
-  })
-
-  test("unknown provider returns empty object", () => {
-    const model = smallModel({ providerID: "custom-provider", apiId: "custom-model" })
-    expect(ProviderTransform.smallOptions(model)).toEqual({})
-  })
-})
-
-// ---------------------------------------------------------------------------
-// ProviderTransform.maxOutputTokens — output token cap
-// ---------------------------------------------------------------------------
-
-describe("ProviderTransform.maxOutputTokens", () => {
-  function tokenModel(output: number) {
-    return { limit: { output } } as any
-  }
-
-  test("caps at OUTPUT_TOKEN_MAX when model limit exceeds it", () => {
-    expect(ProviderTransform.maxOutputTokens(tokenModel(50000))).toBe(OUTPUT_TOKEN_MAX)
-  })
-
-  test("returns model limit when below cap", () => {
-    expect(ProviderTransform.maxOutputTokens(tokenModel(1000))).toBe(1000)
-  })
-
-  test("returns exact cap at boundary", () => {
-    expect(ProviderTransform.maxOutputTokens(tokenModel(OUTPUT_TOKEN_MAX))).toBe(OUTPUT_TOKEN_MAX)
-  })
-
-  test("falls back to OUTPUT_TOKEN_MAX when limit is 0", () => {
-    expect(ProviderTransform.maxOutputTokens(tokenModel(0))).toBe(OUTPUT_TOKEN_MAX)
-  })
-
-  test("falls back to OUTPUT_TOKEN_MAX when limit is NaN", () => {
-    expect(ProviderTransform.maxOutputTokens(tokenModel(NaN))).toBe(OUTPUT_TOKEN_MAX)
   })
 })

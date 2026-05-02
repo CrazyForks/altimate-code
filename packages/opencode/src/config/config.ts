@@ -181,7 +181,9 @@ export namespace Config {
       log.debug("loaded custom config from OPENCODE_CONFIG_CONTENT")
     }
 
-    const active = Account.active()
+    // altimate_change start — bridge merge: Account.active() became async in v1.4.0
+    const active = await Account.active()
+    // altimate_change end
     if (active?.active_org_id) {
       try {
         const [config, token] = await Promise.all([
@@ -553,6 +555,27 @@ export namespace Config {
     return plugin
   }
 
+  // altimate_change start — bridge merge: PluginSpec helpers from v1.4.0
+  // Used by plugin/loader.ts and cli/cmd/tui/plugin/runtime.ts. Not present
+  // in main; added here so these v1.4.0 files don't crash at runtime.
+  export type PluginOptions = Record<string, unknown>
+  export type PluginSpec = string | [string, PluginOptions]
+  export type PluginScope = "global" | "local"
+  export type PluginOrigin = {
+    spec: PluginSpec
+    source: string
+    scope: PluginScope
+  }
+
+  export function pluginSpecifier(plugin: PluginSpec): string {
+    return Array.isArray(plugin) ? plugin[0] : plugin
+  }
+
+  export function pluginOptions(plugin: PluginSpec): PluginOptions | undefined {
+    return Array.isArray(plugin) ? plugin[1] : undefined
+  }
+  // altimate_change end
+
   /**
    * Deduplicates plugins by name, with later entries (higher priority) winning.
    * Priority order (highest to lowest):
@@ -887,6 +910,9 @@ export namespace Config {
       agent_cycle: z.string().optional().default("tab").describe("Next agent"),
       agent_cycle_reverse: z.string().optional().default("shift+tab").describe("Previous agent"),
       variant_cycle: z.string().optional().default("ctrl+t").describe("Cycle model variants"),
+      // altimate_change start — backport upstream PR #21185 (variant_list keybind)
+      variant_list: z.string().optional().default("none").describe("List model variants"),
+      // altimate_change end
       // altimate_change start - add prompt enhance keybind
       prompt_enhance: z.string().optional().default("<leader>i").describe("Enhance prompt with AI before sending"),
       // altimate_change end
@@ -1076,7 +1102,7 @@ export namespace Config {
         .optional()
         // altimate_change start — altimate docs URL
         .describe("Command configuration, see https://docs.altimate.sh/configure/commands/"),
-        // altimate_change end
+      // altimate_change end
       skills: Skills.optional().describe("Additional skill folder paths"),
       watcher: z
         .object({
@@ -1145,7 +1171,7 @@ export namespace Config {
         .optional()
         // altimate_change start — altimate docs URL
         .describe("Agent configuration, see https://docs.altimate.sh/configure/agents/"),
-        // altimate_change end
+      // altimate_change end
       provider: z
         .record(z.string(), Provider)
         .optional()

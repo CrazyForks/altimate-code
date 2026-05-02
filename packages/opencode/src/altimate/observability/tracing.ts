@@ -298,8 +298,12 @@ function formatDurationShort(ms: number): string {
 export class Trace {
   // Global active trace — set when a session starts, cleared on end.
   private static _active: Trace | null = null
-  static get active(): Trace | null { return Trace._active }
-  static setActive(trace: Trace | null) { Trace._active = trace }
+  static get active(): Trace | null {
+    return Trace._active
+  }
+  static setActive(trace: Trace | null) {
+    Trace._active = trace
+  }
 
   private traceId: string
   private sessionId: string | undefined
@@ -321,13 +325,24 @@ export class Trace {
 
   // altimate_change start — trace: loop detection state
   private toolCallHistory: Array<{ tool: string; inputHash: string; time: number }> = []
-  private loopsDetected: Array<{ tool: string; inputHash: string; count: number; firstSeen: number; lastSeen: number }> = []
+  private loopsDetected: Array<{
+    tool: string
+    inputHash: string
+    count: number
+    firstSeen: number
+    lastSeen: number
+  }> = []
   // altimate_change end
 
   private metadata: TraceFile["metadata"] = {}
   private snapshotDir: string | undefined
   private snapshotPending = false
   private snapshotPromise: Promise<void> | undefined
+  // Set true when flushSync runs. Prevents in-flight async snapshot()
+  // calls from racing with the synchronous crash write — without this,
+  // a still-pending snapshot's `fs.rename` can overwrite flushSync's
+  // crashed-trace content. Round-3 audit + CI flake on slow runners.
+  private crashed = false
 
   private constructor(exporters: TraceExporter[]) {
     this.traceId = randomUUIDv7()
@@ -418,12 +433,7 @@ export class Trace {
    * Enrich the trace with model/provider info from the first assistant message.
    * Called when the message.updated event fires with assistant role.
    */
-  enrichFromAssistant(info: {
-    modelID?: string
-    providerID?: string
-    agent?: string
-    variant?: string
-  }) {
+  enrichFromAssistant(info: { modelID?: string; providerID?: string; agent?: string; variant?: string }) {
     try {
       if (!info) return
       if (info.modelID) this.metadata.model = `${info.providerID ?? ""}/${info.modelID}`
@@ -519,9 +529,7 @@ export class Trace {
       const textOutput = this.generationText.join("")
       const output =
         textOutput ||
-        (this.generationToolCalls.length > 0
-          ? `[tool calls: ${this.generationToolCalls.join(", ")}]`
-          : undefined)
+        (this.generationToolCalls.length > 0 ? `[tool calls: ${this.generationToolCalls.join(", ")}]` : undefined)
 
       const span = this.spans.find((s) => s.spanId === this.currentGenerationSpanId)
       if (span) {
@@ -575,9 +583,7 @@ export class Trace {
 
       const errorStr = isError ? String(state.error ?? "") : ""
       const outputStr = !isError ? String(state.output ?? "") : ""
-      const outputSummary = isError
-        ? `error: ${errorStr.slice(0, 200)}`
-        : outputStr.slice(0, 500)
+      const outputSummary = isError ? `error: ${errorStr.slice(0, 200)}` : outputStr.slice(0, 500)
       this.pendingToolResults.push({ tool: toolName, summary: outputSummary })
 
       const time = state.time ?? { start: Date.now(), end: Date.now() }
@@ -745,6 +751,7 @@ export class Trace {
   private snapshot() {
     if (!this.snapshotDir || !this.sessionId) return
     if (this.snapshotPending) return // Debounce — only one in flight at a time
+    if (this.crashed) return // flushSync wrote the canonical crashed file; do NOT race it
     this.snapshotPending = true
 
     const trace = this.buildTraceFile()
@@ -752,10 +759,19 @@ export class Trace {
     const filePath = path.join(this.snapshotDir, `${safeId}.json`)
     const tmpPath = filePath + `.tmp.${Date.now()}.${Math.random().toString(36).slice(2, 8)}`
 
-    // Atomic write: write to temp file, then rename (prevents partial reads)
-    this.snapshotPromise = fs.mkdir(this.snapshotDir, { recursive: true })
+    // Atomic write: write to temp file, then rename (prevents partial reads).
+    // We re-check `this.crashed` immediately before rename so a flushSync that
+    // ran *during* the write doesn't get clobbered.
+    this.snapshotPromise = fs
+      .mkdir(this.snapshotDir, { recursive: true })
       .then(() => fs.writeFile(tmpPath, JSON.stringify(trace, null, 2)))
-      .then(() => fs.rename(tmpPath, filePath))
+      .then(() => {
+        if (this.crashed) {
+          // flushSync took over — drop the temp and bail
+          return fs.unlink(tmpPath).catch(() => {})
+        }
+        return fs.rename(tmpPath, filePath)
+      })
       .catch((err) => {
         Log.Default.debug(`[tracing] failed to write trace snapshot: ${err}`)
         fs.unlink(tmpPath).catch(() => {})
@@ -774,6 +790,16 @@ export class Trace {
     if (!this.snapshotDir || !this.sessionId) return undefined
     const safeId = (this.sessionId || "unknown").replace(/[/\\.:]/g, "_") || "unknown"
     return path.join(this.snapshotDir, `${safeId}.json`)
+  }
+
+  /**
+   * Wait for any pending async snapshot to complete.
+   * Use from tests that need to read the trace file deterministically after
+   * a span completion (instead of `await sleep(50)` which races on slow CI runners).
+   * No-op if no snapshot is in flight.
+   */
+  async flush(): Promise<void> {
+    if (this.snapshotPromise) await this.snapshotPromise.catch(() => {})
   }
 
   /**
@@ -894,14 +920,17 @@ export class Trace {
 
       // Narrative
       const dur = formatDurationShort(trace.summary.duration)
-      const top3 = topTools.slice(0, 3).map((t) => t.name).join(", ")
+      const top3 = topTools
+        .slice(0, 3)
+        .map((t) => t.name)
+        .join(", ")
       const toolsStr = top3 ? ` using ${toolCounts.size} tools (${top3})` : ""
-      const loopWarning = this.loopsDetected.length > 0
-        ? ` Warning: ${this.loopsDetected.length} loop(s) detected.`
-        : ""
+      const loopWarning =
+        this.loopsDetected.length > 0 ? ` Warning: ${this.loopsDetected.length} loop(s) detected.` : ""
       const costStr = Number.isFinite(this.totalCost) ? `$${this.totalCost.toFixed(4)}` : "$0.0000"
       const statusPrefix = error ? `Failed after ${dur}` : `Completed in ${dur}`
-      const llmStr = this.generationCount > 0 ? `. Made ${this.generationCount} LLM call${this.generationCount > 1 ? "s" : ""}` : ""
+      const llmStr =
+        this.generationCount > 0 ? `. Made ${this.generationCount} LLM call${this.generationCount > 1 ? "s" : ""}` : ""
       trace.summary.narrative = `${statusPrefix}${llmStr}${toolsStr}.${loopWarning} Total cost: ${costStr}.`
     } catch {
       // Narrative generation must never crash the trace
@@ -948,6 +977,9 @@ export class Trace {
   flushSync(error?: string) {
     try {
       if (!this.snapshotDir || !this.sessionId) return
+      // Set crashed BEFORE writing so any in-flight async snapshot() will
+      // bail out at its rename step instead of clobbering our crashed file.
+      this.crashed = true
       this.currentGenerationSpanId = undefined
       const rootSpan = this.spans.find((s) => s.spanId === this.rootSpanId)
       if (rootSpan) {

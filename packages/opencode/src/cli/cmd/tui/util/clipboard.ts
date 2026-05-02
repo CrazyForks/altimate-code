@@ -7,7 +7,11 @@ import fs from "fs/promises"
 import { Filesystem } from "../../../../util/filesystem"
 import { Process } from "../../../../util/process"
 import { which } from "../../../../util/which"
+// altimate_change start — upstream_fix: bridge merge replaced Log.Default.debug with
+// console.log, which writes directly to the terminal and corrupts the TUI render.
+// Restore the structured logger.
 import { Log } from "../../../../util/log"
+// altimate_change end
 
 /**
  * Writes text to clipboard via OSC 52 escape sequence.
@@ -29,6 +33,14 @@ export namespace Clipboard {
     mime: string
   }
 
+  // Checks clipboard for images first, then falls back to text.
+  //
+  // On Windows prompt/ can call this from multiple paste signals because
+  // terminals surface image paste differently:
+  //   1. A forwarded Ctrl+V keypress
+  //   2. An empty bracketed-paste hint for image-only clipboard in Windows
+  //      Terminal <1.25
+  //   3. A kitty Ctrl+V key-release fallback for Windows Terminal 1.25+
   export async function read(): Promise<Content | undefined> {
     const os = platform()
 
@@ -59,6 +71,8 @@ export namespace Clipboard {
       }
     }
 
+    // Windows/WSL: probe clipboard for images via PowerShell.
+    // Bracketed paste can't carry image data so we read it directly.
     if (os === "win32" || release().includes("WSL")) {
       const script =
         "Add-Type -AssemblyName System.Windows.Forms; $img = [System.Windows.Forms.Clipboard]::GetImage(); if ($img) { $ms = New-Object System.IO.MemoryStream; $img.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png); [System.Convert]::ToBase64String($ms.ToArray()) }"

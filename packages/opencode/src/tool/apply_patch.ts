@@ -166,6 +166,7 @@ export const ApplyPatchTool = Tool.define("apply_patch", {
       relativePath: path.relative(Instance.worktree, change.movePath ?? change.filePath).replaceAll("\\", "/"),
       type: change.type,
       diff: change.diff,
+      patch: change.diff,
       before: change.oldContent,
       after: change.newContent,
       additions: change.additions,

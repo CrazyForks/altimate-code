@@ -137,7 +137,7 @@ export async function enhancePrompt(text: string): Promise<string> {
     for await (const _ of stream.fullStream) {
       // drain
     }
-    const result = await stream.text.catch((err) => {
+    const result = await Promise.resolve(stream.text).catch((err: unknown) => {
       log.error("failed to enhance prompt", { error: err })
       return undefined
     })

@@ -21,9 +21,9 @@ describe("Todo: CRUD lifecycle", () => {
           { content: "Write docs", status: "completed", priority: "low" },
         ]
 
-        Todo.update({ sessionID: session.id, todos })
+        await Todo.update({ sessionID: session.id, todos })
 
-        const result = Todo.get(session.id)
+        const result = await Todo.get(session.id)
         expect(result).toHaveLength(3)
         expect(result[0].content).toBe("Fix SQL query")
         expect(result[0].status).toBe("pending")
@@ -43,14 +43,14 @@ describe("Todo: CRUD lifecycle", () => {
       fn: async () => {
         const session = await Session.create({})
 
-        Todo.update({
+        await Todo.update({
           sessionID: session.id,
           todos: [{ content: "Task A", status: "pending", priority: "high" }],
         })
-        expect(Todo.get(session.id)).toHaveLength(1)
+        expect(await Todo.get(session.id)).toHaveLength(1)
 
-        Todo.update({ sessionID: session.id, todos: [] })
-        expect(Todo.get(session.id)).toHaveLength(0)
+        await Todo.update({ sessionID: session.id, todos: [] })
+        expect(await Todo.get(session.id)).toHaveLength(0)
 
         await Session.remove(session.id)
       },
@@ -64,21 +64,21 @@ describe("Todo: CRUD lifecycle", () => {
       fn: async () => {
         const session = await Session.create({})
 
-        Todo.update({
+        await Todo.update({
           sessionID: session.id,
           todos: [
             { content: "Old task 1", status: "pending", priority: "high" },
             { content: "Old task 2", status: "pending", priority: "medium" },
           ],
         })
-        expect(Todo.get(session.id)).toHaveLength(2)
+        expect(await Todo.get(session.id)).toHaveLength(2)
 
-        Todo.update({
+        await Todo.update({
           sessionID: session.id,
           todos: [{ content: "New task", status: "in_progress", priority: "low" }],
         })
 
-        const result = Todo.get(session.id)
+        const result = await Todo.get(session.id)
         expect(result).toHaveLength(1)
         expect(result[0].content).toBe("New task")
         expect(result[0].status).toBe("in_progress")
@@ -95,7 +95,7 @@ describe("Todo: CRUD lifecycle", () => {
       fn: async () => {
         const session = await Session.create({})
 
-        const result = Todo.get(session.id)
+        const result = await Todo.get(session.id)
         expect(result).toEqual([])
 
         await Session.remove(session.id)
@@ -120,7 +120,7 @@ describe("Todo: CRUD lifecycle", () => {
         })
 
         const todos = [{ content: "Emit test", status: "pending", priority: "high" }]
-        Todo.update({ sessionID: session.id, todos })
+        await Todo.update({ sessionID: session.id, todos })
 
         // Bus.publish is synchronous — event is delivered immediately
         unsub()
@@ -142,11 +142,11 @@ describe("Todo: CRUD lifecycle", () => {
         const session1 = await Session.create({})
         const session2 = await Session.create({})
 
-        Todo.update({
+        await Todo.update({
           sessionID: session1.id,
           todos: [{ content: "Session 1 task", status: "pending", priority: "high" }],
         })
-        Todo.update({
+        await Todo.update({
           sessionID: session2.id,
           todos: [
             { content: "Session 2 task A", status: "pending", priority: "medium" },
@@ -154,9 +154,9 @@ describe("Todo: CRUD lifecycle", () => {
           ],
         })
 
-        expect(Todo.get(session1.id)).toHaveLength(1)
-        expect(Todo.get(session1.id)[0].content).toBe("Session 1 task")
-        expect(Todo.get(session2.id)).toHaveLength(2)
+        expect(await Todo.get(session1.id)).toHaveLength(1)
+        expect((await Todo.get(session1.id))[0].content).toBe("Session 1 task")
+        expect(await Todo.get(session2.id)).toHaveLength(2)
 
         await Session.remove(session1.id)
         await Session.remove(session2.id)

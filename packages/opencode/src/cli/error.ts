@@ -1,12 +1,18 @@
+import { AccountServiceError, AccountTransportError } from "@/account"
 import { ConfigMarkdown } from "@/config/markdown"
+import { errorFormat } from "@/util/error"
 import { Config } from "../config/config"
 import { MCP } from "../mcp"
 import { Provider } from "../provider/provider"
 import { UI } from "./ui"
 
 export function FormatError(input: unknown) {
+  // altimate_change start — upstream_fix: branding regressions in user-visible error strings
   if (MCP.Failed.isInstance(input))
     return `MCP server "${input.data.name}" failed. Note, altimate-code does not support MCP authentication yet.`
+  if (input instanceof AccountTransportError || input instanceof AccountServiceError) {
+    return input.message
+  }
   if (Provider.ModelNotFoundError.isInstance(input)) {
     const { providerID, modelID, suggestions } = input.data
     return [
@@ -16,6 +22,7 @@ export function FormatError(input: unknown) {
       `Or check your config (altimate-code.json) provider/model names`,
     ].join("\n")
   }
+  // altimate_change end
   if (Provider.InitError.isInstance(input)) {
     return `Failed to initialize provider "${input.data.providerID}". Check credentials and configuration.`
   }
@@ -41,17 +48,5 @@ export function FormatError(input: unknown) {
 }
 
 export function FormatUnknownError(input: unknown): string {
-  if (input instanceof Error) {
-    return input.stack ?? `${input.name}: ${input.message}`
-  }
-
-  if (typeof input === "object" && input !== null) {
-    try {
-      return JSON.stringify(input, null, 2)
-    } catch {
-      return "Unexpected error (unserializable)"
-    }
-  }
-
-  return String(input)
+  return errorFormat(input)
 }

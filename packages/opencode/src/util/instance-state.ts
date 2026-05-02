@@ -1,6 +1,7 @@
 import { Effect, ScopedCache, Scope } from "effect"
 
 import { Instance } from "@/project/instance"
+import { registerDisposer } from "@/effect/instance-registry"
 
 const TypeId = Symbol.for("@opencode/InstanceState")
 
@@ -29,7 +30,16 @@ export namespace InstanceState {
 
       const task: Task = (key) => ScopedCache.invalidate(cache, key)
       tasks.add(task)
-      yield* Effect.addFinalizer(() => Effect.sync(() => void tasks.delete(task)))
+      // altimate_change start — bridge merge: register with the disposer
+      // registry so Instance.reload/dispose invalidate this cache too.
+      const off = registerDisposer((directory) => Effect.runPromise(ScopedCache.invalidate(cache, directory)))
+      // altimate_change end
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          tasks.delete(task)
+          off()
+        }),
+      )
 
       return {
         [TypeId]: TypeId,

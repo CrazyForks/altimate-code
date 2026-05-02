@@ -45,7 +45,9 @@ export namespace ShareNext {
   }> {
     const headers: Record<string, string> = {}
 
-    const active = Account.active()
+    // altimate_change start — bridge merge: Account.active() became async in v1.4.0
+    const active = await Account.active()
+    // altimate_change end
     if (!active?.active_org_id) {
       const baseUrl = await Config.get().then((x) => x.enterprise?.url ?? "https://altimate.ai")
       return { headers, api: legacyApi, baseUrl }

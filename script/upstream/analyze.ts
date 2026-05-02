@@ -35,6 +35,7 @@ const { values: args } = parseArgs({
     version: { type: "string", short: "v" },
     branding: { type: "boolean", default: false },
     markers: { type: "boolean", default: false },
+    "require-markers": { type: "boolean", default: false },
     "audit-fixes": { type: "boolean", default: false },
     strict: { type: "boolean", default: false },
     base: { type: "string" },
@@ -67,8 +68,18 @@ interface BrandingReport {
 /**
  * Upstream branding patterns that should NOT appear in the codebase
  * (except in preserved contexts like npm package names).
+ *
+ * Two tiers:
+ *   - "exact": always-fatal patterns (domains, social handles). Never legitimate.
+ *   - "context": bare `opencode` patterns scoped to user-visible contexts (yargs
+ *     describe text, console output, MCP client identity, workflow YAML, prompt
+ *     placeholders). Caught the v1.4.0 bridge merge regressions in serve.ts,
+ *     web.ts, uninstall.ts, error.ts, mcp.ts, github.ts, dialog-status.tsx,
+ *     plugin/codex.ts UA strings, plugin/install.ts directory names, and 5+
+ *     other sites where bare `opencode` strings shipped to production.
  */
 const LEAK_PATTERNS = [
+  // Always-fatal: domains, emails, registries, social handles
   { regex: /opencode\.ai/g, label: "opencode.ai (domain)" },
   { regex: /opncd\.ai/g, label: "opncd.ai (short domain)" },
   { regex: /anomalyco\//g, label: "anomalyco/ (GitHub org)" },
@@ -78,6 +89,53 @@ const LEAK_PATTERNS = [
   { regex: /ai\.opencode\./g, label: "ai.opencode.* (app ID)" },
   { regex: /x\.com\/altaborodin/g, label: "altaborodin (social handle)" },
   { regex: /ghcr\.io\/anomalyco/g, label: "ghcr.io/anomalyco (container registry)" },
+
+  // Context-scoped: bare `opencode` inside user-visible string literals.
+  // These caught 13 of the 16 v1.4.0 bridge merge regressions.
+  {
+    regex: /describe:\s*["'`][^"'`]*\bopencode\b[^"'`]*["'`]/gi,
+    label: "yargs describe: bare 'opencode' (shown in --help)",
+  },
+  {
+    regex: /\b(?:console\.(?:log|warn|error|info)|UI\.println|prompts\.(?:log|outro)\.[a-zA-Z]+)\s*\(\s*[`"'][^`"']*\bopencode\b[^`"']*[`"']/gi,
+    label: "console/UI output: bare 'opencode' (visible at runtime)",
+  },
+  {
+    regex: /\bplaceholder:\s*["'`][^"'`]*\bopencode\s+[a-z]/gi,
+    label: "input placeholder: bare 'opencode <cmd>' (TUI prompt example)",
+  },
+  {
+    regex: /clientInfo\s*[:=]\s*\{[^}]*name:\s*["'`]opencode[-_]?[a-z]*["'`]/gi,
+    label: "MCP clientInfo.name: 'opencode-...' (sent to remote MCP servers)",
+  },
+  {
+    regex: /\b(?:User-Agent|user-agent)["'`]?\s*[:=]\s*[`"'][^`"']*\bopencode\/\$\{/g,
+    label: "User-Agent header: 'opencode/${VERSION}' (sent to API providers)",
+  },
+  {
+    regex: /["'`]opencode-(?:agent|debug|github-action|share|web-ui)\b/g,
+    label: "opencode-{agent,debug,github-action,share,web-ui} (infrastructure identifier)",
+  },
+  {
+    regex: /\bgetIDToken\s*\(\s*["'`]opencode-/g,
+    label: "OIDC audience: 'opencode-...' (auth identity)",
+  },
+  {
+    regex: /["'`]\.opencode\/opencode\.json/g,
+    label: ".opencode/opencode.json hardcoded (new installs should land in .altimate-code/)",
+  },
+  {
+    regex: /\bspawn\s*\(\s*\[?\s*["'`]opencode["'`]/g,
+    label: "Process.spawn(\"opencode\"): wrong binary (we ship altimate-code)",
+  },
+  {
+    regex: /^\s*name:\s*opencode\s*$/gm,
+    label: "GitHub workflow YAML name: opencode (committed to user repos)",
+  },
+  {
+    regex: /\bopencode-agent\[bot\]/g,
+    label: "opencode-agent[bot]: GitHub App identity",
+  },
 ]
 
 /**
@@ -133,8 +191,24 @@ async function auditBranding(config: MergeConfig): Promise<BrandingReport> {
     report.scannedFiles++
 
     const lines = content.split("\n")
+    // Track whether we're inside an `altimate_change start ... altimate_change end`
+    // block. Code inside markers is intentional altimate customization — referencing
+    // upstream identifiers there (e.g. for upstream_fix comments, dual-config
+    // fallback paths, dead-import explanations) is acknowledged, not a leak.
+    let insideMarker = false
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i]
+
+      if (line.includes("altimate_change start")) {
+        insideMarker = true
+      }
+
+      // Skip lines inside altimate_change blocks (counted as preserved for stats).
+      if (insideMarker) {
+        report.preservedLines++
+        if (line.includes("altimate_change end")) insideMarker = false
+        continue
+      }
 
       // Skip preserved lines (npm package refs, internal identifiers, etc.)
       if (isPreservedLine(line, config.preservePatterns)) {
@@ -812,6 +886,77 @@ function runMarkerCheck(config: MergeConfig, base?: string, strict?: boolean): n
 }
 
 // ---------------------------------------------------------------------------
+// Require-markers check
+// ---------------------------------------------------------------------------
+
+/**
+ * Verify that every file in `requireMarkers` has at least one
+ * `altimate_change` block. These files are known to hold altimate
+ * customizations and the bridge merge tool relies on the markers to
+ * preserve them. If a marker block is dropped (e.g., during a manual
+ * merge or refactor) the next bridge merge would silently overwrite
+ * the patch — the v1.4.0 regression mode.
+ *
+ * Returns 0 if all files have markers, 1 if any file is missing markers
+ * (in --strict mode), 0 otherwise (warning only).
+ */
+function runRequireMarkersCheck(config: MergeConfig, strict?: boolean): number {
+  banner("Require-Markers Check")
+
+  const root = repoRoot()
+  const missing: { file: string; reason: string }[] = []
+
+  for (const rel of config.requireMarkers) {
+    const abs = path.join(root, rel)
+    if (!fs.existsSync(abs)) {
+      missing.push({ file: rel, reason: "file not found" })
+      continue
+    }
+    let content: string
+    try {
+      content = fs.readFileSync(abs, "utf-8")
+    } catch (e) {
+      missing.push({ file: rel, reason: `read failed: ${e instanceof Error ? e.message : String(e)}` })
+      continue
+    }
+    const startCount = (content.match(/altimate_change start/g) ?? []).length
+    const endCount = (content.match(/altimate_change end/g) ?? []).length
+    if (startCount === 0) {
+      missing.push({ file: rel, reason: "no altimate_change blocks" })
+    } else if (startCount !== endCount) {
+      missing.push({ file: rel, reason: `unbalanced markers (${startCount} starts, ${endCount} ends)` })
+    }
+  }
+
+  console.log(`  Files in requireMarkers list: ${config.requireMarkers.length}`)
+  console.log(`  Files with valid markers:     ${config.requireMarkers.length - missing.length}`)
+  console.log(`  Files missing markers:        ${missing.length > 0 ? RED : GREEN}${missing.length}${RESET}`)
+  console.log()
+
+  if (missing.length === 0) {
+    logger.success("All behavior-patched files have markers")
+    return 0
+  }
+
+  console.log(`${BOLD}Files that lost their altimate_change markers:${RESET}`)
+  for (const { file, reason } of missing) {
+    console.log(`  ${RED}${file}${RESET}  ${dim(`(${reason})`)}`)
+  }
+  console.log()
+  console.log(`${dim("These files are listed in `requireMarkers` (script/upstream/utils/config.ts)")}`)
+  console.log(`${dim("because they hold altimate behavioral patches that must be preserved on every")}`)
+  console.log(`${dim("upstream merge. Restore the missing markers or add the patches back.")}`)
+  console.log()
+
+  if (strict) {
+    logger.error("--strict mode — failing CI")
+    return 1
+  }
+  logger.warn("Run with --strict to enforce in CI")
+  return 0
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -826,9 +971,10 @@ async function main(): Promise<void> {
   const hasVersion = Boolean(args.version)
   const hasBranding = Boolean(args.branding)
   const hasMarkers = Boolean(args.markers)
+  const hasRequireMarkers = Boolean(args["require-markers"])
   const hasAuditFixes = Boolean(args["audit-fixes"])
 
-  if (!hasVersion && !hasBranding && !hasMarkers && !hasAuditFixes) {
+  if (!hasVersion && !hasBranding && !hasMarkers && !hasRequireMarkers && !hasAuditFixes) {
     // Default: run marker analysis
     printMarkerAnalysis(config)
 
@@ -836,6 +982,7 @@ async function main(): Promise<void> {
     logger.info("Use --version <tag> to analyze an upstream version")
     logger.info("Use --branding to audit for branding leaks")
     logger.info("Use --markers --base main to check for missing markers")
+    logger.info("Use --require-markers to verify behavior-patched files keep their markers")
     logger.info("Use --audit-fixes to list upstream bug fixes we're carrying")
     return
   }
@@ -885,6 +1032,15 @@ async function main(): Promise<void> {
 
   if (hasMarkers) {
     const exitCode = runMarkerCheck(config, args.base, Boolean(args.strict))
+    if (exitCode !== 0) {
+      process.exit(exitCode)
+    }
+  }
+
+  // ─── Require-markers (regression backstop) ────────────────────────────────
+
+  if (hasRequireMarkers) {
+    const exitCode = runRequireMarkersCheck(config, Boolean(args.strict))
     if (exitCode !== 0) {
       process.exit(exitCode)
     }

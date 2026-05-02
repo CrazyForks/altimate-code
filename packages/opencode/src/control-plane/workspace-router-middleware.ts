@@ -25,14 +25,30 @@ async function routeRequest(req: Request) {
     })
   }
 
+  // altimate_change start — upstream_fix: bridge merge originally called
+  // `(adaptor as any).fetch(...)`, but Adaptor.fetch was renamed to
+  // Adaptor.target() in v1.4.0. Calling .fetch threw at runtime whenever
+  // OPENCODE_EXPERIMENTAL_WORKSPACES was enabled. Use the new target()
+  // API and combine target.url with the original request's path+search
+  // ourselves — ServerProxy.http overrides the URL with target.url
+  // verbatim, dropping the request path, which would route every request
+  // to the workspace's root.
   const adaptor = await getAdaptor(workspace.type)
+  const target = await Promise.resolve(adaptor.target(workspace))
+  if (target.type === "local") return
 
-  return adaptor.fetch(workspace, `${new URL(req.url).pathname}${new URL(req.url).search}`, {
+  const incoming = new URL(req.url)
+  const baseURL = String(target.url).replace(/\/+$/, "")
+  const destination = baseURL + incoming.pathname + incoming.search
+
+  return fetch(destination, {
     method: req.method,
     body: req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer(),
+    headers: target.headers ? new Headers([...new Headers(req.headers), ...new Headers(target.headers)]) : req.headers,
     signal: req.signal,
-    headers: req.headers,
+    redirect: "manual",
   })
+  // altimate_change end
 }
 
 export const WorkspaceRouterMiddleware: MiddlewareHandler = async (c, next) => {

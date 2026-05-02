@@ -32,7 +32,14 @@ export namespace Plugin {
   // vs the workspace version, causing a type mismatch on internal HeyApiClient.
   // The types are structurally compatible at runtime.
   // altimate_change start — snowflake cortex, databricks, and altimate backend internal plugins
-  const INTERNAL_PLUGINS: PluginInstance[] = [CodexAuthPlugin, CopilotAuthPlugin, GitlabAuthPlugin as unknown as PluginInstance, SnowflakeCortexAuthPlugin, DatabricksAuthPlugin, AltimateAuthPlugin]
+  const INTERNAL_PLUGINS: PluginInstance[] = [
+    CodexAuthPlugin,
+    CopilotAuthPlugin,
+    GitlabAuthPlugin as unknown as PluginInstance,
+    SnowflakeCortexAuthPlugin,
+    DatabricksAuthPlugin,
+    AltimateAuthPlugin,
+  ]
   // altimate_change end
 
   const state = Instance.state(async () => {
@@ -125,17 +132,29 @@ export namespace Plugin {
 
   export async function trigger<
     Name extends Exclude<keyof Required<Hooks>, "auth" | "event" | "tool">,
-    Input = Parameters<Required<Hooks>[Name]>[0],
-    Output = Parameters<Required<Hooks>[Name]>[1],
+    // altimate_change start — bridge merge: extract param types via fallback to (...args:any)=>any
+    Input = Required<Hooks>[Name] extends (...args: any) => any ? Parameters<Required<Hooks>[Name]>[0] : never,
+    Output = Required<Hooks>[Name] extends (...args: any) => any ? Parameters<Required<Hooks>[Name]>[1] : never,
+    // altimate_change end
   >(name: Name, input: Input, output: Output): Promise<Output> {
     if (!name) return output
     for (const hook of await state().then((x) => x.hooks)) {
       const fn = hook[name]
       if (!fn) continue
-      // @ts-expect-error if you feel adventurous, please fix the typing, make sure to bump the try-counter if you
-      // give up.
-      // try-counter: 2
-      await fn(input, output)
+      // altimate_change start — isolate plugin-hook failures so a single buggy plugin can't
+      // crash the session. Without this, an unhandled throw in any hook (e.g. chat.params,
+      // chat.headers) propagates to the caller (session/llm.ts), aborting the LLM call.
+      // Round 3 adversarial audit (v140-merge-chaos.test.ts) found this — pre-existing
+      // pre-v1.4.0 but exposure grew with the new chat.params plumbing.
+      try {
+        // @ts-expect-error if you feel adventurous, please fix the typing, make sure to bump the try-counter if you
+        // give up.
+        // try-counter: 2
+        await fn(input, output)
+      } catch (err) {
+        log.error("plugin hook threw; continuing with remaining hooks", { hook: name as string, error: err })
+      }
+      // altimate_change end
     }
     return output
   }

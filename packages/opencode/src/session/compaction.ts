@@ -45,14 +45,11 @@ export namespace SessionCompaction {
   }
 
   export function createObservationMask(part: MessageV2.ToolPart): string {
-    const output =
-      (part.state.status === "completed" ? part.state.output : "") || ""
+    const output = (part.state.status === "completed" ? part.state.output : "") || ""
     const lines = output.split("\n").length
     const bytes = Buffer.byteLength(output, "utf8")
     const args = truncateArgs(
-      part.state.status === "completed" ||
-        part.state.status === "running" ||
-        part.state.status === "error"
+      part.state.status === "completed" || part.state.status === "running" || part.state.status === "error"
         ? part.state.input
         : {},
       80,
@@ -177,9 +174,13 @@ export namespace SessionCompaction {
     // altimate_change start — telemetry, attempt tracking, and circuit breaker
     const attempt = (compactionAttempts.get(input.sessionID) ?? 0) + 1
     compactionAttempts.set(input.sessionID, attempt)
-    input.abort.addEventListener("abort", () => {
-      compactionAttempts.delete(input.sessionID)
-    }, { once: true })
+    input.abort.addEventListener(
+      "abort",
+      () => {
+        compactionAttempts.delete(input.sessionID)
+      },
+      { once: true },
+    )
     Telemetry.track({
       type: "compaction_triggered",
       timestamp: Date.now(),
@@ -303,7 +304,7 @@ When constructing the summary, try to stick to this template:
       tools: {},
       system: [],
       messages: [
-        ...MessageV2.toModelMessages(messages, model, { stripMedia: true }),
+        ...(await MessageV2.toModelMessages(messages, model, { stripMedia: true })),
         {
           role: "user",
           content: [

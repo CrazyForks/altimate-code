@@ -19,7 +19,9 @@ export type ShareData =
   | { type: "session_diff"; data: unknown }
   | { type: "model"; data: unknown }
 
+// altimate_change start — share URLs use altimate.ai (was opencode.ai)
 /** Extract share ID from a share URL like https://altimate.ai/share/abc123 */
+// altimate_change end
 export function parseShareUrl(url: string): string | null {
   const match = url.match(/^https?:\/\/[^/]+\/share\/([a-zA-Z0-9_-]+)$/)
   return match ? match[1] : null

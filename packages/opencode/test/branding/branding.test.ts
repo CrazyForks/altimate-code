@@ -145,7 +145,7 @@ describe("GitHub Action", () => {
 describe("User-Agent & Version", () => {
   test("USER_AGENT contains altimate-code", () => {
     const content = readText(join(srcDir, "installation", "index.ts"))
-    expect(content).toContain('USER_AGENT = `altimate-code/')
+    expect(content).toContain("USER_AGENT = `altimate-code/")
   })
 })
 
@@ -158,6 +158,21 @@ describe("Upstream Branding Leak Detection", () => {
     { pattern: /anomalyco/i, label: "anomalyco GitHub org" },
     { pattern: /opncd\.ai/i, label: "altimate.ai short domain" },
   ]
+
+  // Yields each line of `content` that is NOT inside an `altimate_change start
+  // ... altimate_change end` block. Lines inside markers are intentional altimate
+  // customizations and may legitimately reference upstream identifiers in
+  // explanatory comments (e.g. "schema URL points to altimate.ai (was opencode.ai)").
+  function* nonMarkerLines(content: string): Generator<{ line: string; index: number }> {
+    const lines = content.split("\n")
+    let inside = false
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]
+      if (line.includes("altimate_change start")) inside = true
+      if (!inside) yield { line, index: i }
+      if (line.includes("altimate_change end")) inside = false
+    }
+  }
 
   // Lines matching any of these patterns are intentionally kept (internal identifiers)
   function isExcluded(line: string, filePath: string): boolean {
@@ -183,7 +198,9 @@ describe("Upstream Branding Leak Detection", () => {
     // ".opencode" as config dir name in array literals or string literals (fallback config)
     if (/['"]\.opencode['"]/.test(trimmed)) return true
     // path.join references with ".opencode" (e.g., path.join(".opencode", "bin"))
-    if (/\.opencode/.test(trimmed) && !(/opencode\.ai/i.test(trimmed))) return true
+    if (/\.opencode/.test(trimmed) && !/opencode\.ai/i.test(trimmed)) return true
+    // Generated models snapshot — contains real product URLs from external API (OpenCode Zen/Go)
+    if (filePath.includes("provider/models-snapshot.ts")) return true
     return false
   }
 
@@ -193,12 +210,10 @@ describe("Upstream Branding Leak Detection", () => {
     for await (const file of glob.scan({ cwd: srcDir })) {
       const filePath = join(srcDir, file)
       const content = readText(filePath)
-      const lines = content.split("\n")
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i]
+      for (const { line, index } of nonMarkerLines(content)) {
         if (isExcluded(line, filePath)) continue
         if (/opencode\.ai/i.test(line)) {
-          violations.push(`${file}:${i + 1}: ${line.trim()}`)
+          violations.push(`${file}:${index + 1}: ${line.trim()}`)
         }
       }
     }
@@ -211,12 +226,10 @@ describe("Upstream Branding Leak Detection", () => {
     for await (const file of glob.scan({ cwd: srcDir })) {
       const filePath = join(srcDir, file)
       const content = readText(filePath)
-      const lines = content.split("\n")
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i]
+      for (const { line, index } of nonMarkerLines(content)) {
         if (isExcluded(line, filePath)) continue
         if (/anomalyco/i.test(line)) {
-          violations.push(`${file}:${i + 1}: ${line.trim()}`)
+          violations.push(`${file}:${index + 1}: ${line.trim()}`)
         }
       }
     }
@@ -229,12 +242,10 @@ describe("Upstream Branding Leak Detection", () => {
     for await (const file of glob.scan({ cwd: srcDir })) {
       const filePath = join(srcDir, file)
       const content = readText(filePath)
-      const lines = content.split("\n")
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i]
+      for (const { line, index } of nonMarkerLines(content)) {
         if (isExcluded(line, filePath)) continue
         if (/opncd\.ai/i.test(line)) {
-          violations.push(`${file}:${i + 1}: ${line.trim()}`)
+          violations.push(`${file}:${index + 1}: ${line.trim()}`)
         }
       }
     }

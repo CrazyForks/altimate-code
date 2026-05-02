@@ -1,4 +1,5 @@
 import z from "zod"
+import { setTimeout as sleep } from "node:timers/promises"
 import { fn } from "@/util/fn"
 import { Database, eq } from "@/storage/db"
 import { Project } from "@/project/project"
@@ -113,22 +114,45 @@ export namespace Workspace {
   const log = Log.create({ service: "workspace-sync" })
 
   async function workspaceEventLoop(space: Info, stop: AbortSignal) {
+    // altimate_change start — upstream_fix: bridge merge replaced main's
+    // `adaptor.fetch(..., {signal}).catch(() => undefined)` defensive swallow
+    // with a bare `await fetch(...)` that throws on transient network blips and
+    // kills the loop forever. Local workspaces (target.type === "local") also
+    // hit `return` so the worker would never restart even if the workspace
+    // type later flipped to remote at runtime. Restore the defensive shape:
+    // continue (don't return) on local, swallow fetch errors and back off.
     while (!stop.aborted) {
       const adaptor = await getAdaptor(space.type)
-      const res = await adaptor.fetch(space, "/event", { method: "GET", signal: stop }).catch(() => undefined)
-      if (!res || !res.ok || !res.body) {
-        await Bun.sleep(1000)
+      const target = await Promise.resolve(adaptor.target(space))
+
+      if (target.type === "local") {
+        await sleep(1000)
         continue
       }
+
+      const baseURL = String(target.url).replace(/\/?$/, "/")
+
+      const res = await fetch(new URL(baseURL + "/event"), {
+        method: "GET",
+        signal: stop,
+      }).catch(() => undefined)
+
+      if (!res || !res.ok || !res.body) {
+        await sleep(1000)
+        continue
+      }
+
       await parseSSE(res.body, stop, (event) => {
         GlobalBus.emit("event", {
           directory: space.id,
           payload: event,
         })
       })
+
       // Wait 250ms and retry if SSE connection fails
-      await Bun.sleep(250)
+      await sleep(250)
     }
+    // altimate_change end
   }
 
   export function startSyncing(project: Project.Info) {

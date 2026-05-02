@@ -24,6 +24,20 @@ export interface MergeConfig {
   /** Glob patterns of upstream files to discard entirely. */
   skipFiles: string[]
 
+  /**
+   * Glob patterns of files that historically hold altimate behavioral patches
+   * (UA strings, retry loops, hour-aligned cleanup tasks, etc.) without
+   * `altimate_change` markers. The bridge merge tool MUST flag these for human
+   * review whenever it takes upstream content for them — even if the file
+   * has no markers — because the absence of markers does not mean "safe to
+   * overwrite", just "we forgot to mark our patches".
+   *
+   * Use `bun run script/upstream/analyze.ts --require-markers --strict` to
+   * confirm every file in this list actually has at least one altimate_change
+   * block; CI rejects any file in the list that lost all its markers.
+   */
+  requireMarkers: string[]
+
   /** All branding replacement rules, ordered by specificity (most specific first). */
   brandingRules: StringReplacement[]
 
@@ -262,6 +276,8 @@ export const defaultConfig: MergeConfig = {
     "packages/drivers/**",
     "packages/opencode/src/altimate/**",
     "packages/opencode/src/bridge/**",
+    // Memory tools are net-new altimate features (altimate_memory_* tool family)
+    "packages/opencode/src/memory/**",
     "packages/opencode/test/altimate/**",
     // Build and publish scripts have critical branding (binary name, user-agent,
     // engine version embedding, archive naming, altimate-code symlink)
@@ -279,6 +295,82 @@ export const defaultConfig: MergeConfig = {
     ".claude/**",
     "sdks/**",
     "script/upstream/**",
+    // Catppuccin theme files — JSON can't carry inline altimate_change markers, so
+    // we lock them via keepOurs. The textMuted value is a deliberate a11y choice
+    // (Subtext1 vs upstream's darker Overlay2). The other Catppuccin variants
+    // share the same convention for consistency.
+    "packages/opencode/src/cli/cmd/tui/context/theme/catppuccin.json",
+    "packages/opencode/src/cli/cmd/tui/context/theme/catppuccin-frappe.json",
+    "packages/opencode/src/cli/cmd/tui/context/theme/catppuccin-macchiato.json",
+    // Test files that intentionally reference upstream branding —
+    // either testing upstream API/release fetches, or asserting that
+    // branding strings DON'T leak into shipped source. Excluding from
+    // the branding scan prevents false positives.
+    "packages/opencode/test/upstream/**",
+    "packages/opencode/test/branding/**",
+    // External-API fixture (models.dev response) — keeps real product
+    // names like "OpenCode Zen" because that's what the real API returns.
+    "packages/opencode/test/tool/fixtures/models-api.json",
+    // Transient commit message / PR body files — intentionally quote
+    // upstream brand strings when describing rebrand fixes. See CLAUDE.md
+    // commit workflow conventions.
+    ".github/meta/**",
+  ],
+
+  // Files with altimate behavioral patches that MUST be marked + reviewed on
+  // every upstream merge. The v1.4.0 bridge silently overwrote these because
+  // they had no markers; the patches were re-applied in commit 3a6b59bdea and
+  // wrapped in altimate_change blocks. This list is the regression backstop —
+  // CI fails if any file here loses all its markers, and the bridge tool flags
+  // any change to these for human review.
+  requireMarkers: [
+    // CLI commands with altimate-branded describe/log strings + behavior
+    "packages/opencode/src/cli/cmd/serve.ts",
+    "packages/opencode/src/cli/cmd/web.ts",
+    "packages/opencode/src/cli/cmd/uninstall.ts",
+    "packages/opencode/src/cli/cmd/pr.ts",
+    "packages/opencode/src/cli/cmd/mcp.ts",
+    "packages/opencode/src/cli/cmd/github.ts",
+    "packages/opencode/src/cli/cmd/upgrade.ts",
+    "packages/opencode/src/cli/cmd/tui/attach.ts",
+    "packages/opencode/src/cli/cmd/tui/component/upgrade-indicator.tsx",
+    "packages/opencode/src/cli/error.ts",
+    "packages/opencode/src/cli/ui.ts",
+    "packages/opencode/src/cli/network.ts",
+    // TUI components with brand strings or Log.Default usage
+    "packages/opencode/src/cli/cmd/tui/component/dialog-status.tsx",
+    "packages/opencode/src/cli/cmd/tui/component/dialog-mcp.tsx",
+    "packages/opencode/src/cli/cmd/tui/component/dialog-workspace-list.tsx",
+    "packages/opencode/src/cli/cmd/tui/component/error-component.tsx",
+    "packages/opencode/src/cli/cmd/tui/component/logo.tsx",
+    "packages/opencode/src/cli/cmd/tui/util/clipboard.ts",
+    "packages/opencode/src/cli/cmd/tui/context/route.tsx",
+    // (Catppuccin a11y tweaks live in keepOurs — JSON can't carry markers.)
+    // HTTP routes that must call PermissionNext (split-brain regression)
+    "packages/opencode/src/server/routes/permission.ts",
+    "packages/opencode/src/server/routes/session.ts",
+    "packages/opencode/src/server/routes/global.ts",
+    "packages/opencode/src/server/instance.ts",
+    // OAuth client + TUI schema URLs (point at altimate.ai not opencode.ai)
+    "packages/opencode/src/mcp/oauth-provider.ts",
+    "packages/opencode/src/mcp/config.ts",
+    "packages/opencode/src/config/migrate-tui-config.ts",
+    "packages/opencode/src/config/tui-migrate.ts",
+    // Workspace router middleware uses target() not fetch() — drift breaks runtime
+    "packages/opencode/src/control-plane/workspace-router-middleware.ts",
+    "packages/opencode/src/control-plane/workspace.ts",
+    // Plugin behavior patches (UA, OAuth retry, expiry skew, install dirs)
+    "packages/opencode/src/plugin/codex.ts",
+    "packages/opencode/src/plugin/copilot.ts",
+    "packages/opencode/src/plugin/github-copilot/copilot.ts",
+    "packages/opencode/src/plugin/install.ts",
+    // Provider UA strings + bootstrap deferral
+    "packages/opencode/src/provider/provider.ts",
+    "packages/opencode/src/provider/models.ts",
+    "packages/opencode/src/project/bootstrap.ts",
+    // Session error display + LLM UA
+    "packages/opencode/src/session/llm.ts",
+    "packages/opencode/src/util/error.ts",
   ],
 
   skipFiles: [
@@ -331,6 +423,23 @@ export const defaultConfig: MergeConfig = {
     "script/sync-zed.ts",
     // Upstream AGENTS.md references dev branch, misleading for our fork
     "AGENTS.md",
+    // Unused legacy Anthropic prompt variant — active prompt is anthropic.txt.
+    // PR #18186 deleted this; we do not restore it. If upstream resurrects
+    // this filename, skipFiles ensures the overlay drops it.
+    "packages/opencode/src/session/prompt/anthropic-20250930.txt",
+    // Upstream contributor-management metadata — not relevant to our fork.
+    // We maintain our own TEAM_MEMBERS / pull_request_template.md (kept via
+    // keepOurs above). These specific files are upstream-only and were
+    // accidentally pulled in by the v1.4.0 bridge merge.
+    ".github/CODEOWNERS",
+    ".github/VOUCHED.td",
+    // Upstream's GitHub-stars download tracker — we have our own analytics.
+    "STATS.md",
+    "script/stats.ts",
+    // Upstream Zed editor settings — leaks editor preferences from upstream.
+    ".zed/settings.json",
+    // Upstream changelog command — we have our own bridge-merge / release process.
+    ".opencode/command/changelog.md",
   ],
 
   brandingRules: [

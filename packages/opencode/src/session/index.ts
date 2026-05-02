@@ -698,6 +698,7 @@ export namespace Session {
         .run()
       Database.effect(() =>
         Bus.publish(MessageV2.Event.Updated, {
+          sessionID: msg.sessionID,
           info: msg,
         }),
       )
@@ -768,7 +769,9 @@ export namespace Session {
         .run()
       Database.effect(() =>
         Bus.publish(MessageV2.Event.PartUpdated, {
+          sessionID: part.sessionID,
           part: structuredClone(part),
+          time: Date.now(),
         }),
       )
     })

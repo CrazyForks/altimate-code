@@ -682,6 +682,10 @@ export namespace ACP {
       }
     }
 
+    async listSessions(params: ListSessionsRequest): Promise<ListSessionsResponse> {
+      return this.unstable_listSessions(params)
+    }
+
     async unstable_listSessions(params: ListSessionsRequest): Promise<ListSessionsResponse> {
       try {
         const cursor = params.cursor ? Number(params.cursor) : undefined

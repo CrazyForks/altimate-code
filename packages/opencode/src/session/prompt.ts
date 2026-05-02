@@ -264,19 +264,21 @@ export namespace SessionPrompt {
     return s[sessionID].abort.signal
   }
 
-  export function cancel(sessionID: SessionID) {
+  // altimate_change start — SessionStatus.set became async in v1.4.0; await so idle state actually flushes
+  export async function cancel(sessionID: SessionID) {
     log.info("cancel", { sessionID })
     const s = state()
     const match = s[sessionID]
     if (!match) {
-      SessionStatus.set(sessionID, { type: "idle" })
+      await SessionStatus.set(sessionID, { type: "idle" })
       return
     }
     match.abort.abort()
     delete s[sessionID]
-    SessionStatus.set(sessionID, { type: "idle" })
+    await SessionStatus.set(sessionID, { type: "idle" })
     return
   }
+  // altimate_change end
 
   export const LoopInput = z.object({
     sessionID: SessionID.zod,
@@ -293,7 +295,9 @@ export namespace SessionPrompt {
       })
     }
 
-    using _ = defer(() => cancel(sessionID))
+    // altimate_change start — cancel() became async (SessionStatus.set is async); use `await using` for async dispose
+    await using _ = defer(() => cancel(sessionID))
+    // altimate_change end
 
     // Structured output state
     // Note: On session resumption, state is reset but outputFormat is preserved
@@ -328,11 +332,22 @@ export namespace SessionPrompt {
     let emergencySessionEndFired = false
     // altimate_change start — quality signal, tool chain, error fingerprint tracking
     let lastToolCategory = ""
+    // altimate_change start — agent_outcome diagnostic tracking
+    let lastToolName = ""
+    let lastMessageError = ""
+    // altimate_change end
     const toolChain: string[] = []
     let toolErrorCount = 0
     let errorRecoveryCount = 0
     let lastToolWasError = false
-    interface ErrorRecord { toolName: string; toolCategory: string; errorClass: string; errorHash: string; recovered: boolean; recoveryTool: string }
+    interface ErrorRecord {
+      toolName: string
+      toolCategory: string
+      errorClass: string
+      errorHash: string
+      recovered: boolean
+      recoveryTool: string
+    }
     const errorRecords: ErrorRecord[] = []
     let pendingError: Omit<ErrorRecord, "recovered" | "recoveryTool"> | null = null
     // altimate_change end
@@ -353,7 +368,9 @@ export namespace SessionPrompt {
     process.once("exit", emergencySessionEnd)
     // altimate_change end
     while (true) {
-      SessionStatus.set(sessionID, { type: "busy" })
+      // altimate_change start — SessionStatus.set became async in v1.4.0; await so busy state flushes before LLM call
+      await SessionStatus.set(sessionID, { type: "busy" })
+      // altimate_change end
       log.info("loop", { step, sessionID })
       if (abort.aborted) break
       let msgs = await MessageV2.filterCompacted(MessageV2.stream(sessionID))
@@ -644,10 +661,11 @@ export namespace SessionPrompt {
         const currentUserMsgId = lastUserMsg?.info.id
         if (planHasWritten && step > 1 && currentUserMsgId && currentUserMsgId !== planLastUserMsgId) {
           planLastUserMsgId = currentUserMsgId
-          const userText = lastUserMsg?.parts
-            .filter((p): p is MessageV2.TextPart => p.type === "text" && !("synthetic" in p && p.synthetic))
-            .map((p) => p.text.toLowerCase())
-            .join(" ") ?? ""
+          const userText =
+            lastUserMsg?.parts
+              .filter((p): p is MessageV2.TextPart => p.type === "text" && !("synthetic" in p && p.synthetic))
+              .map((p) => p.text.toLowerCase())
+              .join(" ") ?? ""
 
           if (planRevisionCount >= 5) {
             // Cap reached — track and inject a synthetic hint so the LLM informs the user
@@ -678,13 +696,46 @@ export namespace SessionPrompt {
 
             // Refinement qualifiers: if the user says "yes, but ..." or "approve, however ..."
             // they intend to refine, not approve. Check for these before pure approval.
-            const refinementQualifiers = [" but ", " however ", " except ", " change ", " modify ", " update ", " instead ", " although ", " with the following", " with these"]
+            const refinementQualifiers = [
+              " but ",
+              " however ",
+              " except ",
+              " change ",
+              " modify ",
+              " update ",
+              " instead ",
+              " although ",
+              " with the following",
+              " with these",
+            ]
             const hasRefinementQualifier = refinementQualifiers.some((q) => userText.includes(q))
 
-            const rejectionPhrases = ["don't", "stop", "reject", "not good", "not approve", "not approved", "disapprove", "undo", "abort", "start over", "wrong"]
+            const rejectionPhrases = [
+              "don't",
+              "stop",
+              "reject",
+              "not good",
+              "not approve",
+              "not approved",
+              "disapprove",
+              "undo",
+              "abort",
+              "start over",
+              "wrong",
+            ]
             // "no" as a standalone word to avoid matching "know", "notion", etc.
             const rejectionWords = ["no"]
-            const approvalPhrases = ["looks good", "proceed", "approved", "approve", "lgtm", "go ahead", "ship it", "yes", "perfect"]
+            const approvalPhrases = [
+              "looks good",
+              "proceed",
+              "approved",
+              "approve",
+              "lgtm",
+              "go ahead",
+              "ship it",
+              "yes",
+              "perfect",
+            ]
 
             const isRejectionPhrase = rejectionPhrases.some((phrase) => userText.includes(phrase))
             const isRejectionWord = rejectionWords.some((word) => {
@@ -694,10 +745,13 @@ export namespace SessionPrompt {
             const isRejection = isRejectionPhrase || isRejectionWord
             // Use word-boundary matching for approval phrases to avoid false positives
             // e.g. "this doesn't look good" should NOT match "looks good"
-            const isApproval = !isRejection && !hasRefinementQualifier && approvalPhrases.some((phrase) => {
-              const regex = new RegExp(`\\b${phrase.replace(/\s+/g, "\\s+")}\\b`, "i")
-              return regex.test(userText)
-            })
+            const isApproval =
+              !isRejection &&
+              !hasRefinementQualifier &&
+              approvalPhrases.some((phrase) => {
+                const regex = new RegExp(`\\b${phrase.replace(/\s+/g, "\\s+")}\\b`, "i")
+                return regex.test(userText)
+              })
             const action = isRejection ? "reject" : isApproval ? "approve" : "refine"
             Telemetry.track({
               type: "plan_revision",
@@ -798,9 +852,22 @@ export namespace SessionPrompt {
           if (userText.length > 0) {
             const { intent, confidence } = Telemetry.classifyTaskIntent(userText)
             const fp = Fingerprint.get()
-            const warehouseType = fp?.tags.find((t) =>
-              ["snowflake", "bigquery", "redshift", "databricks", "postgres", "mysql", "sqlite", "duckdb", "trino", "spark", "clickhouse"].includes(t),
-            ) ?? "unknown"
+            const warehouseType =
+              fp?.tags.find((t) =>
+                [
+                  "snowflake",
+                  "bigquery",
+                  "redshift",
+                  "databricks",
+                  "postgres",
+                  "mysql",
+                  "sqlite",
+                  "duckdb",
+                  "trino",
+                  "spark",
+                  "clickhouse",
+                ].includes(t),
+              ) ?? "unknown"
             Telemetry.track({
               type: "task_classified",
               timestamp: Date.now(),
@@ -839,10 +906,12 @@ export namespace SessionPrompt {
       // Build system prompt, adding structured output instruction if needed
       const skills = await SystemPrompt.skills(agent)
       // altimate_change start - unified context-aware injection for memory + training
-      const knowledgeInjection = Flag.ALTIMATE_DISABLE_MEMORY ? "" : await MemoryPrompt.inject(
-        UNIFIED_INJECTION_BUDGET,
-        { agent: agent.name, disableTraining: Flag.ALTIMATE_DISABLE_TRAINING },
-      )
+      const knowledgeInjection = Flag.ALTIMATE_DISABLE_MEMORY
+        ? ""
+        : await MemoryPrompt.inject(UNIFIED_INJECTION_BUDGET, {
+            agent: agent.name,
+            disableTraining: Flag.ALTIMATE_DISABLE_TRAINING,
+          })
       // altimate_change end
       const system = [
         ...(await SystemPrompt.environment(model)),
@@ -877,7 +946,7 @@ export namespace SessionPrompt {
         sessionID,
         system,
         messages: [
-          ...MessageV2.toModelMessages(msgs, model),
+          ...(await MessageV2.toModelMessages(msgs, model)),
           ...(isLastStep
             ? [
                 {
@@ -919,17 +988,33 @@ export namespace SessionPrompt {
       // altimate_change start — accumulate session metrics
       sessionTotalCost += processor.message.cost ?? 0
       const t = processor.message.tokens
-      sessionTotalTokens += (t.input + t.output + t.reasoning + t.cache.read + t.cache.write)
+      sessionTotalTokens += t.input + t.output + t.reasoning + t.cache.read + t.cache.write
       const stepParts = await MessageV2.parts(processor.message.id)
       toolCallCount += stepParts.filter((p) => p.type === "tool").length
       if (processor.message.error) sessionHadError = true
+      // altimate_change start — capture last message error for agent_outcome reason
+      if (processor.message.error) {
+        const err = processor.message.error as any
+        try {
+          const name = typeof err?.name === "string" ? err.name : "unknown"
+          const rawMessage = typeof err?.data?.message === "string" ? err.data.message : ""
+          const masked = rawMessage ? Telemetry.maskString(rawMessage).slice(0, 300) : ""
+          lastMessageError = masked ? `${name}: ${masked}` : String(name)
+        } catch {
+          lastMessageError = "unknown"
+        }
+      }
+      // altimate_change end
       // altimate_change start — quality signal + tool chain + error fingerprints
       const toolParts = stepParts.filter((p) => p.type === "tool")
       for (const part of toolParts) {
         if (part.type !== "tool") continue
-        const toolType = part.tool.startsWith("mcp__") ? "mcp" as const : "standard" as const
+        const toolType = part.tool.startsWith("mcp__") ? ("mcp" as const) : ("standard" as const)
         const toolCategory = Telemetry.categorizeToolName(part.tool, toolType)
         lastToolCategory = toolCategory
+        // altimate_change start — track last tool name for agent_outcome diagnostics
+        lastToolName = part.tool
+        // altimate_change end
         if (toolChain.length < 50) toolChain.push(part.tool)
         const isError = part.state?.status === "error"
         if (isError) {
@@ -939,7 +1024,8 @@ export namespace SessionPrompt {
             if (errorRecords.length < 200) errorRecords.push({ ...pendingError, recovered: false, recoveryTool: "" })
           }
           lastToolWasError = true
-          const errorMsg = part.state.status === "error" && typeof part.state.error === "string" ? part.state.error : "unknown"
+          const errorMsg =
+            part.state.status === "error" && typeof part.state.error === "string" ? part.state.error : "unknown"
           const masked = Telemetry.maskString(errorMsg).slice(0, 500)
           pendingError = {
             toolName: part.tool,
@@ -950,7 +1036,8 @@ export namespace SessionPrompt {
         } else {
           if (lastToolWasError && pendingError) {
             errorRecoveryCount++
-            if (errorRecords.length < 200) errorRecords.push({ ...pendingError, recovered: true, recoveryTool: part.tool })
+            if (errorRecords.length < 200)
+              errorRecords.push({ ...pendingError, recovered: true, recoveryTool: part.tool })
             pendingError = null
           }
           lastToolWasError = false
@@ -1040,6 +1127,25 @@ export namespace SessionPrompt {
       })
     }
     // altimate_change end — emit quality signal, tool chain, and error fingerprint events
+    // altimate_change start — populate agent_outcome diagnostic fields
+    const abortReason: string | null = abort.aborted
+      ? typeof abort.reason === "string"
+        ? abort.reason
+        : abort.reason instanceof Error
+          ? abort.reason.message
+          : abort.reason
+            ? "non_string_reason"
+            : null
+      : null
+    const lastErrorClass = errorRecords.length > 0 ? errorRecords[errorRecords.length - 1].errorClass : ""
+    const diag = Telemetry.deriveAgentOutcomeReason({
+      outcome,
+      lastToolName: lastToolName || null,
+      lastMessageError: lastMessageError || null,
+      abortReason,
+      lastErrorClass,
+    })
+    // altimate_change end
     Telemetry.track({
       type: "agent_outcome",
       timestamp: Date.now(),
@@ -1051,6 +1157,11 @@ export namespace SessionPrompt {
       cost: sessionTotalCost,
       compactions: compactionCount,
       outcome,
+      // altimate_change start — agent_outcome diagnostic fields
+      final_tool: diag.final_tool,
+      error_class: diag.error_class,
+      reason: diag.reason,
+      // altimate_change end
     })
     if (!emergencySessionEndFired) {
       emergencySessionEndFired = true
@@ -1185,7 +1296,8 @@ export namespace SessionPrompt {
       const execute = item.execute
       if (!execute) continue
 
-      const transformed = ProviderTransform.schema(input.model, asSchema(item.inputSchema).jsonSchema)
+      const schemaResult = asSchema(item.inputSchema) as { jsonSchema: any }
+      const transformed = ProviderTransform.schema(input.model, schemaResult.jsonSchema)
       item.inputSchema = jsonSchema(transformed)
       // Wrap execute to add plugin hooks and format output
       item.execute = async (args, opts) => {
@@ -1299,23 +1411,42 @@ export namespace SessionPrompt {
         }
       },
       toModelOutput(result) {
+        // result.output is the tool's return value (an object with `output: string`).
+        const value = typeof result.output === "string" ? result.output : ((result.output as any)?.output ?? "")
         return {
           type: "text",
-          value: result.output,
+          value,
         }
       },
     })
   }
 
   async function createUserMessage(input: PromptInput) {
-    const agent = await Agent.get(input.agent ?? (await Agent.defaultAgent()))
+    const agentName = input.agent ?? (await Agent.defaultAgent())
+    const agent = await Agent.get(agentName)
+    if (!agent) {
+      const available = await Agent.list().then((agents) =>
+        agents.filter((a: any) => !a.hidden).map((a: any) => a.name),
+      )
+      const hint = available.length ? ` Available agents: ${available.join(", ")}` : ""
+      throw new NamedError.Unknown({ message: `Agent not found: "${agentName}".${hint}` })
+    }
 
     const model = input.model ?? agent.model ?? (await lastModel(input.sessionID))
+    // Use agent.variant only when the user did not provide an explicit model
+    // override; if the user picked a different model, agent.variant doesn't apply.
+    const useAgentModel = !input.model
     const full =
-      !input.variant && agent.variant
+      !input.variant && agent.variant && useAgentModel
         ? await Provider.getModel(model.providerID, model.modelID).catch(() => undefined)
         : undefined
-    const variant = input.variant ?? (agent.variant && full?.variants?.[agent.variant] ? agent.variant : undefined)
+    const variant =
+      input.variant ??
+      (agent.variant && useAgentModel
+        ? full?.variants?.[agent.variant]
+          ? agent.variant
+          : agent.variant // accept agent variant even if model registry has no variants entry
+        : undefined)
 
     const info: MessageV2.Info = {
       id: input.messageID ?? MessageID.ascending(),
@@ -1326,7 +1457,7 @@ export namespace SessionPrompt {
       },
       tools: input.tools,
       agent: agent.name,
-      model,
+      model: variant ? { ...model, variant } : model,
       system: input.system,
       format: input.format,
       variant,
@@ -2117,6 +2248,16 @@ NOTE: At any point in time through this workflow you should feel free to ask the
   export async function command(input: CommandInput) {
     log.info("command", input)
     const command = await Command.get(input.command)
+    if (!command) {
+      const all = await Command.list()
+      const names = all
+        .map((c: any) => c.name)
+        .filter(Boolean)
+        .sort()
+      throw new NamedError.Unknown({
+        message: `Command not found: "${input.command}". Available: ${names.join(", ") || "(none)"}`,
+      })
+    }
     const agentName = command.agent ?? input.agent ?? (await Agent.defaultAgent())
 
     const raw = input.arguments.match(argsRegex) ?? []
@@ -2142,7 +2283,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     const usesArgumentsPlaceholder = templateCommand.includes("$ARGUMENTS")
     // altimate_change start — allow $$ARGUMENTS to produce literal $ARGUMENTS in output
     const ESCAPE_SENTINEL = "\x00ESCAPED_DOLLAR_ARGUMENTS\x00"
-    let template = withArgs.replaceAll("$$ARGUMENTS", ESCAPE_SENTINEL).replaceAll("$ARGUMENTS", input.arguments).replaceAll(ESCAPE_SENTINEL, "$ARGUMENTS")
+    let template = withArgs
+      .replaceAll("$$ARGUMENTS", ESCAPE_SENTINEL)
+      .replaceAll("$ARGUMENTS", input.arguments)
+      .replaceAll(ESCAPE_SENTINEL, "$ARGUMENTS")
     // altimate_change end
 
     // If command doesn't explicitly handle arguments (no $N or $ARGUMENTS placeholders)
@@ -2316,16 +2460,19 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         },
         ...(hasOnlySubtaskParts
           ? [{ role: "user" as const, content: subtaskParts.map((p) => p.prompt).join("\n") }]
-          : MessageV2.toModelMessages(contextMessages, model)),
+          : await MessageV2.toModelMessages(contextMessages, model)),
       ],
     })
-    const text = await result.text.catch((err) => log.error("failed to generate title", { error: err }))
+    const text = await Promise.resolve(result.text).catch((err: unknown) => {
+      log.error("failed to generate title", { error: err })
+      return undefined
+    })
     if (text) {
       const cleaned = text
         .replace(/<think>[\s\S]*?<\/think>\s*/g, "")
         .split("\n")
-        .map((line) => line.trim())
-        .find((line) => line.length > 0)
+        .map((line: string) => line.trim())
+        .find((line: string) => line.length > 0)
       if (!cleaned) return
 
       const title = cleaned.length > 100 ? cleaned.substring(0, 97) + "..." : cleaned
