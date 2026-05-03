@@ -65,6 +65,7 @@ no hallucinated SQL advice, no guessing at schema, no missed PII.
 | Column-level lineage | None | Automatic from SQL, any dialect |
 | Schema-aware autocomplete | None | Live-indexed warehouse metadata |
 | Cross-dialect SQL translation | None | Snowflake ↔ BigQuery ↔ Databricks ↔ Redshift |
+| Cross-dialect data validation | None | Row-by-row diff across 12 warehouses, 5 algorithms |
 | FinOps & cost analysis | None | Credits, expensive queries, right-sizing |
 | PII detection | None | 30+ regex patterns, 15 categories |
 | dbt integration | Basic file editing | Manifest parsing, test gen, model scaffolding, lineage |
@@ -104,6 +105,12 @@ altimate-code is a fork of [OpenCode](https://github.com/anomalyco/opencode) reb
 
 # Get a cost report for your Snowflake account
 > /cost-report
+
+# Compare a Snowflake table to a BigQuery copy, row-by-row, without moving data
+> /data-parity prod.orders (Snowflake) vs. analytics.orders (BigQuery), id key
+
+# Generate dbt 1.8 unit tests for a model with CASE/WHEN and JOINs
+> /dbt-unit-tests for models/marts/fct_revenue.sql
 ```
 
 ## Key Features
@@ -137,6 +144,15 @@ Built-in observability for AI interactions — trace tool calls, token usage, an
 ### AI Teammate Training
 Teach your AI teammate project-specific patterns, naming conventions, and best practices. The training system learns from examples and applies rules automatically across sessions.
 
+### Cross-Dialect Data Parity
+Compare tables or query results row-by-row across 12 warehouses with the `/data-parity` skill or `data_diff` tool. Five algorithms — `auto`, `joindiff`, `hashdiff` (any-scale, no data egress), `profile` (column-stats only), and `cascade`. Date / numeric / categorical partitioning so 100M+ row tables diff in independent batches. Auto-discovers comparable columns and excludes audit/timestamp columns by name and catalog default.
+
+### Automated dbt Unit Tests
+Generate dbt 1.8+ unit tests from your terminal with `/dbt-unit-tests` or the `dbt_unit_test_gen` tool. Detects testable SQL constructs (CASE/WHEN, JOINs, NULLs, window functions, division, incremental models) and assembles complete YAML with type-correct mock data across 7 dialects.
+
+### GitLab MR Review
+Review merge requests directly from your terminal with `altimate gitlab review <MR_URL>`. Self-hosted GitLab instances and nested group paths supported. Comment deduplication updates an existing review instead of posting duplicates. Companion to the existing GitHub PR review flow.
+
 ## Agent Modes
 
 Each mode has scoped permissions, tool access, and SQL write-access control.
@@ -151,7 +167,7 @@ Each mode has scoped permissions, tool access, and SQL write-access control.
 
 ## Supported Warehouses
 
-Snowflake · BigQuery · Databricks · PostgreSQL · Redshift · ClickHouse · DuckDB · MySQL · SQL Server · Oracle · SQLite · MongoDB
+Snowflake · BigQuery · Databricks · PostgreSQL · Redshift · ClickHouse · DuckDB · MySQL · SQL Server (incl. Microsoft Fabric) · Oracle · SQLite · MongoDB
 
 First-class support with schema indexing, query execution, and metadata introspection. SSH tunneling available for secure connections.
 
@@ -159,11 +175,13 @@ First-class support with schema indexing, query execution, and metadata introspe
 
 Model-agnostic — bring your own provider or run locally.
 
-Anthropic · OpenAI · Google Gemini · Google Vertex AI · Amazon Bedrock · Azure OpenAI · Mistral · Groq · DeepInfra · Cerebras · Cohere · Together AI · Perplexity · xAI · OpenRouter · Ollama · GitHub Copilot
+Altimate LLM Gateway · Anthropic · OpenAI · Google Gemini · Google Vertex AI · Amazon Bedrock · Azure OpenAI · Databricks AI Gateway · Snowflake Cortex · Mistral · Groq · DeepInfra · Cerebras · Cohere · Together AI · Perplexity · xAI · OpenRouter · LM Studio · Ollama · GitHub Copilot
 
 ## Skills
 
-altimate ships with built-in skills for every common data engineering task — type `/` in the TUI to browse available skills and get autocomplete. No memorization required.
+altimate ships with 19 built-in skills — type `/` in the TUI to browse and get autocomplete. No memorization required.
+
+`/sql-review` · `/sql-translate` · `/data-parity` · `/pii-audit` · `/cost-report` · `/lineage-diff` · `/query-optimize` · `/data-viz` · `/dbt-develop` · `/dbt-test` · `/dbt-unit-tests` · `/dbt-docs` · `/dbt-analyze` · `/dbt-troubleshoot` · `/schema-migration` · `/teach` · `/train` · `/training-status` · `/altimate-setup`
 
 ## Community & Contributing
 
@@ -178,6 +196,17 @@ Contributions welcome — docs, SQL rules, warehouse connectors, and TUI improve
 
 ## Changelog
 
+- **v0.6.1** (April 2026) — BigQuery finops multi-region support and column-name fixes
+- **v0.6.0** (April 2026) — `data_diff` cross-dialect data parity (12 warehouses, 5 algorithms), MSSQL/Microsoft Fabric support, Databricks AI Gateway provider (11 foundation models)
+- **v0.5.21** (April 2026) — automated dbt unit test generation (`/dbt-unit-tests`, dbt 1.8+, 7 dialects), dialect-aware `sql_explain`
+- **v0.5.20** (April 2026) — Altimate model auto-selection, connection-string password URL-encoding, trace pagination
+- **v0.5.19** (April 2026) — `${VAR}` env-var interpolation in configs, atomic trace file writes
+- **v0.5.18** (April 2026) — native GitLab MR review (`altimate gitlab review`), Altimate LLM Gateway provider, glob tool hardening, MCP config normalization
+- **v0.5.17** (April 2026) — custom `DBT_PROFILES_DIR` resolution, ClickHouse driver hardening
+- **v0.5.16** (March 2026) — ClickHouse warehouse driver, agent loop detection
+- **v0.5.15** (March 2026) — plan-agent two-step approach + refinement, feature discovery, SQL classifier security hardening
+- **v0.5.14** (March 2026) — MongoDB driver, skill follow-up suggestions, Verdaccio sanity suite, `upstream_fix:` marker convention
+- **v0.5.12** (March 2026) — `altimate-dbt` auto-discover config (Windows-compatible), local E2E sanity test harness
 - **v0.5.11** (March 2026) — `altimate-code check` CLI command, data-viz improvements, Codespaces support, session tracing, 52 CI test fix
 - **v0.5.7** (March 2026) — impact analysis tool, training import, CI check command, `--max-turns` budget, LM Studio provider
 - **v0.5.6** (March 2026) — skill CLI & TUI management, GitHub skill install, Snowflake Cortex provider
