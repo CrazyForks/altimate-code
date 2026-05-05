@@ -293,7 +293,9 @@ export namespace ProviderError {
       return {
         type: "context_overflow",
         message: m,
+        // altimate_change start — cap responseBody on context_overflow path
         responseBody: capResponseBody(input.error.responseBody),
+        // altimate_change end
       }
     }
 
@@ -318,7 +320,9 @@ export namespace ProviderError {
         ? isOpenAiErrorRetryable(input.error)
         : input.error.isRetryable,
       responseHeaders: input.error.responseHeaders,
+      // altimate_change start — cap responseBody on api_error path
       responseBody: capResponseBody(input.error.responseBody),
+      // altimate_change end
       metadata,
     }
   }
