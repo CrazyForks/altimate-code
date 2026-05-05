@@ -314,7 +314,9 @@ export namespace ProviderError {
     // altimate_change end
     return {
       type: "api_error",
+      // altimate_change start — finalMessage carries the optional /models hint
       message: finalMessage,
+      // altimate_change end
       statusCode: input.error.statusCode,
       isRetryable: input.providerID.startsWith("openai")
         ? isOpenAiErrorRetryable(input.error)
