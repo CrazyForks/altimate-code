@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-05-05
+
+A focused pass on provider error handling, surfaced by a 5-persona pre-release review.
+
+### Fixed
+
+- **Provider 4xx errors now show the inner error message instead of a raw JSON dump.** When any provider returned the standard `{error: {message, type, code}}` shape (OpenAI, Azure OpenAI, OpenRouter, etc.), `parseAPICallError`'s extraction chain short-circuited on the truthy parent `error` object, the `typeof errMsg === "string"` guard rejected it, and the parser fell through to dumping the raw response body — which appeared as `APIError: Bad Request: {?:?}` after telemetry redaction collapsed string values to `?`. Telemetry caught users retrying broken model selections 3+ times in the same session because the surfaced error gave no clue about the cause. Users now see actionable text such as `APIError: Bad Request: The model 'gpt-5-codex' does not exist or you do not have access to it.` The OR-chain is replaced with explicit-typeof ternaries that mirror `parseStreamError`'s pattern, so a truthy non-string at any tier cannot block a valid string further down the chain. (#789, closes #788)
+- **Bedrock / AWS Lambda `errorMessage` shape is now extracted.** AWS APIs that return `{errorMessage: "...", errorType: "..."}` (Lambda style) previously fell through the OpenAI/Anthropic-shaped chain to a raw-body dump. Added `body.errorMessage` to the extraction ladder in both `parseAPICallError` and `parseStreamError`.
+- **Streaming error path no longer dumps `Unknown: {"type":"error",...}` for non-OpenAI codes.** `parseStreamError` previously handled only 4 OpenAI error codes (`context_length_exceeded`, `insufficient_quota`, `usage_not_included`, `invalid_prompt`); everything else fell through to `JSON.stringify(e)`. Added a default fallback that runs the same string-typeof chain as `parseAPICallError`, so any extractable provider message becomes a clean api_error.
+- **`model_not_found` no longer triggers a silent retry storm.** OpenAI 404s are forced retryable in general (some legitimate models 404 transiently), but `error.code === "model_not_found"` now short-circuits to `isRetryable: false` — the user sees the actionable error on attempt 1 instead of after 5 silent retries.
+
+### Added
+
+- **`altimate-code models` discoverability hint on model-not-found errors.** When `error.code === "model_not_found"`, the surfaced message now ends with `Run \`altimate-code models\` to see available models.` so the next step is one command away.
+- **Provider-API-Errors troubleshooting reference** at `docs/docs/reference/troubleshooting.md` covering model-not-found, unauthorized, rate-limited, context-overflow, and HTML-page error classes.
+
+### Privacy
+
+- **`Telemetry.maskString` now redacts email addresses and internal hostnames.** Pre-fix, the JSON-quote masking rule incidentally collapsed everything inside provider error JSON to `?`. The provider-error fix unwraps that JSON, which means provider-side identifiers (caller emails, internal `*.local` / `*.internal` / RFC1918 endpoints) now flow as plain English. Added explicit redaction patterns so they're masked before reaching telemetry, the share backend, or local session storage. `sk-…` and `Bearer …` token redaction is unchanged.
+- **`metadata.url` on `MessageV2.APIError` masks internal hosts.** When `error.url` points at `localhost`, `*.local`, `*.internal`, an RFC1918 IPv4, IPv6 loopback / ULA / link-local, or the AWS IMDS address (`169.254.169.254`), the host is rewritten to `internal-host.redacted` before the URL lands on the parsed error. Basic-auth userinfo (`user:pass@…`) is also stripped on the same code path so a credential in a misconfigured proxy URL does not survive the host mask. Public provider URLs are preserved verbatim for debugging.
+- **`responseBody` is capped at 4KB** at the `parseAPICallError` boundary. Without this, a hostile or verbose gateway could persist a 100KB+ body into local storage and (for shared sessions) the share backend.
+
+### Testing
+
+- 40 adversarial tests covering JSON-scalar bodies, prototype-pollution attempts, 100KB error messages, malformed JSON, every-tier null/numeric extraction, Bedrock `errorMessage` precedence, the `parseStreamError` fallback for unknown codes, the `model_not_found` retry-storm carve-out, the `altimate models` hint, the responseBody cap, the metadata.url internal-host masking (including IPv6 loopback/ULA, AWS IMDS, basic-auth userinfo strip, RFC1918 boundary checks, and lookalike-hostname guards), and the new email / internal-host `maskString` patterns.
+
 ## [0.7.0] - 2026-05-03
 
 ### Changed

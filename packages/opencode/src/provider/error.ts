@@ -28,6 +28,17 @@ export namespace ProviderError {
   function isOpenAiErrorRetryable(e: APICallError) {
     const status = e.statusCode
     if (!status) return e.isRetryable
+    // altimate_change start — upstream_fix: don't retry-storm on model_not_found.
+    // OpenAI 404s are forced retryable below because some legitimate models 404
+    // transiently, but `model_not_found` will never recover; retrying 5x just
+    // delays the user seeing the (now-readable) error message.
+    if (status === 404) {
+      try {
+        const body = e.responseBody ? JSON.parse(e.responseBody) : null
+        if (body?.error?.code === "model_not_found") return false
+      } catch {}
+    }
+    // altimate_change end
     // openai sometimes returns 404 for models that are actually available
     return status === 404 || e.isRetryable
   }
@@ -71,9 +82,11 @@ export namespace ProviderError {
             ? body.error.message
             : typeof body.message === "string"
               ? body.message
-              : typeof body.error === "string"
-                ? body.error
-                : undefined
+              : typeof body.errorMessage === "string"
+                ? body.errorMessage
+                : typeof body.error === "string"
+                  ? body.error
+                  : undefined
         if (errMsg) return `${msg}: ${errMsg}`
         // altimate_change end
       } catch {}
@@ -161,6 +174,32 @@ export namespace ProviderError {
           responseBody,
         }
     }
+
+    // altimate_change start — upstream_fix: extend extraction to non-OpenAI error
+    // codes. The switch above only handles 4 OpenAI shapes; everything else fell
+    // through to `JSON.stringify(e)` in the caller (session/message-v2.ts), which
+    // showed users `Unknown: {"type":"error",...}`. Apply the same string-typeof
+    // chain we use in parseAPICallError so any extractable provider message lands
+    // as a clean api_error.
+    const fallbackMsg =
+      typeof body?.error?.message === "string"
+        ? body.error.message
+        : typeof body?.message === "string"
+          ? body.message
+          : typeof body?.errorMessage === "string"
+            ? body.errorMessage
+            : typeof body?.error === "string"
+              ? body.error
+              : undefined
+    if (fallbackMsg) {
+      return {
+        type: "api_error",
+        message: fallbackMsg,
+        isRetryable: false,
+        responseBody,
+      }
+    }
+    // altimate_change end
   }
 
   export type ParsedAPICallError =
@@ -179,6 +218,56 @@ export namespace ProviderError {
         metadata?: Record<string, string>
       }
 
+  // altimate_change start — cap responseBody at 4KB before it lands on a
+  // MessageV2.APIError. Without this cap, a hostile gateway returning a 100KB
+  // body (or just verbose providers like LiteLLM) would inflate local storage,
+  // share-backend uploads, and diagnostic dumps.
+  const RESPONSE_BODY_CAP = 4096
+  function capResponseBody(body: string | undefined): string | undefined {
+    if (!body) return body
+    if (body.length <= RESPONSE_BODY_CAP) return body
+    return body.slice(0, RESPONSE_BODY_CAP) + `…[truncated ${body.length - RESPONSE_BODY_CAP} chars]`
+  }
+  // altimate_change end
+
+  // altimate_change start — mask host portion of metadata.url when it points
+  // at an internal endpoint (RFC1918, *.local, *.internal, localhost, IPv6
+  // loopback / ULA / link-local, AWS IMDS). Keeps public provider URLs intact
+  // for debugging; redacts customer-internal ones (and clears any basic-auth
+  // userinfo so a credential in a misconfigured proxy URL doesn't survive the
+  // host mask) before the URL flows into local storage / share / telemetry.
+  function maskInternalHost(url: string): string {
+    try {
+      const u = new URL(url)
+      // u.hostname keeps IPv6 brackets (e.g. "[::1]"); strip for regex match.
+      const host = u.hostname.replace(/^\[|\]$/g, "")
+      const isInternal =
+        host === "localhost" ||
+        host.endsWith(".local") ||
+        host.endsWith(".internal") ||
+        host.endsWith(".localhost") ||
+        /^127\./.test(host) ||
+        /^10\./.test(host) ||
+        /^192\.168\./.test(host) ||
+        /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
+        /^169\.254\./.test(host) || // AWS IMDS / link-local IPv4
+        host === "::1" || // IPv6 loopback
+        /^fc[0-9a-f]{2}:/i.test(host) || // IPv6 ULA (RFC4193 fc00::/8)
+        /^fd[0-9a-f]{2}:/i.test(host) || // IPv6 ULA (RFC4193 fd00::/8)
+        /^fe80:/i.test(host) // IPv6 link-local
+      if (isInternal) {
+        u.username = ""
+        u.password = ""
+        u.hostname = "internal-host.redacted"
+        return u.toString()
+      }
+      return url
+    } catch {
+      return url
+    }
+  }
+  // altimate_change end
+
   export function parseAPICallError(input: { providerID: ProviderID; error: APICallError }): ParsedAPICallError {
     const m = message(input.providerID, input.error)
     // Check responseBody for context_length_exceeded code (e.g., OpenAI-style errors)
@@ -188,20 +277,32 @@ export namespace ProviderError {
       return {
         type: "context_overflow",
         message: m,
-        responseBody: input.error.responseBody,
+        responseBody: capResponseBody(input.error.responseBody),
       }
     }
 
-    const metadata = input.error.url ? { url: input.error.url } : undefined
+    // altimate_change start — append a `models` discoverability hint when the
+    // error code is model_not_found. Pairs with the retry-storm carve-out in
+    // isOpenAiErrorRetryable so the user sees the hint on the first attempt
+    // instead of after 5 silent retries.
+    let finalMessage = m
+    if (codeFromBody === "model_not_found") {
+      finalMessage = `${m} Run \`altimate models\` to see available models.`
+    }
+    // altimate_change end
+
+    // altimate_change start — mask internal hostnames in metadata.url
+    const metadata = input.error.url ? { url: maskInternalHost(input.error.url) } : undefined
+    // altimate_change end
     return {
       type: "api_error",
-      message: m,
+      message: finalMessage,
       statusCode: input.error.statusCode,
       isRetryable: input.providerID.startsWith("openai")
         ? isOpenAiErrorRetryable(input.error)
         : input.error.isRetryable,
       responseHeaders: input.error.responseHeaders,
-      responseBody: input.error.responseBody,
+      responseBody: capResponseBody(input.error.responseBody),
       metadata,
     }
   }

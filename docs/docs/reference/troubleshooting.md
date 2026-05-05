@@ -30,6 +30,30 @@ altimate --print-logs --log-level DEBUG
 3. If behind a proxy, set `HTTPS_PROXY` (see [Network](network.md))
 4. Try a different provider to isolate the issue
 
+### Provider API Errors
+
+**Symptoms:** `APIError: <status>: <message>` shown in chat output. Common forms:
+
+- `APIError: Bad Request: The model 'foo' does not exist or you do not have access to it.`
+- `APIError: Unauthorized: Invalid API key`
+- `APIError: Rate limit exceeded`
+
+As of v0.7.1, altimate-code surfaces the **inner provider message** instead of dumping the raw JSON body. The status prefix (`Bad Request:`, `Unauthorized:`, etc.) comes from the provider's HTTP status code; everything after the colon is the provider's text verbatim.
+
+**Solutions by error class:**
+
+1. **Model not found** (`APIError: Bad Request: The model '<name>' does not exist...`) — list the models your provider currently exposes and re-run with one of them:
+   ```bash
+   altimate-code models <provider>
+   ```
+   `model_not_found` errors no longer auto-retry; the message you see is the first attempt, not the fifth.
+2. **Unauthorized / 401** — re-run `altimate-code auth login <provider>` and re-issue the request.
+3. **Rate limited / 429** — altimate-code automatically retries on rate-limit responses (including plain-text 429s from Alibaba/DashScope). If you keep hitting rate limits, lower `parallel_tool_calls` or switch to a less-saturated model.
+4. **Context overflow** — switch to a larger-context model or trim earlier turns with `/compact`. Detection covers Anthropic, Bedrock, OpenAI, Gemini, xAI, Groq, OpenRouter, DeepSeek, Copilot, llama.cpp, LM Studio, MiniMax, Kimi, Moonshot, Azure OpenAI, and HTTP 413.
+5. **HTML page returned** — usually a gateway/proxy error. The CLI returns a friendly hint pointing at `altimate-code auth login` rather than dumping the raw HTML.
+
+**Privacy note:** error messages flow through the same redaction layer as everything else (`sk-…`, `Bearer …`, email addresses, and `*.local` / `*.internal` / RFC1918 hostnames are masked before reaching telemetry). Internal-host URLs in `metadata.url` are also redacted before they reach local storage or shared sessions.
+
 ### Tool Execution Errors
 
 **Symptoms:** "No native handler" or tool execution failures for data engineering tools.

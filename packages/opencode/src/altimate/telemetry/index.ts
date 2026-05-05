@@ -1060,6 +1060,13 @@ export namespace Telemetry {
     return s
       .replace(/sk-(?:ant-)?[A-Za-z0-9_-]{20,}/g, "sk-***")
       .replace(/Bearer\s+[A-Za-z0-9._-]{20,}/gi, "Bearer ***")
+      // Email addresses — providers occasionally echo caller identity in error text.
+      .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, "<email>")
+      // Internal hostnames in URLs — *.local / *.internal / localhost / RFC1918 IPs.
+      // The provider-error fix in v0.7.1 unwraps inner messages that previously
+      // got quote-shredded into `?` by the JSON dump path; this preserves that
+      // incidental privacy shield for the most common internal identifiers.
+      .replace(/\bhttps?:\/\/(?:localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+|[A-Za-z0-9.-]+\.(?:local|internal))(?::\d+)?[\w/.?=&%-]*/gi, "<internal-host>")
       .replace(/'(?:[^'\\]|\\.)*'/g, "?")
       .replace(/"(?:[^"\\]|\\.)*"/g, "?")
       .replace(/\s+/g, " ")
