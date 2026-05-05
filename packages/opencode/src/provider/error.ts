@@ -72,11 +72,17 @@ export namespace ProviderError {
 
       try {
         const body = JSON.parse(e.responseBody)
-        // altimate_change start — upstream_fix: OpenAI errors use {error: {message}} shape;
-        // the original `body.message || body.error || body.error?.message` short-circuits on
-        // the parent object, fails the typeof string guard, and dumps the raw body. Use an
-        // explicit-typeof ternary so a truthy non-string at any level can't block a valid
-        // string further down the chain (matches parseStreamError's pattern below).
+        // altimate_change start — upstream_fix: extract provider error messages
+        // across the four shapes in the wild:
+        //   1. {error: {message: "..."}}  — OpenAI / Azure OpenAI / OpenRouter
+        //   2. {message: "..."}           — Anthropic-style top-level
+        //   3. {errorMessage: "..."}      — Bedrock / AWS Lambda
+        //   4. {error: "..."}             — legacy plain-string shape
+        // The original `body.message || body.error || body.error?.message` short-
+        // circuited on a truthy parent object, failed the `typeof === "string"`
+        // guard, and dumped the raw body. Use an explicit-typeof ternary so a
+        // truthy non-string at any tier can't block a valid string further down
+        // the chain (matches parseStreamError's pattern below).
         const errMsg =
           typeof body.error?.message === "string"
             ? body.error.message
@@ -230,17 +236,26 @@ export namespace ProviderError {
   }
   // altimate_change end
 
-  // altimate_change start — mask host portion of metadata.url when it points
-  // at an internal endpoint (RFC1918, *.local, *.internal, localhost, IPv6
-  // loopback / ULA / link-local, AWS IMDS). Keeps public provider URLs intact
-  // for debugging; redacts customer-internal ones (and clears any basic-auth
-  // userinfo so a credential in a misconfigured proxy URL doesn't survive the
-  // host mask) before the URL flows into local storage / share / telemetry.
+  // altimate_change start — sanitize metadata.url before it lands on the
+  // parsed error. Two transforms are applied:
+  //   (1) basic-auth userinfo (`user:pass@…`) is stripped on every URL,
+  //       internal or public — a credential in a misconfigured proxy URL
+  //       must not flow into telemetry / local storage / share regardless
+  //       of where the URL points.
+  //   (2) the hostname is rewritten to `internal-host.redacted` if it
+  //       matches an internal endpoint (RFC1918, *.local, *.internal,
+  //       localhost, *.localhost, IPv6 loopback / ULA / link-local, or
+  //       the AWS IMDS address 169.254.169.254). Public provider URLs
+  //       are otherwise preserved for debugging.
   function maskInternalHost(url: string): string {
     try {
       const u = new URL(url)
       // u.hostname keeps IPv6 brackets (e.g. "[::1]"); strip for regex match.
       const host = u.hostname.replace(/^\[|\]$/g, "")
+      const hadCredentials = u.username !== "" || u.password !== ""
+      // Always clear userinfo — the credential is the riskier part of the URL.
+      u.username = ""
+      u.password = ""
       const isInternal =
         host === "localhost" ||
         host.endsWith(".local") ||
@@ -256,12 +271,13 @@ export namespace ProviderError {
         /^fd[0-9a-f]{2}:/i.test(host) || // IPv6 ULA (RFC4193 fd00::/8)
         /^fe80:/i.test(host) // IPv6 link-local
       if (isInternal) {
-        u.username = ""
-        u.password = ""
         u.hostname = "internal-host.redacted"
         return u.toString()
       }
-      return url
+      // No host change but we may have removed credentials — re-serialize
+      // only if userinfo was present, otherwise return the original string
+      // so URLs round-trip untouched (preserves trailing slashes, casing).
+      return hadCredentials ? u.toString() : url
     } catch {
       return url
     }

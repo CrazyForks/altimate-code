@@ -44,15 +44,15 @@ As of v0.7.1, altimate-code surfaces the **inner provider message** instead of d
 
 1. **Model not found** (`APIError: Bad Request: The model '<name>' does not exist...`) — list the models your provider currently exposes and re-run with one of them:
    ```bash
-   altimate-code models <provider>
+   altimate models <provider>
    ```
    `model_not_found` errors no longer auto-retry; the message you see is the first attempt, not the fifth.
-2. **Unauthorized / 401** — re-run `altimate-code auth login <provider>` and re-issue the request.
+2. **Unauthorized / 401** — re-run `altimate auth login <provider>` and re-issue the request.
 3. **Rate limited / 429** — altimate-code automatically retries on rate-limit responses (including plain-text 429s from Alibaba/DashScope). If you keep hitting rate limits, lower `parallel_tool_calls` or switch to a less-saturated model.
 4. **Context overflow** — switch to a larger-context model or trim earlier turns with `/compact`. Detection covers Anthropic, Bedrock, OpenAI, Gemini, xAI, Groq, OpenRouter, DeepSeek, Copilot, llama.cpp, LM Studio, MiniMax, Kimi, Moonshot, Azure OpenAI, and HTTP 413.
-5. **HTML page returned** — usually a gateway/proxy error. The CLI returns a friendly hint pointing at `altimate-code auth login` rather than dumping the raw HTML.
+5. **HTML page returned** — usually a gateway/proxy error. The CLI returns a friendly hint pointing at `altimate auth login` rather than dumping the raw HTML.
 
-**Privacy note:** error messages flow through the same redaction layer as everything else (`sk-…`, `Bearer …`, email addresses, and `*.local` / `*.internal` / RFC1918 hostnames are masked before reaching telemetry). Internal-host URLs in `metadata.url` are also redacted before they reach local storage or shared sessions.
+**Privacy note:** error messages flow through the same redaction layer as everything else (`sk-…`, `Bearer …`, email addresses, and `*.local` / `*.internal` / RFC1918 / IPv6 loopback / ULA / link-local / AWS IMDS hostnames are masked before reaching telemetry). Internal-host URLs in `metadata.url` are also redacted before they reach local storage or shared sessions, and basic-auth userinfo (`user:pass@…`) is stripped from every URL regardless of whether the host is internal.
 
 ### Tool Execution Errors
 

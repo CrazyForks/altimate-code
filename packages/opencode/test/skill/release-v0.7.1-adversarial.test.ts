@@ -670,6 +670,28 @@ describe("parseAPICallError — metadata.url masking for internal hosts", () => 
       expect(result.metadata?.url).toBe("https://attacker-localhost.com/exfil")
     }
   })
+
+  test("basic-auth userinfo on a PUBLIC host is also stripped", () => {
+    // Pre cubic-bot review: userinfo was only cleared for internal hosts.
+    // Credentials in a public URL are arguably more dangerous (they're real
+    // keys, not just a misconfigured gateway), so userinfo strip runs
+    // regardless of internal/public classification.
+    const result = ProviderError.parseAPICallError({
+      providerID: "openai" as any,
+      error: makeAPICallError({
+        message: "Bad Request",
+        statusCode: 400,
+        url: "https://user:hunter2@api.openai.com/v1/chat",
+      }),
+    })
+    expect(result.type).toBe("api_error")
+    if (result.type === "api_error") {
+      expect(result.metadata?.url).not.toContain("hunter2")
+      expect(result.metadata?.url).not.toContain("user:")
+      // Public host preserved; only userinfo redacted.
+      expect(result.metadata?.url).toContain("api.openai.com")
+    }
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -706,5 +728,37 @@ describe("Telemetry.maskString — email and internal-host patterns", () => {
     const out = Telemetry.maskString("Auth failed with sk-abcdefghij1234567890XX")
     expect(out).not.toContain("sk-abcdefghij1234567890XX")
     expect(out).toContain("sk-***")
+  })
+
+  test("AWS IMDS URL (169.254.169.254) is masked", () => {
+    const out = Telemetry.maskString("Cannot reach http://169.254.169.254/latest/meta-data/")
+    expect(out).not.toContain("169.254.169.254")
+    expect(out).toContain("<internal-host>")
+  })
+
+  test("IPv6 loopback URL is masked", () => {
+    const out = Telemetry.maskString("Connection refused at http://[::1]:8080/admin")
+    expect(out).not.toContain("[::1]")
+    expect(out).toContain("<internal-host>")
+  })
+
+  test("IPv6 ULA (fc00::) URL is masked", () => {
+    const out = Telemetry.maskString("Backend down: http://[fc00::1]/v1")
+    expect(out).not.toContain("fc00")
+    expect(out).toContain("<internal-host>")
+  })
+
+  test("IPv6 link-local (fe80::) URL is masked", () => {
+    const out = Telemetry.maskString("Probe failed http://[fe80::1%25eth0]/x")
+    expect(out).not.toContain("fe80")
+    expect(out).toContain("<internal-host>")
+  })
+
+  test("query-string with `+` and `#` does not leak past internal-host marker", () => {
+    // Char class previously omitted +/#/,/; — secrets after `?` survived.
+    const out = Telemetry.maskString("Failed http://10.0.0.1/x?token=foo+bar#frag")
+    expect(out).not.toContain("foo+bar")
+    expect(out).not.toContain("#frag")
+    expect(out).toContain("<internal-host>")
   })
 })
