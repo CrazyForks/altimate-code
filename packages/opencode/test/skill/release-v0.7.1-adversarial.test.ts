@@ -110,16 +110,19 @@ describe("parseAPICallError — JSON-scalar and non-object bodies", () => {
 
 describe("parseAPICallError — prototype pollution attempts", () => {
   test("__proto__ in body does not pollute Object.prototype", () => {
+    // Important: write the JSON as a literal string. `JSON.stringify({__proto__: ...})`
+    // produces `{}` because in object-literal syntax `__proto__` is the prototype
+    // setter (it sets [[Prototype]]) rather than an own enumerable property, and
+    // JSON.stringify only walks own enumerables. Building the JSON by hand puts
+    // the malicious key on the wire so JSON.parse in parseAPICallError actually
+    // sees it — which is the surface a hostile gateway would exploit.
     const before = (Object.prototype as any).polluted
     ProviderError.parseAPICallError({
       providerID: "openai" as any,
       error: makeAPICallError({
         message: "Bad Request",
         statusCode: 400,
-        responseBody: JSON.stringify({
-          __proto__: { polluted: "yes" },
-          error: { message: "harmless surface" },
-        }),
+        responseBody: '{"__proto__":{"polluted":"yes"},"error":{"message":"harmless surface"}}',
       }),
     })
     expect((Object.prototype as any).polluted).toBe(before)
