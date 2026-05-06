@@ -36,7 +36,11 @@ export namespace ProviderError {
       try {
         const body = e.responseBody ? JSON.parse(e.responseBody) : null
         if (body?.error?.code === "model_not_found") return false
-      } catch {}
+      } catch {
+        // Malformed JSON on a 404 falls through to "force retryable" below —
+        // intentional; some providers emit non-JSON 404 bodies for transient
+        // model availability blips and those should still retry.
+      }
     }
     // altimate_change end
     // openai sometimes returns 404 for models that are actually available
@@ -258,6 +262,7 @@ export namespace ProviderError {
       u.password = ""
       const isInternal =
         host === "localhost" ||
+        host === "0.0.0.0" || // any-interface bind, often misconfigured proxy
         host.endsWith(".local") ||
         host.endsWith(".internal") ||
         host.endsWith(".localhost") ||

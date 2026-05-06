@@ -15,6 +15,7 @@
 
 import { describe, test, expect } from "bun:test"
 import { ProviderError } from "../../src/provider/error"
+import { Telemetry } from "../../src/altimate/telemetry"
 import { APICallError } from "ai"
 
 function makeAPICallError(opts: {
@@ -380,7 +381,9 @@ describe("parseAPICallError — /models hint on model_not_found", () => {
     expect(result.type).toBe("api_error")
     if (result.type === "api_error") {
       expect(result.message).toContain("does not exist")
-      expect(result.message).toContain("altimate models")
+      // Pin the canonical hint text exactly so docs / changelog / code can't
+      // diverge silently. This string is the single source of truth.
+      expect(result.message).toContain("Run `altimate models` to see available models.")
     }
   })
 
@@ -698,8 +701,6 @@ describe("parseAPICallError — metadata.url masking for internal hosts", () => 
 // Fix F — maskString email + internal-host masking
 // ---------------------------------------------------------------------------
 
-import { Telemetry } from "../../src/altimate/telemetry"
-
 describe("Telemetry.maskString — email and internal-host patterns", () => {
   test("email addresses are masked to <email>", () => {
     const out = Telemetry.maskString("user@bigbank.com is not authorized")
@@ -759,6 +760,24 @@ describe("Telemetry.maskString — email and internal-host patterns", () => {
     const out = Telemetry.maskString("Failed http://10.0.0.1/x?token=foo+bar#frag")
     expect(out).not.toContain("foo+bar")
     expect(out).not.toContain("#frag")
+    expect(out).toContain("<internal-host>")
+  })
+
+  test("internal URL with basic-auth userinfo is fully redacted (cubic P1 regression)", () => {
+    // Pre-fix: regex started with the host alternation, missing `user:pass@`
+    // prefix, so `https://admin:hunter2@10.0.0.5/x` did NOT match — basic-auth
+    // creds + internal host both leaked. Now matches via the optional
+    // `(?:[^\/\s@]+@)?` group.
+    const out = Telemetry.maskString("Cannot reach https://admin:hunter2@10.0.0.5/secret")
+    expect(out).not.toContain("hunter2")
+    expect(out).not.toContain("admin:")
+    expect(out).not.toContain("10.0.0.5")
+    expect(out).toContain("<internal-host>")
+  })
+
+  test("0.0.0.0 (any-interface bind) is masked", () => {
+    const out = Telemetry.maskString("Probe failed http://0.0.0.0:8080/")
+    expect(out).not.toContain("0.0.0.0")
     expect(out).toContain("<internal-host>")
   })
 })

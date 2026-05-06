@@ -1073,7 +1073,11 @@ export namespace Telemetry {
       // don't survive past the redaction marker. Over-masking is the correct
       // failure mode here.
       .replace(
-        /\bhttps?:\/\/(?:localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+|169\.254\.\d+\.\d+|\[(?:::1|fc[0-9a-f]{2}:[^\]]*|fd[0-9a-f]{2}:[^\]]*|fe80:[^\]]*)\]|[A-Za-z0-9.-]+\.(?:local|internal|localhost))(?::\d+)?[\w/.?=&%+#,;~!*'()@:-]*/gi,
+        // `(?:[^\/\s@]+@)?` allows optional basic-auth userinfo
+        // (`user:pass@`) before the host so URLs like
+        // `https://admin:hunter2@10.0.0.5/x` are still recognized as internal
+        // and redacted whole. The credential goes with the host into <internal-host>.
+        /\bhttps?:\/\/(?:[^\/\s@]+@)?(?:localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+|169\.254\.\d+\.\d+|0\.0\.0\.0|\[(?:::1|fc[0-9a-f]{2}:[^\]]*|fd[0-9a-f]{2}:[^\]]*|fe80:[^\]]*)\]|[A-Za-z0-9.-]+\.(?:local|internal|localhost))(?::\d+)?[\w/.?=&%+#,;~!*'()@:-]*/gi,
         "<internal-host>",
       )
       .replace(/'(?:[^'\\]|\\.)*'/g, "?")
