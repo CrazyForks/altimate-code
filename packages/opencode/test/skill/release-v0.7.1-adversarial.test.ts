@@ -116,35 +116,47 @@ describe("parseAPICallError — prototype pollution attempts", () => {
     // JSON.stringify only walks own enumerables. Building the JSON by hand puts
     // the malicious key on the wire so JSON.parse in parseAPICallError actually
     // sees it — which is the surface a hostile gateway would exploit.
+    // try/finally so a regression doesn't leak prototype pollution into the
+    // rest of the suite (cascading-failure containment).
     const before = (Object.prototype as any).polluted
-    ProviderError.parseAPICallError({
-      providerID: "openai" as any,
-      error: makeAPICallError({
-        message: "Bad Request",
-        statusCode: 400,
-        responseBody: '{"__proto__":{"polluted":"yes"},"error":{"message":"harmless surface"}}',
-      }),
-    })
-    expect((Object.prototype as any).polluted).toBe(before)
-    // Modern V8 makes __proto__ a regular property post-JSON.parse since 2019,
-    // but if a future refactor ever switches to Object.assign / spread we want
-    // a regression guard.
+    try {
+      ProviderError.parseAPICallError({
+        providerID: "openai" as any,
+        error: makeAPICallError({
+          message: "Bad Request",
+          statusCode: 400,
+          responseBody: '{"__proto__":{"polluted":"yes"},"error":{"message":"harmless surface"}}',
+        }),
+      })
+      expect((Object.prototype as any).polluted).toBe(before)
+      // Modern V8 makes __proto__ a regular property post-JSON.parse since 2019,
+      // but if a future refactor ever switches to Object.assign / spread we want
+      // a regression guard.
+    } finally {
+      if (before === undefined) delete (Object.prototype as any).polluted
+      else (Object.prototype as any).polluted = before
+    }
   })
 
   test("constructor.prototype injection does not pollute", () => {
     const before = (Object.prototype as any).injected
-    ProviderError.parseAPICallError({
-      providerID: "openai" as any,
-      error: makeAPICallError({
-        message: "Bad Request",
-        statusCode: 400,
-        responseBody: JSON.stringify({
-          constructor: { prototype: { injected: "yes" } },
-          error: { message: "harmless" },
+    try {
+      ProviderError.parseAPICallError({
+        providerID: "openai" as any,
+        error: makeAPICallError({
+          message: "Bad Request",
+          statusCode: 400,
+          responseBody: JSON.stringify({
+            constructor: { prototype: { injected: "yes" } },
+            error: { message: "harmless" },
+          }),
         }),
-      }),
-    })
-    expect((Object.prototype as any).injected).toBe(before)
+      })
+      expect((Object.prototype as any).injected).toBe(before)
+    } finally {
+      if (before === undefined) delete (Object.prototype as any).injected
+      else (Object.prototype as any).injected = before
+    }
   })
 })
 
@@ -469,7 +481,7 @@ describe("parseAPICallError — model_not_found skips retry-storm", () => {
 // ---------------------------------------------------------------------------
 
 describe("parseAPICallError — responseBody cap", () => {
-  test("100KB responseBody is truncated to ~4KB on the result", () => {
+  test("100KB responseBody is truncated to exactly 4096 chars + truncation marker", () => {
     const huge = "a".repeat(100_000)
     const result = ProviderError.parseAPICallError({
       providerID: "openai" as any,
@@ -481,10 +493,12 @@ describe("parseAPICallError — responseBody cap", () => {
     })
     expect(result.type).toBe("api_error")
     if (result.type === "api_error") {
-      expect(result.responseBody).toBeDefined()
-      // 4096 + truncation marker (~30 chars), not the full 100KB.
-      expect(result.responseBody!.length).toBeLessThan(5000)
-      expect(result.responseBody).toContain("[truncated")
+      // Pin the boundary EXACTLY. A regression from 4096 → e.g. 8192 would
+      // still pass `toBeLessThan(5000)` for shorter bodies; pin the prefix
+      // length and the appended marker so the cap is the load-bearing
+      // assertion, not the upper bound.
+      const prefix = "a".repeat(4096)
+      expect(result.responseBody).toBe(`${prefix}…[truncated 95904 chars]`)
     }
   })
 
