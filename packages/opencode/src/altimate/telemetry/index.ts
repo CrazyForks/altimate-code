@@ -1060,6 +1060,26 @@ export namespace Telemetry {
     return s
       .replace(/sk-(?:ant-)?[A-Za-z0-9_-]{20,}/g, "sk-***")
       .replace(/Bearer\s+[A-Za-z0-9._-]{20,}/gi, "Bearer ***")
+      // Email addresses — providers occasionally echo caller identity in error text.
+      .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, "<email>")
+      // Internal hostnames in URLs — keeps parity with `parseAPICallError`'s
+      // `maskInternalHost` so an error message containing the same URL doesn't
+      // leak through telemetry while metadata.url is masked. Covers:
+      //   *.local / *.internal / *.localhost
+      //   RFC1918 IPv4: 10/8, 172.16/12, 192.168/16, plus 127/8 loopback
+      //   AWS IMDS / link-local IPv4: 169.254/16
+      //   IPv6 in brackets: [::1] loopback, [fc??::/[fd??:: ULA, [fe80:: link-local
+      // Char class includes `+`, `#`, `,`, `;` so secrets in query/fragment
+      // don't survive past the redaction marker. Over-masking is the correct
+      // failure mode here.
+      .replace(
+        // `(?:[^\/\s@]+@)?` allows optional basic-auth userinfo
+        // (`user:pass@`) before the host so URLs like
+        // `https://admin:hunter2@10.0.0.5/x` are still recognized as internal
+        // and redacted whole. The credential goes with the host into <internal-host>.
+        /\bhttps?:\/\/(?:[^\/\s@]+@)?(?:localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+|169\.254\.\d+\.\d+|0\.0\.0\.0|\[(?:::1|fc[0-9a-f]{2}:[^\]]*|fd[0-9a-f]{2}:[^\]]*|fe80:[^\]]*)\]|[A-Za-z0-9.-]+\.(?:local|internal|localhost))(?::\d+)?[\w/.?=&%+#,;~!*'()@:-]*/gi,
+        "<internal-host>",
+      )
       .replace(/'(?:[^'\\]|\\.)*'/g, "?")
       .replace(/"(?:[^"\\]|\\.)*"/g, "?")
       .replace(/\s+/g, " ")
