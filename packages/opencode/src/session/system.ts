@@ -82,27 +82,23 @@ export namespace SystemPrompt {
     filtered = [...filtered].sort((a, b) => a.name.localeCompare(b.name))
     // altimate_change end
 
-    const parts = [
-      "Skills provide specialized instructions and workflows for specific tasks.",
-      "Use the skill tool to load a skill when a task matches its description.",
-      // the agents seem to ingest the information about skills a bit better if we present a more verbose
-      // version of them here and a less verbose version in tool description, rather than vice versa.
-      // altimate_change start - use filtered skill list
-      Skill.fmt(filtered, { verbose: true }),
-      // altimate_change end
-    ]
-
     // altimate_change start — auto-load skill bodies for skills marked
     // `alwaysApply: true` (unconditional) or whose `applyPaths` glob matches
     // at least one file in the worktree. This mirrors Cursor's "Always Apply"
     // and "Auto Attached" rule modes — the skill body lands in the system
     // prompt deterministically instead of waiting for the agent to invoke the
     // Skill tool (observed in benchmark traces to fire <1% of tool calls).
-    // The skill description + Skill.fmt block still appears above so the
-    // agent can also invoke the skill on demand; this section is additive.
+    //
+    // Placement: auto-loaded bodies go FIRST, before the lazy-loaded
+    // <available_skills> XML block. Benchmark trace analysis showed that
+    // when the auto-load block was placed at the END of the skills section,
+    // the model treated it as background reference rather than binding
+    // directive, and frequently failed to apply its guidance even when
+    // explicitly relevant. Putting it first frames it as "rules of the road"
+    // for the session before listing optional on-demand skills.
     const autoLoaded = await collectAutoLoadedSkills(filtered)
+    const parts: string[] = []
     if (autoLoaded.length > 0) {
-      parts.push("")
       parts.push(
         "The following skill(s) are auto-loaded because they apply to this project.",
         "Treat their content as binding guidance for any related work — you do not need to",
@@ -114,7 +110,15 @@ export namespace SystemPrompt {
         parts.push(skill.content.trim())
         parts.push(`</auto_loaded_skill>`)
       }
+      parts.push("")
     }
+    parts.push(
+      "Skills provide specialized instructions and workflows for specific tasks.",
+      "Use the skill tool to load a skill when a task matches its description.",
+      // the agents seem to ingest the information about skills a bit better if we present a more verbose
+      // version of them here and a less verbose version in tool description, rather than vice versa.
+      Skill.fmt(filtered, { verbose: true }),
+    )
     // altimate_change end
 
     return parts.join("\n")
