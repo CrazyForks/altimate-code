@@ -1,5 +1,8 @@
 ---
 name: dbt-develop
+applyPaths:
+  - "dbt_project.yml"
+  - "**/dbt_project.yml"
 description: |
   REQUIRED before writing or modifying ANY dbt model. Invoke this skill FIRST
   whenever a task says "create", "build", "add", "modify", "update", "fix", or
@@ -252,6 +255,44 @@ CASE WHEN cond THEN CAST('0' AS NUMERIC) ELSE CAST(0 AS NUMERIC) END
 ```
 Same applies to `UNION` / `UNION ALL` — column types must match across legs.
 
+### String concatenation with `NULL` operands
+
+`||` and `CONCAT()` propagate `NULL` in most engines — a single `NULL` operand
+makes the whole expression `NULL`. When the result feeds an equality join or
+surrogate-key generation, that's an invisible row-dropper:
+```sql
+-- Wrong: NULL region OR NULL segment produces NULL geo_segment
+region || '-' || segment AS geo_segment
+
+-- Right: explicit placeholder
+COALESCE(region, 'UNKNOWN') || '-' || COALESCE(segment, 'UNKNOWN') AS geo_segment
+```
+Use `CONCAT_WS()` if your dialect supports it (Snowflake, BigQuery) — it
+skips `NULL` operands instead of propagating them, which is usually safer
+than a static placeholder.
+
+### dbt model versioning (dbt 1.8+)
+
+When the task asks for a v2 of an existing model (and v1 must keep
+working — common during a rolling schema change), use dbt's **versioned
+models** feature, not a sibling `.sql` file with a `_v2` suffix:
+
+1. Create the new SQL file (e.g. `dim_accounts_v2.sql`).
+2. Add a `versions:` block to the model's entry in `_models.yml`:
+   ```yaml
+   models:
+     - name: dim_accounts
+       latest_version: 1
+       versions:
+         - v: 1
+         - v: 2
+           defined_in: dim_accounts_v2   # filename without .sql
+   ```
+3. Downstream callers reference the version with
+   `{{ ref('dim_accounts', v=2) }}`. Without the `versions:` block, dbt
+   treats `dim_accounts_v2` as an unrelated sibling model — versioning
+   tests will fail and v1↔v2 lineage won't appear in the DAG.
+
 ### Uniqueness when the schema implies it
 
 If the model is named `dim_*`, has a `unique` test in `schema.yml`, or the
@@ -261,12 +302,35 @@ often has duplicates. Use one of:
 - `QUALIFY ROW_NUMBER() OVER (PARTITION BY <key> ORDER BY <tiebreaker>) = 1`
 - `GROUP BY <key>` with explicit aggregation of all other columns
 
-### Window functions with `LIMIT` and ties
+### Window functions / ranking with `LIMIT` and ties
 
-`ORDER BY metric DESC LIMIT N` over a column with ties returns a
-non-deterministic set — it may include any N of the tied rows. If the
-business wants a stable top-N, add a deterministic tiebreaker to the
-`ORDER BY` (e.g. an `id` column) so repeated runs return the same rows.
+`ORDER BY metric DESC LIMIT N` (and equivalently `ROW_NUMBER() / RANK() OVER
+(PARTITION BY ... ORDER BY metric)` filtered to `<= N`) over a column with
+ties returns a **non-deterministic** set — the engine can pick any N of the
+tied rows, and the choice often differs across runs, engines, or warehouse
+versions. The rest of the pipeline then sees row-count drift or different
+keys appearing in downstream joins.
+
+Always add a deterministic tiebreaker to the `ORDER BY` (a primary key, a
+surrogate id, or any column guaranteed unique within the partition):
+```sql
+-- Wrong: ties produce different "top 20" every run
+SELECT * FROM standings
+ORDER BY points DESC
+LIMIT 20
+
+-- Right: tie on points falls back to driver_id
+SELECT * FROM standings
+ORDER BY points DESC, driver_id ASC
+LIMIT 20
+
+-- Same fix inside QUALIFY / window-row-number patterns:
+QUALIFY ROW_NUMBER() OVER (
+  PARTITION BY season ORDER BY points DESC, driver_id ASC
+) <= 20
+```
+If you can't think of a tiebreaker column, the model probably doesn't yet
+have a unique key — fix that first.
 
 ## Common Mistakes
 
