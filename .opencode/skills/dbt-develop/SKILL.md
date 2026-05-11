@@ -1,6 +1,27 @@
 ---
 name: dbt-develop
-description: Create and modify dbt models — staging, intermediate, marts, incremental, medallion architecture. Use when building new SQL models, extending existing ones, scaffolding YAML configs, or reorganizing project structure. Powered by altimate-dbt.
+description: |
+  REQUIRED before writing or modifying ANY dbt model. Invoke this skill FIRST
+  whenever a task says "create", "build", "add", "modify", "update", "fix", or
+  "refactor" a dbt model, staging file, mart, incremental, or snapshot.
+
+  Skipping this skill is the leading cause of silent-correctness bugs —
+  models that compile and `dbt build` cleanly but produce wrong values. It
+  contains the patterns that prevent the most common such bugs encountered
+  in real dbt projects:
+
+  • Incremental high-water marks (`>=` vs `>` ties → silent row dropout)
+  • Snapshot strategy selection (timestamp vs check, `unique_key` choice)
+  • `LEFT JOIN + COUNT(*)` phantom rows from unmatched parents
+  • Type harmonization in `COALESCE` / `CASE` / `UNION` legs
+  • Date-spine completeness (every period present, even empty ones)
+  • Off-by-one window boundaries (`BETWEEN d - (N-1) AND d` for N-wide)
+  • Uniqueness enforcement when schema implies a key
+  • Window-function `LIMIT` with deterministic tiebreaker
+  • Verifying transformation correctness with dbt unit tests, not just `dbt build`
+  • Enumerating every requested deliverable and checking each exists on disk
+
+  Do not start writing SQL until this skill is loaded. Powered by altimate-dbt.
 ---
 
 # dbt Model Development
@@ -31,6 +52,12 @@ description: Create and modify dbt models — staging, intermediate, marts, incr
 
 Before writing any SQL:
 - Read the task requirements carefully
+- **Enumerate every concrete deliverable the task asks for** — write down each
+  model name, every column/test/config change mentioned, and any "create N
+  models" count. This list becomes the checklist you verify against in
+  step 4. A task asking for four models is not done if only three exist on
+  disk. If the task references a `schema.yml`, `_models.yml`, or similar
+  spec file, every entry there is a deliverable.
 - Identify which layer this model belongs to (staging, intermediate, mart)
 - Check existing models for naming conventions and patterns
 - **Check dependencies:** If `packages.yml` exists, check for `dbt_packages/` or `package-lock.yml`. Only run `dbt deps` if packages are declared but not yet installed.
@@ -98,6 +125,44 @@ altimate-dbt compile --model <name>                        # catch Jinja errors
 altimate-dbt build --model <name>                          # materialize + run tests
 ```
 
+**Verify transformation correctness with unit tests:**
+
+For models with non-trivial transformation logic — aggregations, JOINs, CASE/WHEN,
+window functions, ratio / rate / NPS calculations, COALESCE / NULL coalescing, date
+spines, incremental merge keys — generate and run dbt unit tests before declaring
+the model done. Schema checks ("table exists with the right columns") only verify
+mechanics; value-level correctness needs unit tests.
+
+Invoke the **dbt-unit-tests** skill, which will:
+- Analyze your SQL for the constructs above
+- Build typed mock input rows from the manifest
+- Compute expected outputs by running the SQL against the mocks
+- Write a `unit_tests:` block in the model's `_models.yml`
+
+Then run them:
+```bash
+altimate-dbt test --model <name>     # runs unit tests + schema tests
+```
+
+If a unit test fails, the transformation logic is wrong — **fix the SQL, do not
+weaken the test**. Skip unit tests only for genuinely trivial models: pure renames,
+simple `SELECT *` passthrough, materialization / config-only changes, format-only
+edits.
+
+**Verify every requested deliverable exists:**
+
+Walk the checklist you wrote in the Plan step. For each model the task asked
+for, confirm: (1) the `.sql` file exists in the project, (2) it appears in
+`altimate-dbt info` / the manifest, (3) `altimate-dbt columns --model <name>`
+returns the expected columns, (4) the materialization config matches the
+spec. A task that asked for N models is not complete with N-1 files on disk,
+even if those N-1 build cleanly. Use:
+
+```bash
+ls models/                                                   # confirm every requested file exists
+altimate-dbt info                                            # confirm every requested model is in the project
+```
+
 **Verify the output:**
 ```bash
 altimate-dbt columns --model <name>                        # confirm expected columns exist
@@ -127,6 +192,81 @@ Use `altimate-dbt children` and `altimate-dbt parents` to verify the DAG is inta
 3. **Match existing patterns.** Read 2-3 existing models in the same directory before writing.
 4. **One model, one purpose.** A staging model should not contain business logic. An intermediate model should not be materialized as a table unless it has consumers.
 5. **Fix ALL errors, not just yours.** After creating/modifying models, run a full `dbt build`. If ANY model fails — even pre-existing ones you didn't touch — fix them. Your job is to leave the project in a fully working state.
+6. **Verify transformation correctness, not just mechanics.** For non-trivial models, generate and run dbt unit tests as part of the validate step (use the `dbt-unit-tests` skill). Passing `dbt build` only proves the SQL is syntactically valid — it doesn't prove the *values* are right.
+7. **Enumerate deliverables, then check them off.** The task is not done until every model, column, test, and config change explicitly requested exists on disk and in the manifest. Re-read the prompt at the end and verify each requested item — don't trust your own intermediate "done" feeling.
+
+## Common Pitfalls in Transformation Logic
+
+When the model involves any of the following SQL constructs, watch for these
+generic bugs that mostly compile cleanly but produce wrong values:
+
+### Incremental models and snapshots
+
+- **High-water mark boundary**: in the `{% if is_incremental() %}` filter, use
+  `>=` (not `>`) when the upstream timestamp can repeat or land exactly on the
+  prior max — a strict `>` silently drops every event that ties with the most
+  recent prior load.
+- **`unique_key` choice**: must be the *natural* unique key of the row. Picking
+  a column that is not actually unique (e.g. a foreign-key like `customer_id`
+  instead of `order_id`) causes silent merges and lost rows.
+- **`on_schema_change`**: set `append_new_columns` (or `sync_all_columns` if
+  upstream evolves) so a new source column doesn't NULL-out existing data.
+- **Snapshots — strategy selection**: use `strategy='timestamp'` only when the
+  source has a reliable `updated_at` that monotonically increases on every
+  change. If `updated_at` can be NULL, be reset, or move backwards, switch to
+  `strategy='check'` with an explicit `check_cols` list. Verify by querying
+  the source for `MAX(updated_at)` and looking for repeats or NULLs.
+- **Backfilling**: `--full-refresh` rebuilds incremental tables from scratch.
+  Use it whenever you change the incremental SQL, the merge key, or
+  `on_schema_change`.
+
+### Date and time arithmetic
+
+- **"current age", "days since", "elapsed", "tenure"** — if the column is not
+  pre-computed in the source, compute it. For year-based age, account for
+  month/day so the change happens on the birthday, not on Jan 1:
+  ```sql
+  date_part('year', age(birth_date))                              -- in postgres-family
+  EXTRACT(YEAR FROM CURRENT_DATE) - EXTRACT(YEAR FROM birth_date)
+    - CASE WHEN (EXTRACT(MONTH FROM CURRENT_DATE), EXTRACT(DAY FROM CURRENT_DATE))
+              < (EXTRACT(MONTH FROM birth_date), EXTRACT(DAY FROM birth_date))
+           THEN 1 ELSE 0 END                                       -- portable form
+  ```
+- **Date spines**: when a daily/weekly/monthly model must have a row for
+  every period (even periods with zero events), build a spine first with
+  `dbt_utils.date_spine` or a recursive CTE, then LEFT JOIN the events onto
+  it. Never compute date series by `DISTINCT date_col FROM events` — that
+  silently drops empty periods.
+- **Date boundaries for windowed sums**: rolling-N-day windows expressed as
+  `BETWEEN d - (N-1) AND d` (inclusive both ends) give a width of exactly N.
+  `BETWEEN d - N AND d` gives N+1 — a classic off-by-one.
+
+### Type harmonization in `COALESCE` / `CASE` / `UNION`
+
+`COALESCE(timestamp_col, integer_col)` and `CASE WHEN ... THEN '0' ELSE 0 END`
+fail at compile or coerce silently to whatever type the engine guesses.
+Cast every branch / argument to the same explicit type:
+```sql
+COALESCE(CAST(timestamp_col AS TIMESTAMP), CAST(integer_col AS TIMESTAMP))
+CASE WHEN cond THEN CAST('0' AS NUMERIC) ELSE CAST(0 AS NUMERIC) END
+```
+Same applies to `UNION` / `UNION ALL` — column types must match across legs.
+
+### Uniqueness when the schema implies it
+
+If the model is named `dim_*`, has a `unique` test in `schema.yml`, or the
+task says "one row per X", the model must enforce that grain. Source data
+often has duplicates. Use one of:
+- `SELECT DISTINCT ...`
+- `QUALIFY ROW_NUMBER() OVER (PARTITION BY <key> ORDER BY <tiebreaker>) = 1`
+- `GROUP BY <key>` with explicit aggregation of all other columns
+
+### Window functions with `LIMIT` and ties
+
+`ORDER BY metric DESC LIMIT N` over a column with ties returns a
+non-deterministic set — it may include any N of the tied rows. If the
+business wants a stable top-N, add a deterministic tiebreaker to the
+`ORDER BY` (e.g. an `id` column) so repeated runs return the same rows.
 
 ## Common Mistakes
 
@@ -138,6 +278,7 @@ Use `altimate-dbt children` and `altimate-dbt parents` to verify the DAG is inta
 | Creating a staging model with JOINs | Staging = 1:1 with source. JOINs belong in intermediate or mart |
 | Not checking existing naming conventions | Read existing models in the same directory first |
 | Using `SELECT *` in final models | Explicitly list columns for clarity and contract stability |
+| `COUNT(*)` over a `LEFT JOIN` — counts unmatched parent rows as if they had one child (e.g. a `dim_listings LEFT JOIN fct_reviews` with no matching reviews still yields one row, so `COUNT(*) = 1` instead of `0`) | Use `COUNT(<child_key>)` or `COUNT(CASE WHEN <child_key> IS NOT NULL THEN 1 END)`. If you intended to exclude unmatched parents, switch to `INNER JOIN`. Same trap applies to `SUM`, `AVG`, etc. when the unmatched side contributes a "ghost" `NULL` row |
 
 ## Reference Guides
 
