@@ -6,10 +6,10 @@ When you read the user's prompt, scan for these patterns. If one matches, the re
 
 **Trigger phrases (any one):**
 - The user prompt mentions `dbt_utils.surrogate_key`, `surrogate_key has been replaced`, or `dbt_utils.generate_surrogate_key`
-- A compilation **warning** that names `surrogate_key` — even if the prompt only says "the project is broken" or doesn't mention surrogate_key at all
+- A compilation **warning** that names `surrogate_key` — even when the prompt only describes a different symptom or is generic ("the project is broken", "something is failing")
 - The first `dbt build` output contains the string `surrogate_key` in a `Warning:` line
 
-**Important:** if the prompt is vague (e.g. "the project is broken") and you run `dbt build`, **read every Warning line** — deprecation warnings are not "informational fluff", they are actionable instructions describing the migration you need to apply. Apply P1 if `surrogate_key` appears anywhere in the build output, regardless of whether the prompt mentions it.
+**Important:** when the prompt is vague, run `dbt build` early and **read every Warning line**. Deprecation warnings are actionable migration instructions, not informational fluff — apply P1 if `surrogate_key` appears anywhere in the build output, regardless of what the prompt itself mentions.
 
 
 **Why it's tricky (from the dbt-utils CHANGELOG and migration notes):** The new `generate_surrogate_key` treats `NULL` values **differently** from empty strings. The old macro coerced NULL to empty string. Models that compute keys from a nullable column (sentiment, status, optional category) will produce **different surrogate keys** after the rename — even though the build is green. Downstream equality tests against historical keys will silently fail.
@@ -171,7 +171,7 @@ When you read the user's prompt, scan for these patterns. If one matches, the re
 
 ### P4-extra: "Add details" / underspecified column lists
 
-When the prompt does NOT enumerate the columns — phrases like *"add product details"*, *"include the relevant fields"*, *"with all the necessary information"*, *"join with X to enrich"* — the agent must **not** hand-pick a subset. Hand-picked subsets undershoot the grader's expected column set.
+When the prompt does NOT enumerate the columns — phrases like *"add product details"*, *"include the relevant fields"*, *"with all the necessary information"*, *"join with X to enrich"* — do **not** hand-pick a subset. Hand-picked subsets routinely undershoot what the requester actually wants; downstream consumers and tests will surface the omissions.
 
 **Default strategy for underspecified joins:**
 
@@ -197,7 +197,7 @@ altimate-dbt columns --model <fact>
 altimate-dbt columns --model <dim>
 ```
 
-**Naming:** preserve original column names unless the prompt explicitly requests renaming. Don't rename `description` → `product_description` unprompted — that changes the schema and can break downstream consumers (and the grader).
+**Naming:** preserve original column names unless the prompt explicitly requests renaming. Don't rename `description` → `product_description` unprompted — that changes the schema and can break downstream consumers, tests, and BI dashboards that depend on the existing names.
 
 **Verify before declaring done:**
 ```bash
