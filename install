@@ -127,6 +127,18 @@ else
       fi
     fi
 
+    # @altimateai/altimate-core has no NAPI prebuild for musl. Without a
+    # musl-shaped archive, the install would 404 silently (without --fail
+    # curl writes the 404 HTML to disk, and tar then dies "not in gzip
+    # format"). Fail fast with an actionable message instead.
+    if [ "$is_musl" = "true" ]; then
+      echo -e "${RED}Alpine Linux (musl) is not currently supported by the standalone install.${NC}"
+      echo -e "${MUTED}altimate-core has no NAPI prebuild for musl yet. Workarounds:${NC}"
+      echo -e "  • apk add gcompat   ${MUTED}# run glibc binaries on Alpine${NC}"
+      echo -e "  • Use npm: npm install -g altimate-code"
+      exit 1
+    fi
+
     needs_baseline=false
     if [ "$arch" = "x64" ]; then
       if [ "$os" = "linux" ]; then
@@ -161,9 +173,7 @@ else
     if [ "$needs_baseline" = "true" ]; then
       target="$target-baseline"
     fi
-    if [ "$is_musl" = "true" ]; then
-      target="$target-musl"
-    fi
+    # is_musl=true would have exited above — no musl target suffix is constructed.
 
     filename="$APP-$target$archive_ext"
     # Windows release archives ship altimate.exe, every other target ships altimate.
@@ -292,7 +302,9 @@ download_with_progress() {
     trap "trap - RETURN; rm -f \"$tracefile\"; printf '\033[?25h' >&4; exec 4>&-" RETURN
 
     (
-        curl --trace-ascii "$tracefile" -s -L -o "$output" "$url"
+        # --fail so HTTP errors (e.g. 404 on an unknown target archive) become
+        # a non-zero exit instead of silently writing the error page to disk.
+        curl --fail --trace-ascii "$tracefile" -s -L -o "$output" "$url"
     ) &
     local curl_pid=$!
 
@@ -335,8 +347,9 @@ download_and_install() {
     mkdir -p "$tmp_dir"
 
     if [[ "$os" == "windows" ]] || ! [ -t 2 ] || ! download_with_progress "$url" "$tmp_dir/$filename"; then
-        # Fallback to standard curl on Windows, non-TTY environments, or if custom progress fails
-        curl -# -L -o "$tmp_dir/$filename" "$url"
+        # Fallback to standard curl on Windows, non-TTY environments, or if custom progress fails.
+        # --fail so 404s exit non-zero instead of writing the error page to $tmp_dir/$filename.
+        curl --fail -# -L -o "$tmp_dir/$filename" "$url"
     fi
 
     if [ "$os" = "linux" ]; then

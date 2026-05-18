@@ -47,8 +47,42 @@ function detectPlatformAndArch() {
   return { platform, arch }
 }
 
+function isMuslPlatform() {
+  if (os.platform() !== "linux") return false
+  try {
+    if (fs.existsSync("/etc/alpine-release")) return true
+  } catch {
+    // ignore
+  }
+  try {
+    const out = require("child_process").execSync("ldd --version", { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })
+    if (typeof out === "string" && out.toLowerCase().includes("musl")) return true
+  } catch {
+    // ignore — ldd may not exist or may exit non-zero
+  }
+  return false
+}
+
 function findBinary() {
   const { platform, arch } = detectPlatformAndArch()
+
+  // @altimateai/altimate-core has no NAPI prebuild for musl or win32-arm64,
+  // and the altimate binary embeds altimate-core's .node at build time. Emit
+  // a clear, actionable error here rather than the generic
+  // "Could not find package" message that would otherwise fall out below.
+  if (isMuslPlatform()) {
+    throw new Error(
+      "altimate-code is not currently supported on Alpine Linux (musl). " +
+        "Run 'apk add gcompat' to execute glibc binaries on Alpine, or use a glibc-based base image.",
+    )
+  }
+  if (platform === "windows" && arch === "arm64") {
+    throw new Error(
+      "altimate-code is not currently built for Windows on ARM64. " +
+        "Run the x64 build under Windows ARM's x64 emulation, or use WSL.",
+    )
+  }
+
   const packageName = `@altimateai/altimate-code-${platform}-${arch}`
   const binaryName = platform === "windows" ? "altimate-code.exe" : "altimate-code"
 
