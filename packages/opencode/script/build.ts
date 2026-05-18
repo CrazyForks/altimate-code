@@ -458,7 +458,10 @@ if (Script.release) {
     // binary named `altimate` — matching the primary npm bin entry.
     const archiveName = key.replace(/^@altimateai\/altimate-code-/, "altimate-")
     const archivePath = path.resolve("dist", archiveName)
-    const binaryName = key.includes("win32") ? "altimate.exe" : "altimate"
+    // Name construction at line 283 substitutes `win32 → windows`, so the key
+    // contains "windows", not "win32". Matching the wrong substring here would
+    // archive a non-existent `altimate` file on Windows targets.
+    const binaryName = key.includes("windows") ? "altimate.exe" : "altimate"
     if (key.includes("linux")) {
       await $`tar -czf ${archivePath}.tar.gz ${binaryName}`.cwd(`dist/${key}/bin`)
     } else {
