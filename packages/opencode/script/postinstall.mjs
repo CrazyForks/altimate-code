@@ -55,10 +55,17 @@ function isMuslPlatform() {
     // ignore
   }
   try {
-    const out = require("child_process").execSync("ldd --version", { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })
-    if (typeof out === "string" && out.toLowerCase().includes("musl")) return true
+    // Mirror the detection in packages/opencode/bin/altimate: on musl
+    // systems `ldd --version` exits non-zero and prints to stderr.
+    // execSync would throw AND only return stdout — silently missing every
+    // non-Alpine musl distro. spawnSync gives both streams regardless of
+    // exit code.
+    const { spawnSync } = require("child_process")
+    const result = spawnSync("ldd", ["--version"], { encoding: "utf8" })
+    const text = ((result.stdout || "") + (result.stderr || "")).toLowerCase()
+    if (text.includes("musl")) return true
   } catch {
-    // ignore — ldd may not exist or may exit non-zero
+    // ignore — ldd may not exist at all
   }
   return false
 }
