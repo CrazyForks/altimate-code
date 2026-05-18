@@ -59,19 +59,17 @@ jobs:
       matrix:
         include:
           # Each target builds ONE binary in parallel (~5 min each)
-          # Index matches allTargets array in build.ts
+          # Index matches allTargets array in build.ts. Targets without a
+          # @altimateai/altimate-core NAPI prebuild (linux-*-musl, win32-arm64)
+          # are intentionally excluded — see allTargets in build.ts.
           - { index: 0,  name: "linux-arm64" }
           - { index: 1,  name: "linux-x64" }
           - { index: 2,  name: "linux-x64-baseline" }
-          - { index: 3,  name: "linux-arm64-musl" }
-          - { index: 4,  name: "linux-x64-musl" }
-          - { index: 5,  name: "linux-x64-baseline-musl" }
-          - { index: 6,  name: "darwin-arm64" }
-          - { index: 7,  name: "darwin-x64" }
-          - { index: 8,  name: "darwin-x64-baseline" }
-          - { index: 9,  name: "win32-arm64" }
-          - { index: 10, name: "win32-x64" }
-          - { index: 11, name: "win32-x64-baseline" }
+          - { index: 3,  name: "darwin-arm64" }
+          - { index: 4,  name: "darwin-x64" }
+          - { index: 5,  name: "darwin-x64-baseline" }
+          - { index: 6,  name: "win32-x64" }
+          - { index: 7,  name: "win32-x64-baseline" }
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -113,10 +111,12 @@ jobs:
           fi
           chmod +x "$BINARY"
 
-          # Set NODE_PATH so the binary can resolve external NAPI modules
-          # (mirrors what the npm bin wrapper does at runtime)
-          NODE_PATH="$(pwd)/packages/opencode/node_modules:$(pwd)/node_modules" "$BINARY" --version
-          echo "Smoke test passed: binary starts and prints version"
+          # Run the binary with NO pre-set NODE_PATH. The Bun-compiled binary
+          # now embeds @altimateai/altimate-core's NAPI .node into bunfs, so
+          # it must start standalone. This is the regression gate for the
+          # v0.7.x curl-install crash (Cannot find module '@altimateai/altimate-core').
+          env -u NODE_PATH "$BINARY" --version
+          echo "Smoke test passed: standalone binary starts without external NODE_PATH"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -262,7 +262,9 @@ jobs:
             exit 1
           else
             chmod +x "$BINARY"
-            NODE_PATH="$(pwd)/packages/opencode/node_modules:$(pwd)/node_modules" "$BINARY" --version
+            # No NODE_PATH — the binary embeds altimate-core itself.
+            # This is the gate that would have caught the v0.7.x missing-module bug.
+            env -u NODE_PATH "$BINARY" --version
             echo "Pre-publish smoke test passed"
           fi
 

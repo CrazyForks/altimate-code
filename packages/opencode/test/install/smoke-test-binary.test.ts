@@ -2,11 +2,14 @@
  * Smoke tests for compiled binaries.
  *
  * These tests build a local binary (--single) and verify it actually starts
- * with the required external NAPI modules resolvable via NODE_PATH.
+ * — both with NODE_PATH set (matches the npm bin wrapper environment) and
+ * with NODE_PATH cleared (matches the curl-install / Homebrew / AUR / GitHub
+ * release archive environment).
  *
- * This is the test that would have caught the v0.5.10 regression where
- * @altimateai/altimate-core was marked external but missing from standalone
- * distributions, causing an immediate crash on startup.
+ * The "NODE_PATH cleared" test is the regression guard for the v0.7.x
+ * curl-install crash: the Bun-compiled binary now embeds altimate-core's
+ * NAPI .node into bunfs, so the standalone binary must start without any
+ * companion files.
  *
  * Run: bun test test/install/smoke-test-binary.test.ts
  *
@@ -90,10 +93,13 @@ describe("compiled binary smoke test", () => {
     expect(result.stderr).not.toContain("Cannot find module")
   })
 
-  runTest("binary fails gracefully without NODE_PATH (standalone mode)", () => {
-    // Simulate standalone distribution — no node_modules available.
-    // The binary should NOT crash with an unhandled error; it should
-    // either degrade gracefully or show a clear error message.
+  runTest("binary succeeds with NODE_PATH cleared (standalone mode)", () => {
+    // The Bun-compiled binary embeds @altimateai/altimate-core's NAPI .node
+    // directly into bunfs (see script/build.ts — staged shim + resolver
+    // plugin). It MUST start without any external NODE_PATH or companion
+    // node_modules. This is the regression guard for the v0.7.x curl-install
+    // crash where altimate-core was marked `external` and the standalone
+    // archive shipped without it.
     const result = spawnSync(binary!, ["--version"], {
       encoding: "utf-8",
       timeout: 15_000,
@@ -101,21 +107,18 @@ describe("compiled binary smoke test", () => {
         PATH: process.env.PATH,
         HOME: process.env.HOME,
         OPENCODE_DISABLE_TELEMETRY: "1",
-        // Explicitly clear NODE_PATH to simulate standalone
+        // Explicitly clear NODE_PATH to simulate the curl-install layout
         NODE_PATH: "",
       },
     })
 
-    // Process must have exited (not been killed by timeout)
-    expect(result.status).not.toBeNull()
-
-    // If it fails, the error should mention the missing module clearly
     if (result.status !== 0) {
-      const output = (result.stdout ?? "") + (result.stderr ?? "")
-      expect(output).toContain("altimate-core")
+      console.error("STDOUT:", result.stdout)
+      console.error("STDERR:", result.stderr)
     }
-    // Either way, it should not segfault (exit code > 128 means signal)
-    expect(result.status!).toBeLessThanOrEqual(128)
+    expect(result.status).toBe(0)
+    const output = (result.stdout ?? "") + (result.stderr ?? "")
+    expect(output).not.toContain("Cannot find module")
   })
 
   runTest("binary responds to --help", () => {

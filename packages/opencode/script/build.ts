@@ -89,6 +89,17 @@ const singleFlag = process.argv.includes("--single")
 const baselineFlag = process.argv.includes("--baseline")
 const skipInstall = process.argv.includes("--skip-install")
 
+// Build targets are limited to the platforms for which @altimateai/altimate-core
+// publishes a NAPI prebuild (see
+// https://www.npmjs.com/package/@altimateai/altimate-core?activeTab=dependencies).
+// Each per-target build embeds that prebuild's .node file directly into the Bun
+// single-file executable so the release archive ships a single self-contained
+// binary — no companion node_modules, no NODE_PATH wrapper.
+//
+// Combinations with no altimate-core prebuild are intentionally excluded:
+//   • linux-*-musl (no @altimateai/altimate-core-linux-*-musl)
+//   • win32-arm64  (no @altimateai/altimate-core-win32-arm64-msvc)
+// If/when altimate-core ships prebuilds for those, add them back here.
 const allTargets: {
   os: string
   arch: "arm64" | "x64"
@@ -109,22 +120,6 @@ const allTargets: {
     avx2: false,
   },
   {
-    os: "linux",
-    arch: "arm64",
-    abi: "musl",
-  },
-  {
-    os: "linux",
-    arch: "x64",
-    abi: "musl",
-  },
-  {
-    os: "linux",
-    arch: "x64",
-    abi: "musl",
-    avx2: false,
-  },
-  {
     os: "darwin",
     arch: "arm64",
   },
@@ -136,10 +131,6 @@ const allTargets: {
     os: "darwin",
     arch: "x64",
     avx2: false,
-  },
-  {
-    os: "win32",
-    arch: "arm64",
   },
   {
     os: "win32",
@@ -194,12 +185,14 @@ const targets = targetIndexFlag !== undefined
 await $`rm -rf dist`
 
 // Packages excluded from the compiled binary — must be resolvable from
-// node_modules at runtime. Split into required (must ship with the wrapper
-// package) and optional (user installs on demand).
-const requiredExternals = [
-  // NAPI native module — cannot be embedded in Bun single-file executable.
-  "@altimateai/altimate-core",
-]
+// node_modules at runtime.
+//
+// NOTE: @altimateai/altimate-core is intentionally NOT external. We replace
+// its NAPI-RS loader with a one-line shim per target (see below) so Bun
+// statically sees a single `require('./altimate-core.<platform>.node')` and
+// embeds that one .node file into bunfs. This keeps the binary self-contained
+// without bloating it with 5 platforms' worth of native addons.
+const requiredExternals: string[] = []
 const optionalExternals = [
   // Database drivers — native addons, users install on demand per warehouse
   "pg", "snowflake-sdk", "@google-cloud/bigquery", "@databricks/sql",
@@ -212,6 +205,76 @@ const binaries: Record<string, string> = {}
 if (!skipInstall) {
   await $`bun install --os="*" --cpu="*" @opentui/core@${pkg.dependencies["@opentui/core"]}`
   await $`bun install --os="*" --cpu="*" @parcel/watcher@${pkg.dependencies["@parcel/watcher"]}`
+  // Ensure every @altimateai/altimate-core platform prebuild is resolvable in
+  // node_modules. Each per-target build below picks one and embeds its .node
+  // file into the Bun binary.
+  await $`bun install --os="*" --cpu="*" @altimateai/altimate-core@${pkg.dependencies["@altimateai/altimate-core"]}`
+}
+
+// Map a build target to the altimate-core NAPI prebuild package name and the
+// matching `.node` file name. The mapping mirrors the lines in altimate-core's
+// NAPI-RS-generated loader (e.g. `require('./altimate-core.linux-x64-gnu.node')`).
+// Baseline variants share the same prebuild as their non-baseline counterpart —
+// "baseline" is a Bun-binary distinction, not a NAPI one.
+function altimateCorePlatformFor(item: { os: string; arch: "arm64" | "x64"; abi?: "musl" }): {
+  pkg: string
+  nodeFile: string
+  platformTag: string
+} {
+  if (item.abi === "musl") {
+    throw new Error(`No @altimateai/altimate-core prebuild for linux-${item.arch}-musl; this target should not be in allTargets.`)
+  }
+  if (item.os === "darwin") {
+    const tag = `darwin-${item.arch}`
+    return { pkg: `@altimateai/altimate-core-${tag}`, nodeFile: `altimate-core.${tag}.node`, platformTag: tag }
+  }
+  if (item.os === "linux") {
+    const tag = `linux-${item.arch}-gnu`
+    return { pkg: `@altimateai/altimate-core-${tag}`, nodeFile: `altimate-core.${tag}.node`, platformTag: tag }
+  }
+  if (item.os === "win32") {
+    if (item.arch === "x64") {
+      const tag = "win32-x64-msvc"
+      return { pkg: `@altimateai/altimate-core-${tag}`, nodeFile: `altimate-core.${tag}.node`, platformTag: tag }
+    }
+    throw new Error(`No @altimateai/altimate-core prebuild for win32-${item.arch}; this target should not be in allTargets.`)
+  }
+  throw new Error(`Unsupported build target: ${item.os}-${item.arch}`)
+}
+
+// Resolve the loader package once up-front. Real path (not the bun symlink in
+// node_modules/.bun) — we copy from this for each per-target staging dir.
+const altimateCoreLoaderPkgJson = fileURLToPath(import.meta.resolve("@altimateai/altimate-core/package.json"))
+const altimateCoreLoaderDir = fs.realpathSync(path.dirname(altimateCoreLoaderPkgJson))
+const altimateCoreVersion = pkg.dependencies["@altimateai/altimate-core"]
+
+// Locate the on-disk dir for an @altimateai/altimate-core-<platform> NAPI
+// prebuild. bun installs each optional platform package in its own `.bun/`
+// store entry, not next to the loader, so import.meta.resolve doesn't find it
+// from the workspace. Walk up from the loader dir looking for the surrounding
+// `.bun` store, then look up the platform package by its conventional name.
+function locatePlatformPackageDir(pkgName: string): string {
+  // bun's flat layout: `@scope+name@version` — only the `/` becomes `+`, the
+  // leading `@` of the scope stays.
+  const flatName = pkgName.replace("/", "+")
+  let current = altimateCoreLoaderDir
+  for (;;) {
+    // Match every layout we walk through:
+    //   • current === `.bun`                          → check current
+    //   • current === node_modules                    → check current/.bun
+    //   • current === workspace root above node_modules → check current/node_modules/.bun
+    for (const prefix of [current, path.join(current, ".bun"), path.join(current, "node_modules", ".bun")]) {
+      const candidate = path.join(prefix, `${flatName}@${altimateCoreVersion}`, "node_modules", pkgName)
+      if (fs.existsSync(candidate)) return fs.realpathSync(candidate)
+    }
+    const parent = path.dirname(current)
+    if (parent === current) break
+    current = parent
+  }
+  throw new Error(
+    `Could not locate ${pkgName}@${altimateCoreVersion} on disk under any .bun store; ` +
+      `ensure 'bun install --os=* --cpu=*' has fetched it.`,
+  )
 }
 for (const item of targets) {
   const name = [
@@ -235,10 +298,66 @@ for (const item of targets) {
   const bunfsRoot = item.os === "win32" ? "B:/~BUN/root/" : "/$bunfs/root/"
   const workerRelativePath = path.relative(dir, parserWorker).replaceAll("\\", "/")
 
+  // -------------------------------------------------------------------------
+  // Stage a per-target copy of @altimateai/altimate-core so we can embed the
+  // target's NAPI prebuild into the Bun single-file executable.
+  //
+  // The upstream NAPI-RS loader (index.js) dispatches at runtime across every
+  // supported platform — referencing each `./altimate-core.<platform>.node`
+  // and `@altimateai/altimate-core-<platform>` from `require()`. If we hand
+  // that loader to Bun.build as-is, Bun statically resolves every branch and
+  // either bloats the binary with 5 platforms' worth of .node files or fails
+  // when a non-target platform package isn't on disk.
+  //
+  // Instead we replace the loader with a one-line shim:
+  //
+  //     module.exports = require('./altimate-core.<platform>.node')
+  //
+  // and drop the matching .node file next to it. Bun sees a single static
+  // require() and embeds that one .node into bunfs. Result: self-contained
+  // ~80–100 MB binary, no companion files, no NODE_PATH.
+  // -------------------------------------------------------------------------
+  const platform = altimateCorePlatformFor(item)
+  const platformPkgDir = locatePlatformPackageDir(platform.pkg)
+  const platformNodeSrc = path.join(platformPkgDir, platform.nodeFile)
+  if (!fs.existsSync(platformNodeSrc)) {
+    throw new Error(`Expected NAPI prebuild not found: ${platformNodeSrc}. Did 'bun install --os=* --cpu=*' run?`)
+  }
+
+  const stagedAltimateCoreDir = path.join(dir, "dist", name, ".altimate-core-staged", "@altimateai", "altimate-core")
+  await $`mkdir -p ${stagedAltimateCoreDir}`
+  // Keep index.d.ts + package.json so typecheck and resolution stay happy.
+  fs.copyFileSync(path.join(altimateCoreLoaderDir, "package.json"), path.join(stagedAltimateCoreDir, "package.json"))
+  if (fs.existsSync(path.join(altimateCoreLoaderDir, "index.d.ts"))) {
+    fs.copyFileSync(path.join(altimateCoreLoaderDir, "index.d.ts"), path.join(stagedAltimateCoreDir, "index.d.ts"))
+  }
+  // The shim — single static require() of the target's .node file.
+  fs.writeFileSync(
+    path.join(stagedAltimateCoreDir, "index.js"),
+    `// Generated by packages/opencode/script/build.ts for ${name}.\n` +
+      `// Replaces the multi-platform NAPI-RS loader so Bun embeds exactly one .node.\n` +
+      `module.exports = require('./${platform.nodeFile}')\n`,
+  )
+  // The actual native binding, co-located so the shim's relative require() resolves.
+  fs.copyFileSync(platformNodeSrc, path.join(stagedAltimateCoreDir, platform.nodeFile))
+
+  // Bun.build plugin: rewrite @altimateai/altimate-core imports to the staged
+  // shim. Without this, Bun resolves the import via the workspace
+  // node_modules and we'd be back to the full multi-platform loader.
+  const stagedShimAbs = path.join(stagedAltimateCoreDir, "index.js")
+  const altimateCoreResolverPlugin = {
+    name: "altimate-core-staged-resolver",
+    setup(build: any) {
+      build.onResolve({ filter: /^@altimateai\/altimate-core$/ }, () => ({
+        path: stagedShimAbs,
+      }))
+    },
+  }
+
   await Bun.build({
     conditions: ["browser"],
     tsconfig: "./tsconfig.json",
-    plugins: [solidPlugin],
+    plugins: [solidPlugin, altimateCoreResolverPlugin],
     sourcemap: "external",
     // IMPORTANT: Without code splitting, Bun inlines dynamic import() targets
     // into the main chunk. Any external require() in those targets will fail
@@ -269,9 +388,15 @@ for (const item of targets) {
     },
   })
 
-  // Create backward-compatible altimate-code alias
-  // Use hard copy instead of symlink — npm publish and Docker COPY can strip symlinks,
-  // causing "Binary not found" in Verdaccio sanity tests.
+  // Staging dir is no longer needed once Bun has embedded the shim + .node.
+  await $`rm -rf dist/${name}/.altimate-core-staged`
+
+  // Create backward-compatible altimate-code alias inside the platform package.
+  // The npm wrapper (`packages/opencode/bin/altimate`) looks for `bin/altimate-code`
+  // (or .exe) when locating the platform binary, so this must exist for the
+  // `npm i -g` flow. The release archive below ships only `altimate`.
+  // Use a hard copy instead of a symlink — npm publish and Docker COPY can
+  // strip symlinks, causing "Binary not found" in Verdaccio sanity tests.
   if (item.os === "win32") {
     await $`cp dist/${name}/bin/altimate.exe dist/${name}/bin/altimate-code.exe`.nothrow()
   } else {
@@ -327,12 +452,17 @@ for (const item of targets) {
 
 if (Script.release) {
   for (const key of Object.keys(binaries)) {
-    const archiveName = key.replace(/^@altimateai\//, "")
+    // Archive name maps the platform package name (`@altimateai/altimate-code-<target>`)
+    // to a standalone-archive prefix (`altimate-<target>`). The curl-install
+    // script (`install` at repo root) expects this prefix and unpacks a single
+    // binary named `altimate` — matching the primary npm bin entry.
+    const archiveName = key.replace(/^@altimateai\/altimate-code-/, "altimate-")
     const archivePath = path.resolve("dist", archiveName)
+    const binaryName = key.includes("win32") ? "altimate.exe" : "altimate"
     if (key.includes("linux")) {
-      await $`tar -czf ${archivePath}.tar.gz *`.cwd(`dist/${key}/bin`)
+      await $`tar -czf ${archivePath}.tar.gz ${binaryName}`.cwd(`dist/${key}/bin`)
     } else {
-      await $`zip -r ${archivePath}.zip *`.cwd(`dist/${key}/bin`)
+      await $`zip ${archivePath}.zip ${binaryName}`.cwd(`dist/${key}/bin`)
     }
   }
 }
