@@ -4,6 +4,7 @@ import { $ } from "bun"
 import fs from "fs"
 import path from "path"
 import { fileURLToPath } from "url"
+import { createRequire } from "node:module"
 import solidPlugin from "@opentui/solid/bun-plugin"
 
 const __filename = fileURLToPath(import.meta.url)
@@ -246,7 +247,13 @@ function altimateCorePlatformFor(item: { os: string; arch: "arm64" | "x64"; abi?
 // node_modules/.bun) — we copy from this for each per-target staging dir.
 const altimateCoreLoaderPkgJson = fileURLToPath(import.meta.resolve("@altimateai/altimate-core/package.json"))
 const altimateCoreLoaderDir = fs.realpathSync(path.dirname(altimateCoreLoaderPkgJson))
-const altimateCoreVersion = pkg.dependencies["@altimateai/altimate-core"]
+
+// A `require` rooted at the loader's index.js so we can resolve sibling
+// `@altimateai/altimate-core-<platform>` packages without hand-walking bun's
+// `.bun/` flat layout. Node's resolution walks parent node_modules from the
+// require base, which (in bun's hoisted layout used by this project) reaches
+// the top-level `node_modules/@altimateai/altimate-core-<platform>` symlinks.
+const altimateCoreLoaderRequire = createRequire(path.join(altimateCoreLoaderDir, "index.js"))
 
 // Extract the `_requiredExports` literal from the upstream NAPI-RS loader so
 // the generated single-platform shim can keep the same correctness check
@@ -265,32 +272,13 @@ if (!requiredExportsMatch) {
 const altimateCoreRequiredExportsLiteral = requiredExportsMatch[1]
 
 // Locate the on-disk dir for an @altimateai/altimate-core-<platform> NAPI
-// prebuild. bun installs each optional platform package in its own `.bun/`
-// store entry, not next to the loader, so import.meta.resolve doesn't find it
-// from the workspace. Walk up from the loader dir looking for the surrounding
-// `.bun` store, then look up the platform package by its conventional name.
+// prebuild. Use createRequire rooted at the loader's index.js — Node's
+// require.resolve walks parent node_modules from the require base, which
+// reaches both bun's hoisted top-level @altimateai/altimate-core-<platform>
+// symlinks and any nested layout.
 function locatePlatformPackageDir(pkgName: string): string {
-  // bun's flat layout: `@scope+name@version` — only the `/` becomes `+`, the
-  // leading `@` of the scope stays.
-  const flatName = pkgName.replace("/", "+")
-  let current = altimateCoreLoaderDir
-  for (;;) {
-    // Match every layout we walk through:
-    //   • current === `.bun`                          → check current
-    //   • current === node_modules                    → check current/.bun
-    //   • current === workspace root above node_modules → check current/node_modules/.bun
-    for (const prefix of [current, path.join(current, ".bun"), path.join(current, "node_modules", ".bun")]) {
-      const candidate = path.join(prefix, `${flatName}@${altimateCoreVersion}`, "node_modules", pkgName)
-      if (fs.existsSync(candidate)) return fs.realpathSync(candidate)
-    }
-    const parent = path.dirname(current)
-    if (parent === current) break
-    current = parent
-  }
-  throw new Error(
-    `Could not locate ${pkgName}@${altimateCoreVersion} on disk under any .bun store; ` +
-      `ensure 'bun install --os=* --cpu=*' has fetched it.`,
-  )
+  const pkgJsonPath = altimateCoreLoaderRequire.resolve(`${pkgName}/package.json`)
+  return fs.realpathSync(path.dirname(pkgJsonPath))
 }
 for (const item of targets) {
   const name = [
