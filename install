@@ -166,6 +166,11 @@ else
     fi
 
     filename="$APP-$target$archive_ext"
+    # Windows release archives ship altimate.exe, every other target ships altimate.
+    binary_name="$APP"
+    if [ "$os" = "windows" ]; then
+      binary_name="$APP.exe"
+    fi
 
 
     if [ "$os" = "linux" ]; then
@@ -340,15 +345,19 @@ download_and_install() {
         unzip -q "$tmp_dir/$filename" -d "$tmp_dir"
     fi
 
-    mv "$tmp_dir/altimate" "$INSTALL_DIR"
-    chmod 755 "${INSTALL_DIR}/altimate"
+    mv "$tmp_dir/$binary_name" "${INSTALL_DIR}/$binary_name"
+    chmod 755 "${INSTALL_DIR}/$binary_name"
     rm -rf "$tmp_dir"
 }
 
 install_from_binary() {
-    print_message info "\n${MUTED}Installing ${NC}altimate ${MUTED}from: ${NC}$binary_path"
-    cp "$binary_path" "${INSTALL_DIR}/altimate"
-    chmod 755 "${INSTALL_DIR}/altimate"
+    # --binary may point to either altimate or altimate.exe; preserve the
+    # caller's basename so the installed file matches what was supplied.
+    local dest_name
+    dest_name=$(basename "$binary_path")
+    print_message info "\n${MUTED}Installing ${NC}$dest_name ${MUTED}from: ${NC}$binary_path"
+    cp "$binary_path" "${INSTALL_DIR}/$dest_name"
+    chmod 755 "${INSTALL_DIR}/$dest_name"
 }
 
 if [ -n "$binary_path" ]; then
