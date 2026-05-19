@@ -121,7 +121,13 @@ else
       fi
 
       if command -v ldd >/dev/null 2>&1; then
-        if ldd --version 2>&1 | grep -qi musl; then
+        # ldd --version exits non-zero on musl by design. With `set -o pipefail`
+        # (line 2), a pipeline `ldd --version 2>&1 | grep -qi musl` would inherit
+        # ldd's failure and the if-block would never fire — defeating musl
+        # detection on every non-Alpine musl distro (Void, Adelie, custom builds).
+        # Capture output first, then grep.
+        ldd_out="$(ldd --version 2>&1 || true)"
+        if printf '%s' "$ldd_out" | grep -qi musl; then
           is_musl=true
         fi
       fi

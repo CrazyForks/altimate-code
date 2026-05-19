@@ -183,6 +183,48 @@ const targets = targetIndexFlag !== undefined
     ? allTargets.filter(t => targetsFlag.includes(t.os))
     : allTargets
 
+// Defense in depth: refuse to produce no artifacts at all, and refuse to build
+// the glibc target on a musl host where the binary would crash at startup.
+//
+// Why it matters:
+//   - `--target-index=N` for an index that no longer exists (after the
+//     musl/win32-arm64 cull) silently yields an empty `targets` array. Without
+//     this guard the build "succeeds" with zero output and CI proceeds.
+//   - `--single` only filters on os/arch, not libc. On Alpine that matches
+//     `linux-x64` (glibc), produces a glibc binary that the musl host can't
+//     load, and dies later with a cryptic linker error.
+if (targets.length === 0) {
+  const reason = targetIndexFlag !== undefined
+    ? `--target-index=${targetIndexFlag} is out of range (allTargets has ${allTargets.length} entries — musl/win32-arm64 were removed).`
+    : singleFlag
+      ? `--single found no entry in allTargets matching ${process.platform}/${process.arch} (host may be excluded — see allTargets at the top of build.ts).`
+      : targetsFlag
+        ? `--targets=${targetsFlag.join(",")} matched nothing in allTargets.`
+        : "allTargets is empty."
+  console.error(`error: no build targets selected. ${reason}`)
+  process.exit(1)
+}
+
+if (singleFlag && process.platform === "linux") {
+  const isMuslHost = (() => {
+    try {
+      if (fs.existsSync("/etc/alpine-release")) return true
+    } catch {}
+    try {
+      const { spawnSync } = require("node:child_process") as typeof import("node:child_process")
+      const r = spawnSync("ldd", ["--version"], { encoding: "utf8" })
+      const text = ((r.stdout ?? "") + (r.stderr ?? "")).toLowerCase()
+      if (text.includes("musl")) return true
+    } catch {}
+    return false
+  })()
+  if (isMuslHost) {
+    console.error("error: --single on a musl-linux host would build the glibc target and produce a binary the host cannot run.")
+    console.error("       altimate-core has no NAPI prebuild for musl yet. Build on a glibc host, or install via `apk add gcompat` + the npm wrapper.")
+    process.exit(1)
+  }
+}
+
 await $`rm -rf dist`
 
 // Packages excluded from the compiled binary — must be resolvable from

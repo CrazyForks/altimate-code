@@ -19,7 +19,7 @@ import { describe, test, expect } from "bun:test"
 import { spawnSync, execFileSync } from "child_process"
 import path from "path"
 import fs from "fs"
-import os from "os"
+import { tmpdir } from "../fixture/fixture"
 
 const PKG_DIR = path.resolve(import.meta.dir, "../..")
 const REPO_ROOT = path.resolve(PKG_DIR, "../..")
@@ -94,7 +94,7 @@ describe("compiled binary smoke test", () => {
     expect(result.stderr).not.toContain("Cannot find module")
   })
 
-  runTest("binary succeeds with NODE_PATH cleared (standalone mode)", () => {
+  runTest("binary succeeds with NODE_PATH cleared (standalone mode)", async () => {
     // The Bun-compiled binary embeds @altimateai/altimate-core's NAPI .node
     // directly into bunfs (see script/build.ts — staged shim + resolver
     // plugin). It MUST start without any external NODE_PATH or companion
@@ -102,12 +102,15 @@ describe("compiled binary smoke test", () => {
     // crash where altimate-core was marked `external` and the standalone
     // archive shipped without it.
     //
-    // Hermeticity: cwd is the OS tmpdir so the binary cannot walk upward and
-    // discover the worktree's node_modules. Without this, Bun's compiled
-    // binary falls back to filesystem resolution from process.execPath and
-    // the test passes even if the staged-shim onResolve silently misses.
+    // Hermeticity: cwd is a freshly-created tmp dir so the binary cannot walk
+    // upward and discover the worktree's node_modules. Without this, Bun's
+    // compiled binary falls back to filesystem resolution from process.execPath
+    // and the test passes even if the staged-shim onResolve silently misses.
+    //
+    // Uses the repo's tmpdir() fixture for auto-cleanup via `await using`.
+    await using tmp = await tmpdir()
     const result = spawnSync(binary!, ["--version"], {
-      cwd: os.tmpdir(),
+      cwd: tmp.path,
       encoding: "utf-8",
       timeout: 15_000,
       env: {
