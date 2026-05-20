@@ -290,6 +290,25 @@ function altimateCorePlatformFor(item: { os: string; arch: "arm64" | "x64"; abi?
 const altimateCoreLoaderPkgJson = fileURLToPath(import.meta.resolve("@altimateai/altimate-core/package.json"))
 const altimateCoreLoaderDir = fs.realpathSync(path.dirname(altimateCoreLoaderPkgJson))
 
+// Pin: the version actually on disk must match what package.json declares.
+// `bun install --os=* --cpu=*` hoists into `node_modules/.bun/` and re-links
+// the top-level entry, but a previous hoist for an older version can linger.
+// Asserting here catches the case where the build silently embeds yesterday's
+// .node into today's release archive.
+{
+  const expected = pkg.dependencies["@altimateai/altimate-core"]
+  const resolvedVersion = JSON.parse(
+    fs.readFileSync(path.join(altimateCoreLoaderDir, "package.json"), "utf8"),
+  ).version
+  if (resolvedVersion !== expected) {
+    throw new Error(
+      `build.ts: resolved @altimateai/altimate-core version ${resolvedVersion} ` +
+        `does not match package.json (${expected}). ` +
+        `Run 'rm -rf node_modules bun.lock && bun install' to refresh the hoist.`,
+    )
+  }
+}
+
 // A `require` rooted at the loader's index.js so we can resolve sibling
 // `@altimateai/altimate-core-<platform>` packages without hand-walking bun's
 // `.bun/` flat layout. Node's resolution walks parent node_modules from the
@@ -311,7 +330,31 @@ if (!requiredExportsMatch) {
       "The upstream NAPI-RS loader format changed — update the regex (see script/build.ts).",
   )
 }
-const altimateCoreRequiredExportsLiteral = requiredExportsMatch[1]
+// Parse and validate: the captured literal must be a pure JSON array of
+// non-empty string literals. The regex above would happily match
+// `["x"]; <attacker code>; const _foo = [` and the matched group would
+// then be inlined verbatim into the staged shim — embedding attacker JS
+// into our shipped binary. Strict parse + shape-check refuses any value
+// that isn't a string-array.
+let altimateCoreRequiredExportsLiteral: string
+try {
+  const parsed = JSON.parse(requiredExportsMatch[1])
+  if (
+    !Array.isArray(parsed) ||
+    parsed.length === 0 ||
+    !parsed.every((n) => typeof n === "string" && n.length > 0 && n.length < 200)
+  ) {
+    throw new Error("not an array of non-empty short string literals")
+  }
+  // Re-serialize so the shim is built from validated data, not the raw match.
+  altimateCoreRequiredExportsLiteral = JSON.stringify(parsed)
+} catch (err) {
+  throw new Error(
+    `build.ts: _requiredExports literal from @altimateai/altimate-core/index.js failed validation: ${
+      err instanceof Error ? err.message : String(err)
+    }. Refusing to inline into the staged shim.`,
+  )
+}
 
 // Locate the on-disk dir for an @altimateai/altimate-core-<platform> NAPI
 // prebuild. Use createRequire rooted at the loader's index.js — Node's
@@ -371,6 +414,11 @@ for (const item of targets) {
   }
 
   const stagedAltimateCoreDir = path.join(dir, "dist", name, ".altimate-core-staged", "@altimateai", "altimate-core")
+  // Pre-loop cleanup: a previous build that crashed between staging and the
+  // post-build cleanup would leave a stale `.altimate-core-staged/` here.
+  // Without this, the next build could see the old shim and (if onResolve
+  // regresses) embed yesterday's .node. Wipe before staging fresh.
+  await $`rm -rf dist/${name}/.altimate-core-staged`
   await $`mkdir -p ${stagedAltimateCoreDir}`
   // Keep index.d.ts + package.json so typecheck and resolution stay happy.
   fs.copyFileSync(path.join(altimateCoreLoaderDir, "package.json"), path.join(stagedAltimateCoreDir, "package.json"))

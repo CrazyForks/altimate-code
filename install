@@ -96,6 +96,7 @@ else
       rosetta_flag=$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)
       if [ "$rosetta_flag" = "1" ]; then
         arch="arm64"
+        echo -e "${MUTED}Rosetta detected — installing arm64 build${NC}"
       fi
     fi
 
@@ -141,7 +142,8 @@ else
       echo -e "${RED}Alpine Linux (musl) is not currently supported by the standalone install.${NC}"
       echo -e "${MUTED}altimate-core has no NAPI prebuild for musl yet. Workarounds:${NC}"
       echo -e "  • apk add gcompat   ${MUTED}# run glibc binaries on Alpine${NC}"
-      echo -e "  • Use npm: npm install -g altimate-code"
+      echo -e "  • Use npm + gcompat: apk add gcompat && npm install -g altimate-code"
+      echo -e "    ${MUTED}(the npm postinstall also bails on raw musl; gcompat is required either way)${NC}"
       exit 1
     fi
 
@@ -240,16 +242,23 @@ print_message() {
 }
 
 check_version() {
+    # Probe both names: the curl-installed binary is `altimate` (v0.7.1+) but
+    # earlier curl installs and the npm alias still expose `altimate-code`.
+    # Without probing both, an upgrade from v0.7.0 would always re-download.
+    local probe=""
     if command -v altimate >/dev/null 2>&1; then
-        altimate_path=$(which altimate)
+        probe="altimate"
+    elif command -v altimate-code >/dev/null 2>&1; then
+        probe="altimate-code"
+    fi
 
-        ## Check the installed version
-        installed_version=$(altimate --version 2>/dev/null || echo "")
+    if [ -n "$probe" ]; then
+        installed_version=$("$probe" --version 2>/dev/null || echo "")
 
         if [[ "$installed_version" != "$specific_version" ]]; then
             print_message info "${MUTED}Installed version: ${NC}$installed_version."
         else
-            print_message info "${MUTED}Version ${NC}$specific_version${MUTED} already installed"
+            print_message info "${MUTED}Version ${NC}$specific_version${MUTED} already installed${NC}"
             exit 0
         fi
     fi
@@ -358,14 +367,28 @@ download_and_install() {
         curl --fail -# -L -o "$tmp_dir/$filename" "$url"
     fi
 
+    # Extract only the expected binary member rather than the whole archive.
+    # The current build only puts a single file in each archive, but listing
+    # the member explicitly makes a future "tars a whole directory" mistake
+    # incapable of writing attacker-controlled paths to disk.
     if [ "$os" = "linux" ]; then
-        tar -xzf "$tmp_dir/$filename" -C "$tmp_dir"
+        tar --no-same-owner -xzf "$tmp_dir/$filename" -C "$tmp_dir" "$binary_name"
     else
-        unzip -q "$tmp_dir/$filename" -d "$tmp_dir"
+        unzip -q "$tmp_dir/$filename" "$binary_name" -d "$tmp_dir"
     fi
 
     mv "$tmp_dir/$binary_name" "${INSTALL_DIR}/$binary_name"
     chmod 755 "${INSTALL_DIR}/$binary_name"
+
+    # If the previous install dropped `altimate-code` here (pre-v0.7.1 curl
+    # install), remove it so users don't end up running a stale binary by
+    # name. The npm/Homebrew/AUR paths still expose both names; only the
+    # standalone $INSTALL_DIR has the rename collapse.
+    if [ "$os" != "windows" ] && [ -f "${INSTALL_DIR}/altimate-code" ]; then
+        rm -f "${INSTALL_DIR}/altimate-code"
+        print_message info "${MUTED}Removed stale ${NC}altimate-code${MUTED} from ${NC}$INSTALL_DIR${MUTED} (renamed to altimate in v0.7.1)${NC}"
+    fi
+
     rm -rf "$tmp_dir"
 }
 
@@ -374,9 +397,21 @@ install_from_binary() {
     # caller's basename so the installed file matches what was supplied.
     local dest_name
     dest_name=$(basename "$binary_path")
+    local dest_path="${INSTALL_DIR}/$dest_name"
+
+    # Guard against cp-on-self: `--binary ~/.altimate/bin/altimate` would
+    # truncate the destination first and produce an empty file. Compare
+    # canonical paths (`-ef` checks inode equality; portable across coreutils
+    # and BusyBox).
+    if [ -f "$dest_path" ] && [ "$binary_path" -ef "$dest_path" ]; then
+        print_message info "${MUTED}Source and destination are the same file — nothing to do: ${NC}$dest_path"
+        chmod 755 "$dest_path"
+        return 0
+    fi
+
     print_message info "\n${MUTED}Installing ${NC}$dest_name ${MUTED}from: ${NC}$binary_path"
-    cp "$binary_path" "${INSTALL_DIR}/$dest_name"
-    chmod 755 "${INSTALL_DIR}/$dest_name"
+    cp "$binary_path" "$dest_path"
+    chmod 755 "$dest_path"
 }
 
 if [ -n "$binary_path" ]; then
@@ -474,11 +509,12 @@ fi
 echo -e ""
 echo -e ""
 echo -e ""
-echo -e "${MUTED}To start:${NC}"
+echo -e "${MUTED}Get started:${NC}"
 echo -e ""
-echo -e "cd <project>  ${MUTED}# Open directory${NC}"
-echo -e "altimate      ${MUTED}# Run command${NC}"
+echo -e "altimate                 ${MUTED}# Open the TUI${NC}"
+echo -e "altimate run \"hello\"     ${MUTED}# Run a quick task${NC}"
+echo -e "altimate --help          ${MUTED}# See all commands${NC}"
 echo -e ""
-echo -e "${MUTED}For more information visit ${NC}https://altimate.ai"
+echo -e "${MUTED}Docs: ${NC}https://altimate-code.dev"
 echo -e ""
 echo -e ""

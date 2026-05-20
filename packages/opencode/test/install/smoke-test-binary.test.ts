@@ -24,28 +24,50 @@ import { tmpdir } from "../fixture/fixture"
 const PKG_DIR = path.resolve(import.meta.dir, "../..")
 const REPO_ROOT = path.resolve(PKG_DIR, "../..")
 
-// Find the locally-built binary for the current platform
+// Find the locally-built binary for the current platform. The build target
+// naming scheme is `@altimateai/altimate-code-<os>-<arch>[-baseline]`, where
+// `<os>` is `linux`/`darwin`/`windows`. We need to match by host OS+arch
+// only — running a Linux ELF on Darwin makes spawnSync return null status
+// with a cryptic failure that has nothing to do with the test's actual
+// invariant.
 function findLocalBinary(): string | undefined {
   const distDir = path.join(PKG_DIR, "dist")
   if (!fs.existsSync(distDir)) return undefined
 
-  // Walk dist/ recursively — binary packages may be scoped (@altimateai/...)
+  // node `process.platform` → build's `<os>` slug.
+  const hostOsSlug =
+    process.platform === "win32" ? "windows" : process.platform === "darwin" ? "darwin" : "linux"
+  // Build only emits arm64 / x64.
+  const hostArchSlug = process.arch === "arm64" ? "arm64" : "x64"
+
+  function dirMatchesHost(dirName: string): boolean {
+    // Match the target slug (e.g. `linux-x64`, `darwin-arm64-baseline`).
+    // Reject cross-platform builds outright.
+    return dirName.includes(`-${hostOsSlug}-${hostArchSlug}`) || dirName.endsWith(`-${hostOsSlug}-${hostArchSlug}`)
+  }
+
   const binaryNames = process.platform === "win32" ? ["altimate.exe", "altimate"] : ["altimate"]
-  function search(dir: string): string | undefined {
+  function search(dir: string, requireHostMatch: boolean): string | undefined {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue
       const sub = path.join(dir, entry.name)
+      if (requireHostMatch && !dirMatchesHost(entry.name)) {
+        // Still recurse — the host-matching dir may live under a scoped
+        // subdir like `@altimateai/altimate-code-linux-x64`.
+        const nested = search(sub, true)
+        if (nested) return nested
+        continue
+      }
       for (const name of binaryNames) {
         const binPath = path.join(sub, "bin", name)
         if (fs.existsSync(binPath)) return binPath
       }
-      // Recurse one level for scoped packages (e.g. @altimateai/)
-      const nested = search(sub)
+      const nested = search(sub, true)
       if (nested) return nested
     }
     return undefined
   }
-  return search(distDir)
+  return search(distDir, true)
 }
 
 // Resolve NODE_PATH the same way the bin wrapper does — walk up from

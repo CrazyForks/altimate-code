@@ -1,5 +1,57 @@
 # Troubleshooting
 
+## Installation
+
+### Standalone binary not found after curl install
+
+**Symptoms:** `altimate-code: command not found` after running `curl -fsSL https://altimate.ai/install | bash`.
+
+As of v0.7.1 the curl-installed binary is named `altimate`, not `altimate-code`. The npm package continues to ship both names. If you scripted against the curl install:
+
+```bash
+# Before (v0.7.0 and earlier curl install):
+~/.altimate-code/bin/altimate-code run "..."
+
+# After (v0.7.1+ curl install):
+~/.altimate/bin/altimate run "..."
+```
+
+Or stay on the `altimate-code` name by installing via npm: `npm install -g altimate-code`.
+
+### `Cannot find module '@altimateai/altimate-code-core'`
+
+**Symptoms:** Binary crashes on first run with the above error (curl-installed v0.7.0 and earlier).
+
+The v0.7.0 curl install shipped without the NAPI native module. Fixed in v0.7.1 — the native module is now embedded directly into the binary. Re-install with:
+
+```bash
+curl -fsSL https://altimate.ai/install | bash
+```
+
+### Alpine Linux (musl) not supported
+
+**Symptoms:** `Alpine Linux (musl) is not currently supported by the standalone install` during curl install, or `altimate-code is not currently supported on Alpine Linux (musl)` during `npm install` postinstall.
+
+`@altimateai/altimate-core` has no NAPI prebuild for musl. Workarounds:
+
+```bash
+# Run the glibc binary under Alpine (recommended):
+apk add gcompat
+
+# Then either:
+curl -fsSL https://altimate.ai/install | bash   # standalone binary
+# or:
+apk add gcompat && npm install -g altimate-code  # npm install
+```
+
+Or use a glibc-based base image (`debian`, `ubuntu`, `node:slim`).
+
+### Windows on ARM64 not supported
+
+**Symptoms:** `altimate-code is not currently built for Windows on ARM64` during install.
+
+Run the x64 build under Windows-on-ARM's x64 emulation layer, or use WSL.
+
 ## Log Files
 
 Logs are stored at:

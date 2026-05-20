@@ -100,6 +100,12 @@ export namespace Installation {
   }
 
   export async function method() {
+    // altimate_change start — detect altimate-code curl install at ~/.altimate/bin
+    // (the standalone install dir was renamed in v0.7.1; `.opencode/bin` is kept
+    // for users still on a pre-rename layout, `.local/bin` for distros that
+    // resolve there).
+    if (process.execPath.includes(path.join(".altimate", "bin"))) return "curl"
+    // altimate_change end
     if (process.execPath.includes(path.join(".opencode", "bin"))) return "curl"
     if (process.execPath.includes(path.join(".local", "bin"))) return "curl"
     const exec = process.execPath.toLowerCase()
