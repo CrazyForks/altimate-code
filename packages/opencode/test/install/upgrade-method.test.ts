@@ -85,8 +85,12 @@ describe("upgrade execution", () => {
     expect(INSTALLATION_SRC).toContain("HOMEBREW_NO_AUTO_UPDATE")
   })
 
-  test("curl upgrade uses altimate.ai/install endpoint", () => {
-    expect(INSTALLATION_SRC).toContain("https://altimate.ai/install")
+  test("curl upgrade uses altimate.sh/install endpoint", () => {
+    expect(INSTALLATION_SRC).toContain("https://altimate.sh/install")
+    // altimate.ai/install was the legacy URL (broken since 2026-05; tracked in
+    // #309). Keep the assertion so any future regression that reintroduces it
+    // fires immediately.
+    expect(INSTALLATION_SRC).not.toContain("https://altimate.ai/install")
   })
 
   test("VERSION normalization strips v prefix", () => {

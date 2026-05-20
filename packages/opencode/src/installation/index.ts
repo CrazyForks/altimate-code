@@ -34,7 +34,7 @@ export namespace Installation {
   }
 
   async function upgradeCurl(target: string) {
-    const body = await fetch("https://altimate.ai/install").then((res) => {
+    const body = await fetch("https://altimate.sh/install").then((res) => {
       if (!res.ok) throw new Error(res.statusText)
       return res.text()
     })
