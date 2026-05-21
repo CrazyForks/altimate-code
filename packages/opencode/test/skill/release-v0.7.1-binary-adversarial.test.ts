@@ -281,7 +281,9 @@ describe("v0.7.1 PR #820 — docs surface coverage", () => {
   })
   test("README documents the curl install option with the correct binary name", () => {
     const readme = readFileSync(path.join(REPO_ROOT, "README.md"), "utf8")
-    expect(readme).toContain("curl -fsSL https://altimate.ai/install | bash")
+    // Accept either apex (altimate.sh) or www. host so a future apex-DNS fix
+    // that swaps www.altimate.sh → altimate.sh doesn't need another test update.
+    expect(readme).toMatch(/curl -fsSL https:\/\/(www\.)?altimate\.sh\/install \| bash/)
     expect(readme).toContain("~/.altimate/bin")
     expect(readme).toMatch(/single self-contained binary named `altimate`/)
   })

@@ -121,8 +121,12 @@ describe("Installation Script", () => {
     expect(installContent).not.toContain("anomalyco")
   })
 
-  test("references altimate.ai domain for user-facing URLs", () => {
-    expect(installContent).toContain("altimate.ai")
+  test("references altimate-owned domain for user-facing URLs", () => {
+    // The install URL moved from altimate.ai → altimate.sh in v0.7.1 because
+    // altimate.ai/install was an unreachable route on the marketing SPA
+    // (issue #309). altimate.sh is the canonical altimate-code site.
+    expect(installContent).toContain("altimate.sh/install")
+    expect(installContent).not.toContain("altimate.ai/install")
   })
 })
 

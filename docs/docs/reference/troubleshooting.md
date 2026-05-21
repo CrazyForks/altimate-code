@@ -4,7 +4,7 @@
 
 ### Standalone binary not found after curl install
 
-**Symptoms:** `altimate-code: command not found` after running `curl -fsSL https://altimate.ai/install | bash`.
+**Symptoms:** `altimate-code: command not found` after running `curl -fsSL https://www.altimate.sh/install | bash`.
 
 As of v0.7.1 the curl-installed binary is named `altimate`, not `altimate-code`. The npm package continues to ship both names. If you scripted against the curl install:
 
@@ -25,7 +25,7 @@ Or stay on the `altimate-code` name by installing via npm: `npm install -g altim
 The v0.7.0 curl install shipped without the NAPI native module. Fixed in v0.7.1 — the native module is now embedded directly into the binary. Re-install with:
 
 ```bash
-curl -fsSL https://altimate.ai/install | bash
+curl -fsSL https://www.altimate.sh/install | bash
 ```
 
 ### Alpine Linux (musl) not supported
@@ -39,7 +39,7 @@ curl -fsSL https://altimate.ai/install | bash
 apk add gcompat
 
 # Then either:
-curl -fsSL https://altimate.ai/install | bash   # standalone binary
+curl -fsSL https://www.altimate.sh/install | bash   # standalone binary
 # or:
 apk add gcompat && npm install -g altimate-code  # npm install
 ```
