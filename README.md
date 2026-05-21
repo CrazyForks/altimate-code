@@ -31,7 +31,7 @@ npm install -g altimate-code
 Or via curl (installs the `altimate` binary to `~/.altimate/bin`):
 
 ```bash
-curl -fsSL https://altimate.sh/install | bash
+curl -fsSL https://www.altimate.sh/install | bash
 ```
 
 The curl install drops a single self-contained binary named `altimate`. The npm install exposes both `altimate` and `altimate-code` on PATH; the curl install only exposes `altimate`. Alpine Linux (musl) and Windows on ARM64 are not currently supported by the standalone binary — use `apk add gcompat` on Alpine, or use WSL on Windows-on-ARM.

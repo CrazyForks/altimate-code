@@ -86,7 +86,11 @@ describe("upgrade execution", () => {
   })
 
   test("curl upgrade uses altimate.sh/install endpoint", () => {
-    expect(INSTALLATION_SRC).toContain("https://altimate.sh/install")
+    // Accept either apex (altimate.sh) or www. host. Apex routes to a non-
+    // Amplify origin today, so the source uses www.altimate.sh; once the
+    // apex is fixed (separate infra change), the source can drop www. and
+    // this assertion still passes.
+    expect(INSTALLATION_SRC).toMatch(/https:\/\/(www\.)?altimate\.sh\/install/)
     // altimate.ai/install was the legacy URL (broken since 2026-05; tracked in
     // #309). Keep the assertion so any future regression that reintroduces it
     // fires immediately.

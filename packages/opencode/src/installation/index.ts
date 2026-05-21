@@ -34,10 +34,15 @@ export namespace Installation {
   }
 
   async function upgradeCurl(target: string) {
-    const body = await fetch("https://altimate.sh/install").then((res) => {
+    // altimate_change start — curl-upgrade endpoint URL
+    // Upstream uses opencode.ai/install. We fetch the altimate install script
+    // from www.altimate.sh/install (the apex altimate.sh isn't routed to the
+    // Amplify Next.js app — tracked separately; revisit when apex DNS is fixed).
+    const body = await fetch("https://www.altimate.sh/install").then((res) => {
       if (!res.ok) throw new Error(res.statusText)
       return res.text()
     })
+    // altimate_change end
     const proc = Process.spawn(["bash"], {
       stdin: "pipe",
       stdout: "pipe",
