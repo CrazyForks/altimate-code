@@ -101,7 +101,20 @@ describe("upgrade execution", () => {
     // Without a timeout the install-script fetch can stall indefinitely on a
     // hung CDN/origin, blocking `altimate upgrade` forever. Use AbortSignal.timeout
     // so the request fails fast with a clear error instead.
-    expect(INSTALLATION_SRC).toMatch(/AbortSignal\.timeout\(\s*15_000\s*\)/)
+    // Assert on the named constant + 15s value separately so a future refactor
+    // that extracts the literal (e.g., `AbortSignal.timeout(UPGRADE_FETCH_TIMEOUT_MS)`)
+    // doesn't break this regression guard for cosmetic reasons.
+    expect(INSTALLATION_SRC).toMatch(/AbortSignal\.timeout\(/)
+    expect(INSTALLATION_SRC).toMatch(/UPGRADE_FETCH_TIMEOUT_MS\s*=\s*15_000/)
+  })
+
+  test("curl upgrade fetch failure surfaces an actionable error", () => {
+    // A raw `AbortError: The operation was aborted` is useless to a user on a
+    // flaky network — they should see the URL, the manual-recovery curl
+    // one-liner, and the GitHub releases fallback so they can self-recover.
+    expect(INSTALLATION_SRC).toContain("Could not download install script from")
+    expect(INSTALLATION_SRC).toContain("Re-run the install manually")
+    expect(INSTALLATION_SRC).toContain("github.com/AltimateAI/altimate-code/releases/latest")
   })
 
   test("VERSION normalization strips v prefix", () => {

@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.2] - 2026-05-21
+
+A focused hotfix for v0.7.1's broken install endpoint plus a defensive pass on the upgrade fetch surface. v0.7.1 documented and embedded `https://altimate.ai/install` in the curl install path and in `altimate upgrade`'s in-place upgrader — that host is the marketing-site SPA and returns an HTML 404 for `/install`, so every curl install and every curl-installed user's `altimate upgrade` silently failed end-to-end. v0.7.2 swaps the host to `https://www.altimate.sh/install` (apex `altimate.sh` is still not routed to the Amplify Next.js app — tracked separately, drop the `www.` once apex DNS is fixed), wraps the upgrader fetch with a 15s bounded timeout, replaces the raw `AbortError: The operation was aborted` with an actionable error that names the URL, prints the manual re-install one-liner, and points at the GitHub releases fallback. Realigns the published GitHub Action (`github/action.yml`) with the v0.7.1 binary rename (`altimate-code` → `altimate`) and new install directory (`~/.altimate/bin`) — pre-fix, every Action consumer hit the broken URL on cache miss and then a missing binary even if the URL had worked. 30 adversarial tests pin the regression classes (URL eradication, cross-file host consistency, named-constant invariants, error-surface invariants, action.yml alignment, marker integrity, migration recovery surface, CHANGELOG presence).
+
+**If you installed v0.7.1 via curl, your `altimate upgrade` will still fail until you re-install manually once:**
+
+```bash
+curl -fsSL https://www.altimate.sh/install | bash
+```
+
+After that, v0.7.2 and forward self-heal.
+
+### Fixed
+
+- **`Installation.upgradeCurl()` now fetches from `https://www.altimate.sh/install` instead of the unreachable `https://altimate.ai/install`.** v0.7.1 had pointed the in-place upgrader at the marketing site, which routes everything through a React Router SPA — `/install` rendered an HTML 404 page, the upgrader's `fetch` succeeded with a 200, the response body was the 404 HTML, and `bash` either executed the HTML and failed cryptically or hung mid-stream. The matching curl install one-liner in `install --help`, `README.md`, and `docs/docs/reference/troubleshooting.md` (three references) was broken the same way. www.altimate.sh now serves the install script via a Next.js route handler with `Content-Type: text/x-shellscript`. (#825, closes #309)
+- **Published GitHub Action (`github/action.yml`) realigned with the v0.7.1 binary rename.** v0.7.1 renamed the curl-installed binary `altimate-code` → `altimate` and moved the install directory `~/.altimate-code/bin` → `~/.altimate/bin`, but the Action's cache `path:`, `$GITHUB_PATH` addition, and final `run:` step still referenced the legacy `altimate-code` name and path. Combined with the broken install URL, every Action consumer hit a 404 on cache miss followed by an empty `$PATH` and a `altimate-code: command not found` even after the install "succeeded". All four references updated in lockstep.
+- **`altimate upgrade` (curl method) no longer hangs indefinitely on a stalled CDN/origin.** The fetch is bounded by `AbortSignal.timeout(UPGRADE_FETCH_TIMEOUT_MS)` (15s) so a TLS-rewriting corporate proxy, a hung CloudFront edge, or a slow-loris-style stall fails fast instead of blocking the user's terminal for minutes. Surfaced via CodeRabbit review on #825.
+
+### Changed
+
+- **Curl-upgrade fetch failures now surface an actionable error instead of `AbortError: The operation was aborted`.** Pre-fix, a timeout, a 404, a DNS failure, or a connection refused would propagate as `DOMException: The operation was aborted` (timeout) or `Error: Not Found` (HTTP non-2xx) — neither named the URL, the recovery path, or the fallback. The fetch is now wrapped in `try/catch` and the rethrown error reads: `"Could not download install script from https://www.altimate.sh/install: <cause>. Re-run the install manually: curl -fsSL https://www.altimate.sh/install | bash — or download a release binary directly from https://github.com/AltimateAI/altimate-code/releases/latest"`. HTTP non-2xx now also includes the numeric status (`HTTP 404 Not Found` instead of just `Not Found`).
+- **`UPGRADE_INSTALL_URL` and `UPGRADE_FETCH_TIMEOUT_MS` extracted as named constants** inside the `altimate_change` block in `packages/opencode/src/installation/index.ts`. Pre-fix, the URL and timeout were duplicated string + literal across the source and the test assertion. A future timeout tune (15s → 20s) would have required three coordinated edits; now it's one. The adversarial test asserts the existence of the named constant separately from the literal value so the regression guard isn't brittle to constant extraction itself.
+- **`altimate_change` marker block in `installation/index.ts` extended.** The v0.7.1 release did not mark the line where `upgradeCurl()` fetches the install script; v0.7.2 wraps the URL + timeout constants and the entire fetch+wrap block in a single marker pair so the next upstream bridge merge sees the intent and doesn't silently revert the URL or strip the timeout.
+
+### Testing
+
+- 30 adversarial tests in `release-v0.7.2-adversarial.test.ts` pinning the v0.7.2 surface:
+  - **URL eradication** — 5 surfaces (`installation/index.ts`, `install`, `README.md`, `troubleshooting.md`, `github/action.yml`) each negative-asserted to not contain `altimate.ai/install`. The intentional `altimate.ai/discord` link in `docs/mkdocs.yml` is positively asserted as still present (different path, marketing-site contact info, intentionally out of scope).
+  - **Cross-file host consistency** — the host used in the source `UPGRADE_INSTALL_URL` is automatically compared against every other reference in README, troubleshooting docs, install script, and action.yml. A future "drop the www." that updates the source but misses README will fail loudly.
+  - **`install --help` examples** — both examples in the `--help` block asserted (a previous half-fix had updated only the first); negative assertion against the legacy host on the help block specifically.
+  - **Bounded timeout** — `AbortSignal.timeout(` is wired, `UPGRADE_FETCH_TIMEOUT_MS = 15_000` is a named constant, the fetch references the constant by name, and a raw `AbortSignal.timeout(15_000)` literal is forbidden (would mean someone reverted the constant extraction).
+  - **Error surface** — the fetch lives inside a try/catch, the rethrown error message names the URL, includes the manual re-install one-liner with the URL templated through the constant, points at the GitHub releases fallback, and surfaces HTTP status codes (`HTTP ${res.status} ${res.statusText}`).
+  - **`github/action.yml` alignment** — install URL, cache path, `$GITHUB_PATH` addition, and final binary invocation all match the v0.7.1 rename; negative assertions against every legacy form. Action file existence asserted at `github/action.yml` (not `.github/action.yml`) since moving it would silently break every downstream consumer.
+  - **Marker integrity** — URL/timeout constants live inside an `altimate_change` block; try/catch wrapper lives inside an `altimate_change` block; balanced start/end count across the file.
+  - **Migration recovery surface** — troubleshooting doc still has the install-path section with the new URL; README curl one-liner matches the source's `UPGRADE_INSTALL_URL` host.
+  - **CHANGELOG presence** — release-skill backstop that catches a release commit without a 0.7.2 entry.
+
 ## [0.7.1] - 2026-05-20
 
 A focused provider-error pass plus the standalone-binary fix: the curl-installed binary now starts (previously crashed with `Cannot find module '@altimateai/altimate-core'`), is renamed to match the npm primary `bin` (`altimate-code` → `altimate` for the curl path only), and Alpine + Windows-on-ARM hit a clear early-exit instead of a cryptic gzip failure. Two 5-persona pre-release reviews (provider-error pass, then binary-fix + rename pass) drove the surface — 86 adversarial tests total pin the regression classes.
