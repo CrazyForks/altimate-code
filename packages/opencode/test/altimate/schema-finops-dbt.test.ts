@@ -660,20 +660,23 @@ describe("FinOps: handler error paths (no warehouse configured)", () => {
     expect(result.success).toBe(false)
   })
 
-  test("finops.role_hierarchy returns error for non-snowflake", async () => {
+  test("finops.role_hierarchy returns error for unknown warehouse", async () => {
     const result = await Dispatcher.call("finops.role_hierarchy", {
       warehouse: "nonexistent",
     } as any)
     expect(result.success).toBe(false)
-    expect(result.error).toContain("not available")
+    // The new warehouse resolver returns "not configured" (more precise than
+    // the old "not available for X" message — the warehouse doesn't exist at
+    // all, regardless of type).
+    expect(result.error).toContain("not configured")
   })
 
-  test("finops.user_roles returns error for non-snowflake", async () => {
+  test("finops.user_roles returns error for unknown warehouse", async () => {
     const result = await Dispatcher.call("finops.user_roles", {
       warehouse: "nonexistent",
     } as any)
     expect(result.success).toBe(false)
-    expect(result.error).toContain("not available")
+    expect(result.error).toContain("not configured")
   })
 })
 

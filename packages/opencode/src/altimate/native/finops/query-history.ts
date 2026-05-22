@@ -5,7 +5,7 @@
  */
 
 import * as Registry from "../connections/registry"
-import { bqRegionFor, interpolateBqRegion, sanitizeBqRegion } from "./bq-utils"
+import { bqRegionFor, interpolateBqRegion } from "./bq-utils"
 import { resolveFinopsWarehouse } from "./warehouse-resolver"
 import type { QueryHistoryParams, QueryHistoryResult } from "../types"
 

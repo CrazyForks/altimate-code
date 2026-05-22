@@ -578,7 +578,8 @@ export interface ExpensiveQueriesResult {
 // --- FinOps: Warehouse Advisor ---
 
 export interface WarehouseAdvisorParams {
-  warehouse: string
+  /** Warehouse connection name. If omitted, the first compatible warehouse is auto-picked. */
+  warehouse?: string
   days?: number
 }
 
@@ -594,7 +595,8 @@ export interface WarehouseAdvisorResult {
 // --- FinOps: Unused Resources ---
 
 export interface UnusedResourcesParams {
-  warehouse: string
+  /** Warehouse connection name. If omitted, the first compatible warehouse is auto-picked. */
+  warehouse?: string
   days?: number
   limit?: number
 }
@@ -611,7 +613,8 @@ export interface UnusedResourcesResult {
 // --- FinOps: Role & Access ---
 
 export interface RoleGrantsParams {
-  warehouse: string
+  /** Warehouse connection name. If omitted, the first compatible warehouse is auto-picked. */
+  warehouse?: string
   role?: string
   object_name?: string
   limit?: number
@@ -626,7 +629,8 @@ export interface RoleGrantsResult {
 }
 
 export interface RoleHierarchyParams {
-  warehouse: string
+  /** Warehouse connection name. If omitted, the first compatible (Snowflake) warehouse is auto-picked. */
+  warehouse?: string
 }
 
 export interface RoleHierarchyResult {
@@ -637,7 +641,8 @@ export interface RoleHierarchyResult {
 }
 
 export interface UserRolesParams {
-  warehouse: string
+  /** Warehouse connection name. If omitted, the first compatible (Snowflake) warehouse is auto-picked. */
+  warehouse?: string
   user?: string
   limit?: number
 }

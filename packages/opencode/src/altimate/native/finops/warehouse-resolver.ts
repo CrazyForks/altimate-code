@@ -59,6 +59,10 @@ export function resolveFinopsWarehouse(opts: ResolveOptions): FinopsWarehouseRes
   if (requested && requested.trim() !== "") {
     const match = all.find((w) => w.name === requested)
     if (!match) {
+      // Error messages enumerate configured warehouse names so the LLM can
+      // self-correct. This is intentional — names are already accessible via
+      // the warehouse_list tool, so this is not new information disclosure;
+      // it just shortens the recovery path.
       const availableNames = all.map((w) => w.name).join(", ")
       return {
         kind: "error",
@@ -68,8 +72,14 @@ export function resolveFinopsWarehouse(opts: ResolveOptions): FinopsWarehouseRes
           `Pass one of those as the 'warehouse' parameter, or omit it to use the default.`,
       }
     }
-    if (!supportedTypes.includes(match.type)) {
-      const compatible = all.filter((w) => supportedTypes.includes(w.type)).map((w) => w.name)
+    // Driver types are case-insensitive (DRIVER_MAP in registry.ts uses
+    // toLowerCase()). Normalize here so a config with `type: "Snowflake"`
+    // resolves the same as `type: "snowflake"`.
+    const matchTypeLower = match.type.toLowerCase()
+    if (!supportedTypes.includes(matchTypeLower)) {
+      const compatible = all
+        .filter((w) => supportedTypes.includes(w.type.toLowerCase()))
+        .map((w) => w.name)
       const hint =
         compatible.length > 0
           ? `Try one of: ${compatible.join(", ")}.`
@@ -79,11 +89,16 @@ export function resolveFinopsWarehouse(opts: ResolveOptions): FinopsWarehouseRes
         error: `${operationName} is not available for ${match.type} warehouses. ${hint}`,
       }
     }
-    return { kind: "ok", warehouse: match.name, type: match.type, autoPicked: false }
+    return { kind: "ok", warehouse: match.name, type: matchTypeLower, autoPicked: false }
   }
 
   // No requested warehouse — auto-pick first compatible.
-  const compatible = all.find((w) => supportedTypes.includes(w.type))
+  //
+  // Order is whatever Registry.list() returns, which follows config-load order
+  // (global file → local file → env vars). Deterministic per machine but may
+  // vary across machines for the same user. Matches the existing sql.explain
+  // fallback pattern in connections/register.ts.
+  const compatible = all.find((w) => supportedTypes.includes(w.type.toLowerCase()))
   if (!compatible) {
     const availableTypes = Array.from(new Set(all.map((w) => w.type))).join(", ") || "(none)"
     return {
@@ -94,5 +109,5 @@ export function resolveFinopsWarehouse(opts: ResolveOptions): FinopsWarehouseRes
         `Add a compatible warehouse with the warehouse_add tool.`,
     }
   }
-  return { kind: "ok", warehouse: compatible.name, type: compatible.type, autoPicked: true }
+  return { kind: "ok", warehouse: compatible.name, type: compatible.type.toLowerCase(), autoPicked: true }
 }

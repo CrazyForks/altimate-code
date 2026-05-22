@@ -70,9 +70,14 @@ function formatWarehouseAdvice(
 
 export const FinopsWarehouseAdviceTool = Tool.define("finops_warehouse_advice", {
   description:
-    "Analyze warehouse load and performance to recommend sizing changes. Identifies underutilized, overloaded, and correctly-sized warehouses. Snowflake only.",
+    "Analyze warehouse load and performance on Snowflake / BigQuery / Databricks to recommend sizing changes. Identifies underutilized, overloaded, and correctly-sized warehouses.",
   parameters: z.object({
-    warehouse: z.string().describe("Warehouse connection name"),
+    warehouse: z
+      .string()
+      .optional()
+      .describe(
+        "Warehouse connection name. Optional — if omitted, the first configured Snowflake/BigQuery/Databricks warehouse is used.",
+      ),
     days: z.number().optional().default(14).describe("Days of history to analyze"),
   }),
   async execute(args, ctx) {

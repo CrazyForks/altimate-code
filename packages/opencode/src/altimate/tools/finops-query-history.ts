@@ -9,8 +9,8 @@ function formatQueryHistory(summary: Record<string, unknown>, queries: unknown[]
   lines.push("Query History Summary")
   lines.push("".padEnd(50, "-"))
   lines.push(`Total queries: ${summary.query_count ?? 0}`)
-  if (summary.avg_execution_time !== undefined)
-    lines.push(`Avg execution time: ${Number(summary.avg_execution_time).toFixed(2)}s`)
+  if (summary.avg_execution_time_sec !== undefined)
+    lines.push(`Avg execution time: ${Number(summary.avg_execution_time_sec).toFixed(2)}s`)
   if (summary.total_bytes_scanned !== undefined)
     lines.push(`Total bytes scanned: ${formatBytes(Number(summary.total_bytes_scanned))}`)
   if (summary.period_days !== undefined) lines.push(`Period: ${summary.period_days} days`)
@@ -34,7 +34,8 @@ function formatQueryHistory(summary: Record<string, unknown>, queries: unknown[]
   for (let i = 0; i < arr.length; i++) {
     const q = arr[i] as Record<string, unknown>
     const queryText = truncateQuery(String(q.query_text ?? q.query ?? ""), 80)
-    const execTime = q.execution_time !== undefined ? `${Number(q.execution_time).toFixed(2)}s` : "-"
+    const execTime =
+      q.execution_time_sec !== undefined ? `${Number(q.execution_time_sec).toFixed(2)}s` : "-"
     const bytesScanned = q.bytes_scanned !== undefined ? formatBytes(Number(q.bytes_scanned)) : "-"
     const queryStatus = q.status ?? q.execution_status ?? "-"
     lines.push(`${i + 1} | ${queryText} | ${execTime} | ${bytesScanned} | ${queryStatus}`)

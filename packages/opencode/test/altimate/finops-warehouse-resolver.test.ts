@@ -257,4 +257,60 @@ describe("resolveFinopsWarehouse", () => {
     if (credit.kind === "error") expect(credit.error).toContain("Credit analysis")
     if (history.kind === "error") expect(history.error).toContain("Query history")
   })
+
+  test("matches type case-insensitively (Snowflake / snowflake / SNOWFLAKE all resolve)", () => {
+    // Driver lookup in registry.ts uses toLowerCase(), so a user config with
+    // mixed-case `type` (Snowflake) gets a working driver but used to fail the
+    // resolver's case-sensitive supportedTypes.includes(). Pin the fix.
+    Registry.setConfigs({
+      prod_titlecase: { type: "Snowflake", account: "x", user: "u", password: "p" } as any,
+    })
+
+    const titleResult = resolveFinopsWarehouse({
+      requested: "prod_titlecase",
+      supportedTypes: CREDIT_SUPPORTED,
+      operationName: "Credit analysis",
+    })
+    expect(titleResult.kind).toBe("ok")
+    if (titleResult.kind === "ok") {
+      // Returned type is normalized to lowercase so downstream SQL-template
+      // selectors (which compare against "snowflake" etc.) work.
+      expect(titleResult.type).toBe("snowflake")
+    }
+
+    Registry.reset()
+    Registry.setConfigs({
+      prod_upper: { type: "SNOWFLAKE", account: "x", user: "u", password: "p" } as any,
+    })
+    const upperResult = resolveFinopsWarehouse({
+      requested: undefined,
+      supportedTypes: CREDIT_SUPPORTED,
+      operationName: "Credit analysis",
+    })
+    expect(upperResult.kind).toBe("ok")
+    if (upperResult.kind === "ok") {
+      expect(upperResult.type).toBe("snowflake")
+      expect(upperResult.autoPicked).toBe(true)
+    }
+  })
+
+  test("filters compatible warehouses case-insensitively during auto-pick", () => {
+    Registry.setConfigs({
+      dev_pg: { type: "Postgres", host: "localhost" } as any,
+      prod_bq: { type: "BIGQUERY", project: "p" } as any,
+    })
+
+    const result = resolveFinopsWarehouse({
+      requested: undefined,
+      supportedTypes: CREDIT_SUPPORTED,
+      operationName: "Credit analysis",
+    })
+
+    expect(result.kind).toBe("ok")
+    if (result.kind === "ok") {
+      // Skips mixed-case postgres (unsupported) and picks the uppercase bigquery.
+      expect(result.warehouse).toBe("prod_bq")
+      expect(result.type).toBe("bigquery")
+    }
+  })
 })
