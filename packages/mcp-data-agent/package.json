@@ -1,0 +1,49 @@
+{
+  "name": "@altimateai/mcp-data-agent",
+  "version": "0.1.0",
+  "description": "Local-first MCP server exposing SQL, dbt, FinOps, lineage, and PII tools for data engineering. Query text stays on your machine.",
+  "type": "module",
+  "private": false,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AltimateAI/altimate-code",
+    "directory": "packages/mcp-data-agent"
+  },
+  "homepage": "https://altimate.ai",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "dbt",
+    "snowflake",
+    "bigquery",
+    "databricks",
+    "finops",
+    "sql",
+    "lineage",
+    "data-engineering"
+  ],
+  "bin": {
+    "altimate-mcp": "./bin/altimate-mcp"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "server.json",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "bun build src/index.ts --outdir dist --target node --format esm",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@tsconfig/bun": "catalog:",
+    "@types/bun": "catalog:",
+    "typescript": "catalog:"
+  }
+}

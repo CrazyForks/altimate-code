@@ -1,0 +1,28 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.altimateai/altimate-code-data-agent",
+  "title": "Altimate Code Data Agent",
+  "description": "SQL, dbt, FinOps, lineage tools for data engineering. Local-first — query text never leaves your machine. Works with Snowflake, BigQuery, Databricks, Postgres, Redshift, MySQL, SQL Server, Oracle, DuckDB, SQLite.",
+  "version": "0.1.0",
+  "repository": {
+    "url": "https://github.com/AltimateAI/altimate-code",
+    "source": "github"
+  },
+  "websiteUrl": "https://altimate.ai",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@altimateai/mcp-data-agent",
+      "version": "0.1.0",
+      "transport": { "type": "stdio" },
+      "runtimeHint": "npx",
+      "environmentVariables": [
+        { "name": "SNOWFLAKE_ACCOUNT", "description": "Snowflake account locator", "isRequired": false },
+        { "name": "SNOWFLAKE_USER", "description": "Snowflake username", "isRequired": false },
+        { "name": "SNOWFLAKE_PASSWORD", "description": "Snowflake password or PAT", "isSecret": true, "isRequired": false },
+        { "name": "ALTIMATE_API_KEY", "description": "Optional Altimate API key for hosted services", "isSecret": true, "isRequired": false },
+        { "name": "ALTIMATE_MCP_ALLOW_WRITE", "description": "Set true to enable write tools (sql_execute mutating SQL, dbt_run). Default false (read-only).", "isRequired": false }
+      ]
+    }
+  ]
+}
