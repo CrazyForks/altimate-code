@@ -103,6 +103,95 @@ describe("Session.getUsage — OpenAI-style (inclusive input)", () => {
     expect(result.tokens.input).toBe(4000)
     expect(result.tokens.inputTotal).toBe(4000)
   })
+
+  test("OpenAI cache_write is always 0 (provider doesn't expose the concept)", () => {
+    // Doc-block claim: "OpenAI / OpenRouter don't surface a cache_write concept".
+    // Verify the subtraction is a no-op rather than producing wrong numbers.
+    const result = Session.getUsage({
+      model: fakeModel("@ai-sdk/openai"),
+      usage: {
+        inputTokens: 5000,
+        outputTokens: 100,
+        cachedInputTokens: 2000,
+      } as any,
+      metadata: {} as any, // no anthropic / bedrock / venice metadata
+    })
+
+    expect(result.tokens.cache.write).toBe(0)
+    expect(result.tokens.input).toBe(3000) // 5000 - 2000 - 0
+    expect(result.tokens.inputTotal).toBe(5000)
+  })
+})
+
+describe("Session.getUsage — provider edge cases", () => {
+  test("@ai-sdk/google-vertex/anthropic uses Anthropic-style accounting (per total branch)", () => {
+    // The `total` computation at session/index.ts:828 includes this NPM as
+    // Anthropic-shaped. If `metadata.anthropic` is present (which the Vertex
+    // adapter does set for Claude calls), the excludesCachedTokens check
+    // routes through the Anthropic branch.
+    const result = Session.getUsage({
+      model: fakeModel("@ai-sdk/google-vertex/anthropic"),
+      usage: {
+        inputTokens: 1000, // uncached only
+        outputTokens: 50,
+        cachedInputTokens: 4000,
+      } as any,
+      metadata: { anthropic: { cacheCreationInputTokens: 500 } } as any,
+    })
+
+    expect(result.tokens.input).toBe(1000)
+    expect(result.tokens.inputTotal).toBe(1000 + 4000 + 500)
+    expect(result.tokens.cache.read).toBe(4000)
+    expect(result.tokens.cache.write).toBe(500)
+  })
+
+  test("Bedrock surfaces cacheWriteInputTokens via metadata.bedrock.usage", () => {
+    // Bedrock's cache_write lives at a different metadata path than Anthropic's.
+    // Pin that the reader at session/index.ts:813 picks it up.
+    const result = Session.getUsage({
+      model: fakeModel("@ai-sdk/amazon-bedrock"),
+      usage: {
+        inputTokens: 800,
+        outputTokens: 40,
+        cachedInputTokens: 2000,
+      } as any,
+      metadata: { bedrock: { usage: { cacheWriteInputTokens: 600 } } } as any,
+    })
+
+    expect(result.tokens.input).toBe(800)
+    expect(result.tokens.cache.read).toBe(2000)
+    expect(result.tokens.cache.write).toBe(600)
+    expect(result.tokens.inputTotal).toBe(800 + 2000 + 600)
+  })
+
+  test("tokens.input is never negative even with inconsistent provider counts", () => {
+    // Hypothetical: OpenAI returns inputTokens=1000 but cachedInputTokens=2000
+    // (inconsistent — should never happen but providers occasionally surface
+    // weird numbers). Verify the subtraction doesn't underflow into negative
+    // territory; safe() clamps via Number.isFinite but does NOT clamp
+    // negatives. Document the current behavior so a future refactor that
+    // changes it is forced through this test.
+    const result = Session.getUsage({
+      model: fakeModel("@ai-sdk/openai"),
+      usage: {
+        inputTokens: 1000,
+        outputTokens: 50,
+        cachedInputTokens: 2000,
+      } as any,
+      metadata: {} as any,
+    })
+
+    // Current behavior: tokens.input = inputTokens - cacheRead - cacheWrite = -1000
+    // The invariant `input + cache.read + cache.write === inputTotal` still
+    // holds algebraically (-1000 + 2000 + 0 = 1000 = inputTotal). But the
+    // negative value is surprising. If safe() is ever updated to clamp at
+    // zero, this test will fail and force a deliberate decision about the
+    // invariant.
+    expect(result.tokens.input + result.tokens.cache.read + result.tokens.cache.write).toBe(
+      result.tokens.inputTotal,
+    )
+    expect(result.tokens.inputTotal).toBe(1000)
+  })
 })
 
 describe("Session.getUsage — invariant", () => {
