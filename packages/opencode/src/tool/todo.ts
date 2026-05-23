@@ -3,7 +3,9 @@ import { Tool } from "./tool"
 import DESCRIPTION_WRITE from "./todowrite.txt"
 import { Todo } from "../session/todo"
 // altimate_change start — telemetry hook for session-level todowrite runaway detection
-import { Telemetry } from "@/altimate/telemetry"
+import { Telemetry } from "../altimate/telemetry"
+import { Bus } from "../bus"
+import { Session } from "../session"
 // altimate_change end
 
 // altimate_change start — session-level todowrite call counters
@@ -14,13 +16,37 @@ import { Telemetry } from "@/altimate/telemetry"
 // processor threshold but total runaway. This per-session counter catches the
 // slow-burn pattern by accumulating across all turns within a session.
 //
-// In-memory Map is fine because:
-// - Sessions don't survive process restart anyway (the loop would end naturally).
-// - Stale entries are harmless because the counter is keyed per sessionID; a
-//   new session simply starts at 0 regardless of any old entries.
+// Lifecycle and override semantics:
+// - In-memory Map keyed by sessionID. Entries are cleared on `session.deleted`
+//   so daemon-mode (`altimate serve`) doesn't accumulate stale state.
+// - REFUSAL IS PER-SESSION, NOT PERMANENT. The agent can continue working
+//   without calling todowrite (the existing list stays readable via todoread).
+//   To explicitly reset the counter mid-session, an operator can call
+//   `clearTodoWriteCounter(sessionID)` — exposed for debugging/escape hatch.
+// - Counter increments on EVERY call, including refused ones. The published
+//   count therefore represents attempts, not accepted updates.
+// - Permission check (`ctx.ask`) runs before the counter increment, so a
+//   permission-denied call does not bump the counter.
 const todoWriteCallsBySession = new Map<string, number>()
 export const TODOWRITE_WARN_THRESHOLD = 25
 export const TODOWRITE_REFUSE_THRESHOLD = 50
+
+// Clear counters on session deletion so daemon-mode processes don't
+// accumulate entries indefinitely. Subscribing at module load is the
+// established pattern in `share/share-next.ts` and `session/projectors.ts`.
+let _subscribed = false
+function ensureSessionDeletedSubscription(): void {
+  if (_subscribed) return
+  _subscribed = true
+  try {
+    Bus.subscribe(Session.Event.Deleted, (evt) => {
+      todoWriteCallsBySession.delete(evt.properties.info.id)
+    })
+  } catch {
+    // Bus may not be initialized in some test contexts; the counter still
+    // works correctly for the in-memory case. Subscription is best-effort.
+  }
+}
 
 /**
  * Record one todowrite call for the session and return a decision about how
@@ -28,11 +54,15 @@ export const TODOWRITE_REFUSE_THRESHOLD = 50
  *
  * Exported so unit tests can drive the same code path the tool uses, without
  * needing the full Tool.define() initialization context.
+ *
+ * Note: the counter increments on EVERY call, including refused ones — the
+ * returned `count` is attempts, not accepted updates.
  */
 export function recordTodoWriteCall(sessionID: string): {
   action: "ok" | "warn" | "refuse"
   count: number
 } {
+  ensureSessionDeletedSubscription()
   const prev = todoWriteCallsBySession.get(sessionID) ?? 0
   const count = prev + 1
   todoWriteCallsBySession.set(sessionID, count)
@@ -42,12 +72,31 @@ export function recordTodoWriteCall(sessionID: string): {
   return { action: "ok", count }
 }
 
-/** Reset all per-session counters (testing only). */
+/**
+ * Explicit escape hatch: reset the counter for a single session.
+ *
+ * Use case: a long-running session that legitimately exceeded the refuse
+ * threshold (large multi-step refactor, parallel subagents) needs the
+ * counter cleared without ending the session. The operator can call this
+ * from a debug context. Sessions reset automatically on `session.deleted`,
+ * so most users never need this.
+ */
+export function clearTodoWriteCounter(sessionID: string): void {
+  todoWriteCallsBySession.delete(sessionID)
+}
+
+/**
+ * Reset all per-session counters.
+ * @internal — only used by tests; do not call from production code.
+ */
 export function _resetTodoWriteCounters(): void {
   todoWriteCallsBySession.clear()
 }
 
-/** Read the current count for a session (testing only). */
+/**
+ * Read the current count for a session.
+ * @internal — only used by tests; do not call from production code.
+ */
 export function _getTodoWriteCount(sessionID: string): number {
   return todoWriteCallsBySession.get(sessionID) ?? 0
 }
@@ -99,7 +148,9 @@ export const TodoWriteTool = Tool.define("todowrite", {
       todos: params.todos,
     })
 
+    // altimate_change start — extract for reuse across warn / normal branches
     const remainingTodos = params.todos.filter((x) => x.status !== "completed").length
+    // altimate_change end
 
     // altimate_change start — gentle warning at the soft threshold
     if (decision.action === "warn") {

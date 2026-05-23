@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeEach } from "bun:test"
 import {
   recordTodoWriteCall,
+  clearTodoWriteCounter,
   _resetTodoWriteCounters,
   _getTodoWriteCount,
   TODOWRITE_WARN_THRESHOLD,
@@ -100,5 +101,40 @@ describe("recordTodoWriteCall: decision boundaries", () => {
     expect(TODOWRITE_WARN_THRESHOLD).toBeGreaterThan(15)
     expect(TODOWRITE_WARN_THRESHOLD).toBeLessThan(TODOWRITE_REFUSE_THRESHOLD)
     expect(TODOWRITE_REFUSE_THRESHOLD).toBeLessThanOrEqual(100)
+  })
+})
+
+describe("clearTodoWriteCounter: explicit escape hatch", () => {
+  test("clearTodoWriteCounter resets a single session without affecting others", () => {
+    for (let i = 0; i < 10; i++) recordTodoWriteCall("session-x")
+    for (let i = 0; i < 5; i++) recordTodoWriteCall("session-y")
+    expect(_getTodoWriteCount("session-x")).toBe(10)
+    expect(_getTodoWriteCount("session-y")).toBe(5)
+
+    clearTodoWriteCounter("session-x")
+
+    expect(_getTodoWriteCount("session-x")).toBe(0)
+    expect(_getTodoWriteCount("session-y")).toBe(5)
+  })
+
+  test("clearTodoWriteCounter unblocks a refused session", () => {
+    // Climb to refusal.
+    for (let i = 0; i < TODOWRITE_REFUSE_THRESHOLD; i++) {
+      recordTodoWriteCall("stuck-session")
+    }
+    expect(recordTodoWriteCall("stuck-session").action).toBe("refuse")
+
+    // Operator clears.
+    clearTodoWriteCounter("stuck-session")
+
+    // Next call is ok again.
+    expect(recordTodoWriteCall("stuck-session").action).toBe("ok")
+    expect(_getTodoWriteCount("stuck-session")).toBe(1)
+  })
+
+  test("clearTodoWriteCounter on an unknown session is a no-op", () => {
+    expect(_getTodoWriteCount("never-touched")).toBe(0)
+    clearTodoWriteCounter("never-touched")
+    expect(_getTodoWriteCount("never-touched")).toBe(0)
   })
 })
