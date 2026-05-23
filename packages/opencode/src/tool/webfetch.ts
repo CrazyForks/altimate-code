@@ -17,14 +17,91 @@ const RETRYABLE_STATUSES = new Set([403, 406])
 
 // altimate_change start — session-level URL failure cache (#471)
 // Prevents repeated fetches to URLs that already returned 404/410 in this session.
+//
+// 2026-05-22 follow-up to telemetry-2026-05-21 (486 residual webfetch 404s,
+// down from March's 2,222 but still meaningful):
+//   - Extended TTL from 5 min to 30 min. URLs that 404 rarely self-heal
+//     within a session, and many sessions run longer than 5 min so the
+//     short window was letting agents re-hit the same dead URL multiple
+//     times in one session.
+//   - Cache key is the URL with tracking-only params (utm_*, ref, fbclid,
+//     gclid, mc_*, _ga, _gl, igshid, mibextid, __cf_chl_*) stripped, so
+//     LLM-generated tracking variations of a known-bad URL all hit cache.
+//     Functional query params (page, id, q, etc.) are preserved.
 const failedUrls = new Map<string, { status: number; timestamp: number }>()
-const FAILURE_CACHE_TTL = 5 * 60 * 1000 // 5 minutes
+const FAILURE_CACHE_TTL = 30 * 60 * 1000 // 30 minutes
+
+/**
+ * Param names that are universally tracking-only — stripping them never
+ * changes the document the URL points to. Conservative list; favoured over
+ * a regex sweep because false positives (e.g. stripping `?page=2`) would
+ * cause real fetches to incorrectly hit the cache.
+ */
+const TRACKING_PARAMS = new Set([
+  "utm_source",
+  "utm_medium",
+  "utm_campaign",
+  "utm_term",
+  "utm_content",
+  "utm_id",
+  "ref",
+  "ref_src",
+  "ref_url",
+  "referrer",
+  "fbclid",
+  "gclid",
+  "dclid",
+  "msclkid",
+  "yclid",
+  "twclid",
+  "li_fat_id",
+  "mc_cid",
+  "mc_eid",
+  "_ga",
+  "_gl",
+  "igshid",
+  "mibextid",
+  "__cf_chl_tk",
+  "__cf_chl_jschl_tk__",
+  "vero_conv",
+  "vero_id",
+])
+
+function isTrackingParamPrefix(name: string): boolean {
+  return name.startsWith("__cf_chl_") || name.startsWith("utm_")
+}
+
+/**
+ * Normalize a URL for cache lookup. Strips tracking-only query params, sorts
+ * the remaining params for stable ordering, and lowercases the host. Returns
+ * the input unchanged if URL parsing fails.
+ */
+export function normalizeUrlForCache(url: string): string {
+  try {
+    const parsed = new URL(url)
+    parsed.hostname = parsed.hostname.toLowerCase()
+    const kept: [string, string][] = []
+    for (const [k, v] of parsed.searchParams) {
+      if (TRACKING_PARAMS.has(k) || isTrackingParamPrefix(k)) continue
+      kept.push([k, v])
+    }
+    kept.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    parsed.search = ""
+    for (const [k, v] of kept) parsed.searchParams.append(k, v)
+    // Also strip fragment — fragments don't change the fetched resource.
+    parsed.hash = ""
+    return parsed.toString()
+  } catch {
+    return url
+  }
+}
 
 function isUrlCachedFailure(url: string): { status: number } | null {
-  const entry = failedUrls.get(url)
+  const key = normalizeUrlForCache(url)
+  const entry = failedUrls.get(key)
   if (!entry) return null
   if (Date.now() - entry.timestamp > FAILURE_CACHE_TTL) {
-    failedUrls.delete(url)
+    failedUrls.delete(key)
     return null
   }
   return { status: entry.status }
@@ -34,13 +111,24 @@ const MAX_CACHED_URLS = 500
 
 function cacheUrlFailure(url: string, status: number): void {
   if (status === 404 || status === 410 || status === 451) {
+    const key = normalizeUrlForCache(url)
     if (failedUrls.size >= MAX_CACHED_URLS) {
       // Evict oldest entry (Map preserves insertion order)
       const oldest = failedUrls.keys().next().value
       if (oldest) failedUrls.delete(oldest)
     }
-    failedUrls.set(url, { status, timestamp: Date.now() })
+    failedUrls.set(key, { status, timestamp: Date.now() })
   }
+}
+
+/** Reset the failure cache (testing only). */
+export function _resetFailureCache(): void {
+  failedUrls.clear()
+}
+
+/** Read the current failure cache size (testing only). */
+export function _failureCacheSize(): number {
+  return failedUrls.size
 }
 
 /** Strip query string from URL to avoid leaking auth tokens in error messages. */
