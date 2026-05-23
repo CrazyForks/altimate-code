@@ -179,14 +179,14 @@ export const TodoWriteTool = Tool.define("todowrite", {
     // altimate_change end
 
     return {
+      // altimate_change start — reuse extracted remainingTodos + expose call_count for observability
       title: `${remainingTodos} todos`,
       output: JSON.stringify(params.todos, null, 2),
       metadata: {
         todos: params.todos,
-        // altimate_change start — expose count so observability sees the climb
         call_count: decision.count,
-        // altimate_change end
       },
+      // altimate_change end
     }
   },
 })
