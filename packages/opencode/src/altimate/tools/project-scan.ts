@@ -56,10 +56,29 @@ export interface ConfigFileInfo {
  * `project_scan` (the binary name `"git"` was masked to `?` downstream,
  * which made it look like a generic shell error). Wrap every spawn so a
  * missing binary degrades gracefully instead of crashing the whole tool.
+ *
+ * Return value semantics:
+ *   - `null`         → could not spawn (binary missing, permission denied,
+ *                      Bun internal failure). Distinct from "ran and failed".
+ *   - `{exitCode: 0, stdout}`         → ran successfully.
+ *   - `{exitCode: N>0, stdout}`       → ran and exited non-zero.
+ *   - `{exitCode: 1, stdout: ""}`     → also returned when `Bun.spawnSync`
+ *                                       gives back `exitCode: null` (signaled
+ *                                       child). Coalesced to `1` because no
+ *                                       current caller distinguishes "killed
+ *                                       by signal" from "exited with status 1";
+ *                                       expand this contract if that changes.
  */
-function safeSpawnSync(args: string[]): { exitCode: number; stdout: string } | null {
+export function safeSpawnSync(
+  args: string[],
+  opts?: { timeout?: number },
+): { exitCode: number; stdout: string } | null {
   try {
-    const result = Bun.spawnSync(args, { stdout: "pipe", stderr: "pipe" })
+    const result = Bun.spawnSync(args, {
+      stdout: "pipe",
+      stderr: "pipe",
+      ...(opts?.timeout !== undefined && { timeout: opts.timeout }),
+    })
     return {
       exitCode: result.exitCode ?? 1,
       stdout: result.stdout?.toString() ?? "",
@@ -352,25 +371,23 @@ export function parseToolVersion(output: string): string | undefined {
 export async function detectDataTools(skip: boolean): Promise<DataToolInfo[]> {
   if (skip) return []
 
+  // Route through safeSpawnSync for consistency with detectGit. The previous
+  // implementation used a bare try/catch around Bun.spawnSync — same outcome
+  // for the caller, but the two functions solved the same problem two
+  // different ways. Using one helper keeps the contract uniform: `null`
+  // means "could not spawn" (binary missing), distinct from "ran and exited
+  // non-zero" (binary present but the version check failed).
   const results = await Promise.all(
     DATA_TOOL_NAMES.map(async (tool): Promise<DataToolInfo> => {
-      try {
-        const result = Bun.spawnSync([tool, "--version"], {
-          stdout: "pipe",
-          stderr: "pipe",
-          timeout: 5000,
-        })
-        if (result.exitCode === 0) {
-          return {
-            name: tool,
-            installed: true,
-            version: parseToolVersion(result.stdout.toString()),
-          }
+      const result = safeSpawnSync([tool, "--version"], { timeout: 5000 })
+      if (result && result.exitCode === 0) {
+        return {
+          name: tool,
+          installed: true,
+          version: parseToolVersion(result.stdout),
         }
-        return { name: tool, installed: false }
-      } catch {
-        return { name: tool, installed: false }
       }
+      return { name: tool, installed: false }
     }),
   )
 
@@ -608,7 +625,10 @@ export const ProjectScanTool = Tool.define("project_scan", {
           suggestionsShown: ["dbt-develop", "dbt-troubleshoot", "dbt-analyze"],
         })
       } catch {
-        // Telemetry must never break scan output
+        // Telemetry must never break scan output, but record it in the
+        // degraded list so we can see post-deploy whether the dynamic
+        // import is silently failing for some users.
+        degraded.push("post-connect-suggestions")
       }
       // altimate_change end
     } else {
@@ -733,7 +753,10 @@ export const ProjectScanTool = Tool.define("project_scan", {
 
     const skillCount = await Skill.all()
       .then((s) => s.length)
-      .catch(() => 0)
+      .catch(() => {
+        degraded.push("skills")
+        return 0
+      })
 
     Telemetry.track({
       type: "environment_census",

@@ -11,6 +11,7 @@ import {
   detectDataTools,
   detectConfigFiles,
   parseToolVersion,
+  safeSpawnSync,
   DATA_TOOL_NAMES,
   type GitInfo,
   type DbtProjectInfo,
@@ -928,5 +929,43 @@ describe("return type contracts", () => {
     expect(typeof result.altimateConfig).toBe("boolean")
     expect(typeof result.sqlfluff).toBe("boolean")
     expect(typeof result.preCommit).toBe("boolean")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// safeSpawnSync — the new primitive both detectGit and detectDataTools route through
+// ---------------------------------------------------------------------------
+
+describe("safeSpawnSync", () => {
+  test("returns null when the binary is missing from PATH", () => {
+    const result = safeSpawnSync(["this-binary-does-not-exist-anywhere-on-the-system-xyz123"])
+    expect(result).toBeNull()
+  })
+
+  test("returns { exitCode, stdout } when the binary runs successfully", () => {
+    // Use `node --version` — present on any system that can run this test.
+    const result = safeSpawnSync(["node", "--version"])
+    expect(result).not.toBeNull()
+    if (result) {
+      expect(result.exitCode).toBe(0)
+      expect(result.stdout).toMatch(/^v?\d+\.\d+/)
+    }
+  })
+
+  test("returns { exitCode: nonzero } when the binary exits non-zero", () => {
+    // `node -e 'process.exit(7)'` runs but exits 7.
+    const result = safeSpawnSync(["node", "-e", "process.exit(7)"])
+    expect(result).not.toBeNull()
+    if (result) {
+      expect(result.exitCode).toBe(7)
+    }
+  })
+
+  test("forwards the timeout option to Bun.spawnSync", () => {
+    // Just verify the helper doesn't crash when given timeout — actually
+    // exercising the timeout path requires a long-running command, which
+    // is flaky in CI. Smoke-check the wiring instead.
+    const result = safeSpawnSync(["node", "--version"], { timeout: 5000 })
+    expect(result).not.toBeNull()
   })
 })
