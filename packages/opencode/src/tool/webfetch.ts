@@ -37,6 +37,21 @@ const FAILURE_CACHE_TTL = 30 * 60 * 1000 // 30 minutes
  * a regex sweep because false positives (e.g. stripping `?page=2`) would
  * cause real fetches to incorrectly hit the cache.
  */
+// Notable exclusions (do NOT add these to TRACKING_PARAMS):
+//   - `ref` / `ref_src` / `ref_url`: functional on GitHub raw URLs and
+//     git-hosting APIs (`?ref=main` vs `?ref=v2.0` selects a different
+//     branch/tag). Stripping `ref` would suppress legitimate fetches of
+//     different refs against the same path — a coding agent fetches GitHub
+//     heavily, so this is a real false-positive risk.
+//   - `referrer` (full word) is tracking-only and IS in the list; the
+//     abbreviated `ref` is not.
+//
+// The utm_* family is enumerated explicitly here AND covered by the
+// `isTrackingParamPrefix` check below. The duplication is intentional —
+// the explicit list documents the named params we know about, the prefix
+// check catches any future utm_* variant we haven't enumerated.
+// Cloudflare challenge tokens (`__cf_chl_*`) are handled by the prefix
+// check exclusively; no explicit entries needed.
 const TRACKING_PARAMS = new Set([
   "utm_source",
   "utm_medium",
@@ -44,9 +59,6 @@ const TRACKING_PARAMS = new Set([
   "utm_term",
   "utm_content",
   "utm_id",
-  "ref",
-  "ref_src",
-  "ref_url",
   "referrer",
   "fbclid",
   "gclid",
@@ -61,8 +73,6 @@ const TRACKING_PARAMS = new Set([
   "_gl",
   "igshid",
   "mibextid",
-  "__cf_chl_tk",
-  "__cf_chl_jschl_tk__",
   "vero_conv",
   "vero_id",
 ])
@@ -85,7 +95,13 @@ export function normalizeUrlForCache(url: string): string {
       if (TRACKING_PARAMS.has(k) || isTrackingParamPrefix(k)) continue
       kept.push([k, v])
     }
-    kept.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    // Sort by (key, value) so duplicate-key params produce a stable order:
+    // `?a=1&a=2` and `?a=2&a=1` normalize to the same string. Sorting by key
+    // alone leaked the original insertion order between same-key entries.
+    kept.sort(([ak, av], [bk, bv]) => {
+      if (ak !== bk) return ak < bk ? -1 : 1
+      return av < bv ? -1 : av > bv ? 1 : 0
+    })
     parsed.search = ""
     for (const [k, v] of kept) parsed.searchParams.append(k, v)
     // Also strip fragment — fragments don't change the fetched resource.
@@ -110,8 +126,19 @@ function isUrlCachedFailure(url: string): { status: number } | null {
 const MAX_CACHED_URLS = 500
 
 function cacheUrlFailure(url: string, status: number): void {
+  // 404 (permanent), 410 (gone), and 451 (legal block) get the same TTL
+  // here intentionally. 410 is spec-permanent (won't lift), 404 is
+  // overwhelmingly permanent in practice (typos, removed docs), and 451
+  // can lift but rarely within a single session. Caching all three at
+  // 30 min is a deliberate simplification — split TTLs would be marginal
+  // complexity for marginal benefit.
   if (status === 404 || status === 410 || status === 451) {
     const key = normalizeUrlForCache(url)
+    // Re-touch semantics: if the key is already in the cache, delete first
+    // so the .set() reinserts at the tail of the FIFO. Otherwise a
+    // frequently-failing URL would stay at the head and be the first
+    // evicted under pressure — wrong order for an LRU-flavoured cache.
+    if (failedUrls.has(key)) failedUrls.delete(key)
     if (failedUrls.size >= MAX_CACHED_URLS) {
       // Evict oldest entry (Map preserves insertion order)
       const oldest = failedUrls.keys().next().value
@@ -121,12 +148,18 @@ function cacheUrlFailure(url: string, status: number): void {
   }
 }
 
-/** Reset the failure cache (testing only). */
+/**
+ * Reset the failure cache.
+ * @internal — only used by tests; do not call from production code.
+ */
 export function _resetFailureCache(): void {
   failedUrls.clear()
 }
 
-/** Read the current failure cache size (testing only). */
+/**
+ * Read the current failure cache size.
+ * @internal — only used by tests; do not call from production code.
+ */
 export function _failureCacheSize(): number {
   return failedUrls.size
 }

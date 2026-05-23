@@ -51,9 +51,11 @@ describe("normalizeUrlForCache", () => {
   })
 
   test("preserves functional params when mixed with tracking params", () => {
+    // `ref` is preserved (it's functional on GitHub etc.); `referrer` is stripped.
+    // utm_* and fbclid are stripped.
     expect(
       normalizeUrlForCache(
-        "https://example.com/post?id=42&utm_source=email&utm_campaign=monthly&ref=fred",
+        "https://example.com/post?id=42&utm_source=email&utm_campaign=monthly&fbclid=abc&referrer=twitter",
       ),
     ).toBe("https://example.com/post?id=42")
   })
@@ -121,6 +123,44 @@ describe("normalizeUrlForCache", () => {
   test("different paths do NOT collapse", () => {
     expect(normalizeUrlForCache("https://example.com/v1/api")).not.toBe(
       normalizeUrlForCache("https://example.com/v2/api"),
+    )
+  })
+
+  test("preserves `ref` param (functional on GitHub raw URLs / git APIs)", () => {
+    // GitHub: `?ref=main` vs `?ref=v2.0` selects different branches/tags.
+    // Stripping `ref` would suppress legitimate fetches of different refs.
+    // Caught by reviewer (2026-05-22). Same for ref_src and ref_url.
+    expect(normalizeUrlForCache("https://api.github.com/repos/x/y/contents/foo.md?ref=main")).toBe(
+      "https://api.github.com/repos/x/y/contents/foo.md?ref=main",
+    )
+    expect(normalizeUrlForCache("https://api.github.com/repos/x/y/contents/foo.md?ref=v2.0")).toBe(
+      "https://api.github.com/repos/x/y/contents/foo.md?ref=v2.0",
+    )
+    // Different `ref` values must NOT collapse — they identify different
+    // resources. Pinning this prevents a regression that would re-add ref
+    // to TRACKING_PARAMS.
+    expect(
+      normalizeUrlForCache("https://api.github.com/repos/x/y/contents/foo.md?ref=main"),
+    ).not.toBe(normalizeUrlForCache("https://api.github.com/repos/x/y/contents/foo.md?ref=v2.0"))
+  })
+
+  test("still strips `referrer` (full word, tracking-only)", () => {
+    // The abbreviated `ref` is functional; the full word `referrer` is
+    // a tracking header and stays in TRACKING_PARAMS.
+    expect(normalizeUrlForCache("https://example.com/page?referrer=twitter")).toBe(
+      "https://example.com/page",
+    )
+  })
+
+  test("duplicate-key params collapse to a stable order regardless of input order", () => {
+    // Without value-aware sort, `?a=1&a=2` and `?a=2&a=1` would produce
+    // different cache keys despite carrying the same logical content.
+    expect(normalizeUrlForCache("https://example.com/x?a=1&a=2")).toBe(
+      normalizeUrlForCache("https://example.com/x?a=2&a=1"),
+    )
+    // And the normalized form is deterministic:
+    expect(normalizeUrlForCache("https://example.com/x?a=2&a=1")).toBe(
+      "https://example.com/x?a=1&a=2",
     )
   })
 })
