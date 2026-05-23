@@ -119,6 +119,34 @@ describe("detectGit", () => {
     }
   })
 
+  test("does not throw when git binary is missing from PATH", async () => {
+    // Telemetry-2026-05-21 showed `project_scan` failing 32% of the time with
+    // `Executable not found in $PATH: ?` — the binary was masked to `?` by the
+    // PII filter, but the underlying cause was Bun.spawnSync throwing on a
+    // missing git executable. This test pins the fix: detectGit must return a
+    // sentinel result rather than throw, so the rest of project_scan still
+    // runs.
+    const dir = nextTmpDir()
+    await fsp.mkdir(dir, { recursive: true })
+
+    const originalPath = process.env.PATH
+    const originalCwd = process.cwd()
+    // Point PATH at an empty directory so the shell can't find git (or any
+    // other binary). Bun.spawnSync will throw "Executable not found in $PATH"
+    // — which the safeSpawnSync wrapper should catch.
+    process.env.PATH = dir
+    process.chdir(dir)
+    try {
+      const result = await detectGit()
+      expect(result.isRepo).toBe(false)
+      expect(result.branch).toBeUndefined()
+      expect(result.remoteUrl).toBeUndefined()
+    } finally {
+      process.chdir(originalCwd)
+      process.env.PATH = originalPath
+    }
+  })
+
   afterAll(async () => {
     await fsp.rm(tmpRoot, { recursive: true, force: true }).catch(() => {})
   })
