@@ -216,7 +216,7 @@ export async function queryGrants(params: RoleGrantsParams): Promise<RoleGrantsR
       grants: [],
       grant_count: 0,
       privilege_summary: {},
-      error: String(e),
+      error: e instanceof Error ? e.message : String(e),
     }
   }
 }
@@ -257,7 +257,7 @@ export async function queryRoleHierarchy(params: RoleHierarchyParams): Promise<R
       success: false,
       hierarchy: [],
       role_count: 0,
-      error: String(e),
+      error: e instanceof Error ? e.message : String(e),
     }
   }
 }
@@ -298,7 +298,7 @@ export async function queryUserRoles(params: UserRolesParams): Promise<UserRoles
       success: false,
       assignments: [],
       assignment_count: 0,
-      error: String(e),
+      error: e instanceof Error ? e.message : String(e),
     }
   }
 }
