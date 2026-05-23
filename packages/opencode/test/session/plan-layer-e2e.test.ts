@@ -284,8 +284,13 @@ describe("sessionAgentName fix safety", () => {
     // Find agent_outcome emission
     const outcomeIdx = promptTs.indexOf('type: "agent_outcome"')
     expect(outcomeIdx).toBeGreaterThan(-1)
-    const block = promptTs.slice(outcomeIdx, outcomeIdx + 400)
-    expect(block).toContain("agent: sessionAgentName")
+    // The agent name is normalized at the emit boundary: legacy "build" sessions
+    // (from before the agent was renamed to "builder") fold into "builder" so
+    // dashboards see one coherent bucket instead of a phantom 0%-completion row.
+    // Allow both the original `agent: sessionAgentName` and the normalized form.
+    const block = promptTs.slice(outcomeIdx, outcomeIdx + 1200)
+    expect(block).toContain("sessionAgentName")
+    expect(block).toContain('"builder"')
   })
 })
 

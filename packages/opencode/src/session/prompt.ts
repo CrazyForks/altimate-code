@@ -1150,7 +1150,15 @@ export namespace SessionPrompt {
       type: "agent_outcome",
       timestamp: Date.now(),
       session_id: sessionID,
-      agent: sessionAgentName,
+      // altimate_change start — normalize legacy agent name for telemetry parity
+      // The "build" agent was renamed to "builder" but some persisted sessions
+      // and the plan-exit handler historically wrote `agent: "build"`. Agent.get()
+      // applies an alias so execution still works, but the telemetry event used
+      // to record the literal "build" value — splitting metrics into a phantom
+      // 0%-completion bucket. Normalize at the emit boundary so dashboards see
+      // a single coherent agent name regardless of how the session got created.
+      agent: sessionAgentName === "build" ? "builder" : sessionAgentName,
+      // altimate_change end
       tool_calls: toolCallCount,
       generations: step,
       duration_ms: Date.now() - sessionStartTime,
