@@ -86,10 +86,25 @@ export namespace Telemetry {
         duration_ms: number
         // Flat token fields — only present when data is available from the provider.
         // No nested objects: Azure App Insights custom measures must be top-level numbers.
+        //
+        // SEMANTICS (read this before writing dashboard queries):
+        //   tokens_input        = UNCACHED input tokens. Equal to 0 on a full cache hit.
+        //                          Normalized across providers — Anthropic returns this
+        //                          directly; OpenAI returns the inclusive total and we
+        //                          subtract cache_read/cache_write here.
+        //   tokens_input_total  = INCLUSIVE input tokens (uncached + cache_read +
+        //                          cache_write). This is what most cost/volume queries
+        //                          actually want. Always present (since 2026-05-22).
+        //   tokens_cache_read   = subset of tokens_input_total served from prompt cache.
+        //   tokens_cache_write  = subset of tokens_input_total committed to prompt cache.
+        // Invariant: tokens_input + tokens_cache_read + tokens_cache_write == tokens_input_total.
         tokens_input: number
         tokens_output: number
-        // altimate_change start — total input tokens including cached (for providers like Anthropic that exclude cache from tokens_input)
-        tokens_input_total?: number
+        // altimate_change start — total input tokens including cached. Always emitted
+        // as of 2026-05-22 (previously conditional, which made dashboard queries that
+        // assumed presence return null for non-cache-using providers — including the
+        // false-positive "tokens_input=0 broken" finding in telemetry-2026-05-21).
+        tokens_input_total: number
         // altimate_change end
         tokens_reasoning?: number // only for reasoning models
         tokens_cache_read?: number // only when a cached prompt was reused

@@ -327,10 +327,15 @@ export namespace SessionProcessor {
                     duration_ms: Date.now() - stepStartTime,
                     tokens_input: usage.tokens.input,
                     tokens_output: usage.tokens.output,
-                    // altimate_change start — include total input tokens (with cache) when they differ from tokens_input
-                    ...(usage.tokens.inputTotal !== usage.tokens.input && {
-                      tokens_input_total: usage.tokens.inputTotal,
-                    }),
+                    // altimate_change start — always emit tokens_input_total so dashboard
+                    // queries can rely on it without null-handling. Pre-2026-05-22 this
+                    // was conditional on `inputTotal !== input` to save 12 bytes per event,
+                    // but the absent field looked like a bug in queries that didn't know
+                    // to coalesce — the false-positive "Anthropic tokens_input=0 broken"
+                    // finding in telemetry-2026-05-21 was driven by this. See the comment
+                    // block on the `generation` event type in telemetry/index.ts for the
+                    // canonical semantics. Cost: ~12 bytes × generations/day, negligible.
+                    tokens_input_total: usage.tokens.inputTotal,
                     // altimate_change end
                     ...(value.usage.reasoningTokens !== undefined && { tokens_reasoning: usage.tokens.reasoning }),
                     ...(value.usage.cachedInputTokens !== undefined && { tokens_cache_read: usage.tokens.cache.read }),
