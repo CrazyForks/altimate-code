@@ -141,6 +141,26 @@ describe("detectGit", () => {
     expect(currentRepoResult.isRepo).toBe(true)
   })
 
+  test("detectGit on a clean non-repo dir has no gitError", async () => {
+    // Reviewer (coderabbit) flagged: any non-zero rev-parse exit was being
+    // bucketed as "not a repo", potentially masking corrupted-.git failures.
+    // Pin the contract that a clean non-repo (exit 128) leaves gitError
+    // undefined so callers can distinguish "clean non-repo" from "degraded
+    // git" by checking gitError presence.
+    const dir = nextTmpDir()
+    await fsp.mkdir(dir, { recursive: true })
+    const originalCwd = process.cwd()
+    process.chdir(dir)
+    try {
+      const result = await detectGit()
+      expect(result.isRepo).toBe(false)
+      expect(result.gitAvailable).toBe(true)
+      expect(result.gitError).toBeUndefined()
+    } finally {
+      process.chdir(originalCwd)
+    }
+  })
+
   afterAll(async () => {
     await fsp.rm(tmpRoot, { recursive: true, force: true }).catch(() => {})
   })

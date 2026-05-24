@@ -23,6 +23,16 @@ export interface GitInfo {
    * Undefined for callers that don't care.
    */
   gitAvailable?: boolean
+  /**
+   * Captures the case where git ran but produced a non-standard error
+   * (corrupted .git, permission denied, etc. — anything that isn't a
+   * clean "not a repo" exit-128). Lets callers distinguish:
+   *   isRepo=false, gitAvailable=true, gitError=undefined → clean non-repo
+   *   isRepo=false, gitAvailable=true, gitError=<exit>   → degraded git
+   *   isRepo=false, gitAvailable=false                    → git missing
+   * Undefined when irrelevant.
+   */
+  gitError?: { exitCode: number; stderr?: string }
 }
 
 export interface DbtProjectInfo {
@@ -81,7 +91,7 @@ export interface ConfigFileInfo {
 export function safeSpawnSync(
   args: string[],
   opts?: { timeout?: number },
-): { exitCode: number; stdout: string } | null {
+): { exitCode: number; stdout: string; stderr: string } | null {
   try {
     const result = Bun.spawnSync(args, {
       stdout: "pipe",
@@ -91,6 +101,7 @@ export function safeSpawnSync(
     return {
       exitCode: result.exitCode ?? 1,
       stdout: result.stdout?.toString() ?? "",
+      stderr: result.stderr?.toString() ?? "",
     }
   } catch {
     // Binary missing from PATH, permission denied, etc. — treat as
@@ -102,17 +113,30 @@ export function safeSpawnSync(
 
 export async function detectGit(): Promise<GitInfo> {
   const isRepoResult = safeSpawnSync(["git", "rev-parse", "--is-inside-work-tree"])
-  // Distinguish "git binary missing" from "valid git, not a repo" — both
-  // produce isRepo=false but the caller wants to record "git" in the
-  // degraded list only for the first case. Collapsing both into a bare
-  // `{ isRepo: false }` would re-introduce the same opacity that was the
-  // original 437-user telemetry symptom — "Executable not found in
+  // Distinguish three cases that all produce isRepo=false:
+  //   1. Git binary missing (null result) — record "git" in degraded.
+  //   2. Git ran with exit 128 — clean "not a repo" signal.
+  //   3. Git ran with non-zero, non-128 — degraded git (corrupted .git,
+  //      permission denied, etc.); still record "git" in degraded so the
+  //      caller doesn't silently bucket a real failure as "not a repo".
+  // Collapsing all three into a bare `{ isRepo: false }` would re-introduce
+  // the original 437-user telemetry opacity — "Executable not found in
   // $PATH: ?" masked to look like a generic shell error.
   if (!isRepoResult) {
     return { isRepo: false, gitAvailable: false }
   }
   if (isRepoResult.exitCode !== 0) {
-    return { isRepo: false, gitAvailable: true }
+    // Exit 128 is git's standard "fatal" for not-in-a-repo. Anything else
+    // is unusual — surface it via gitError so the caller can decide
+    // whether to record it in degraded.
+    if (isRepoResult.exitCode === 128) {
+      return { isRepo: false, gitAvailable: true }
+    }
+    return {
+      isRepo: false,
+      gitAvailable: true,
+      gitError: { exitCode: isRepoResult.exitCode, stderr: isRepoResult.stderr?.trim() || undefined },
+    }
   }
 
   const branchResult = safeSpawnSync(["git", "branch", "--show-current"])
@@ -620,6 +644,14 @@ export const ProjectScanTool = Tool.define("project_scan", {
       // this case and only this explicit add() records it.
       lines.push("✗ git binary not found in PATH (install git or add it to PATH)")
       degraded.add("git")
+    } else if (git.gitError) {
+      // Git ran but produced a non-128 error — corrupted .git, permission
+      // denied, etc. Surface the exit code + stderr (truncated) so the user
+      // can self-diagnose. Record in degraded so this case doesn't silently
+      // bucket as a clean "not a repo".
+      const stderrSuffix = git.gitError.stderr ? `: ${git.gitError.stderr.slice(0, 120)}` : ""
+      lines.push(`✗ git error (exit ${git.gitError.exitCode})${stderrSuffix}`)
+      degraded.add("git")
     } else {
       lines.push("✗ Not a git repository")
     }
@@ -847,7 +879,12 @@ export const ProjectScanTool = Tool.define("project_scan", {
       title: `Scan: ${totalConnections} connection(s), ${dbtProject.found ? "dbt found" : "no dbt"}${degradedSuffix}`,
       metadata: {
         engine_healthy: engineHealth.healthy,
-        git: { isRepo: git.isRepo, branch: git.branch, gitAvailable: git.gitAvailable },
+        git: {
+          isRepo: git.isRepo,
+          branch: git.branch,
+          gitAvailable: git.gitAvailable,
+          gitError: git.gitError,
+        },
         dbt: {
           found: dbtProject.found,
           name: dbtProject.name,
