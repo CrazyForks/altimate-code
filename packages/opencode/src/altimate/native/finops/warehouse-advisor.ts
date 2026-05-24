@@ -298,7 +298,7 @@ export async function adviseWarehouse(params: WarehouseAdvisorParams): Promise<W
       warehouse_performance: [],
       recommendations: [],
       days_analyzed: days,
-      error: String(e),
+      error: e instanceof Error ? e.message : String(e),
     }
   }
 }

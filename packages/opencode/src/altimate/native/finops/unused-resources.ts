@@ -231,7 +231,7 @@ export async function findUnusedResources(params: UnusedResourcesParams): Promis
       idle_warehouses: [],
       summary: {},
       days_analyzed: days,
-      error: String(e),
+      error: e instanceof Error ? e.message : String(e),
     }
   }
 }
