@@ -600,6 +600,7 @@ describe("generation telemetry", () => {
       agent: "builder",
       finish_reason: "end_turn",
       tokens_input: 1000,
+      tokens_input_total: 1900, // input + cache.read + cache.write
       tokens_output: 500,
       tokens_reasoning: 200,
       tokens_cache_read: 800,

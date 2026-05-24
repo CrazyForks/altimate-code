@@ -145,6 +145,27 @@ describe("Session.getUsage — provider edge cases", () => {
     expect(result.tokens.cache.write).toBe(500)
   })
 
+  test("Venice surfaces cacheCreationInputTokens via metadata.venice.usage", () => {
+    // Venice's cache_write lives at metadata.venice.usage.cacheCreationInputTokens —
+    // the third metadata path the reader at session/index.ts:815 supports.
+    // Venice uses OpenAI-style inclusive inputTokens (not the Anthropic
+    // exclusive style), so the subtraction branch should run.
+    const result = Session.getUsage({
+      model: fakeModel("@ai-sdk/openai"), // Venice exposes an OpenAI-compatible surface
+      usage: {
+        inputTokens: 5000, // inclusive
+        outputTokens: 80,
+        cachedInputTokens: 1500,
+      } as any,
+      metadata: { venice: { usage: { cacheCreationInputTokens: 400 } } } as any,
+    })
+
+    expect(result.tokens.cache.write).toBe(400)
+    expect(result.tokens.cache.read).toBe(1500)
+    expect(result.tokens.input).toBe(5000 - 1500 - 400) // 3100
+    expect(result.tokens.inputTotal).toBe(5000)
+  })
+
   test("Bedrock surfaces cacheWriteInputTokens via metadata.bedrock.usage", () => {
     // Bedrock's cache_write lives at a different metadata path than Anthropic's.
     // Pin that the reader at session/index.ts:813 picks it up.
@@ -164,23 +185,17 @@ describe("Session.getUsage — provider edge cases", () => {
     expect(result.tokens.inputTotal).toBe(800 + 2000 + 600)
   })
 
-  test("invariant holds even when tokens.input goes negative on inconsistent provider counts", () => {
-    // Renamed from "tokens.input is never negative" — the previous name was
-    // the OPPOSITE of what this test verifies. The test pins that the
-    // algebraic invariant `input + cache.read + cache.write === inputTotal`
-    // holds even when input is negative.
-    //
+  test("tokens.input is clamped to zero on inconsistent provider counts (no negative cost)", () => {
     // Hypothetical: OpenAI returns inputTokens=1000 but cachedInputTokens=2000
-    // (inconsistent — should never happen but providers occasionally surface
-    // weird numbers). Verify the invariant holds even though `safe()`
-    // clamps non-finite values but does NOT clamp negatives. Documents the
-    // current behavior so a future refactor that changes it is forced
-    // through this test.
+    // (inconsistent — should never happen, but providers occasionally surface
+    // weird numbers). Without clamping, tokens.input would be -1000 and
+    // cost = tokens.input × costInfo.input would be negative, leaking a
+    // negative-cost outlier into telemetry and session totals.
     //
-    // Note: negative tokens.input flows into cost calculation as a
-    // negative contribution. Pre-existing concern — not introduced by
-    // this PR. Tracked as a follow-up to either clamp at zero or accept
-    // the offset.
+    // The fix (Math.max(0, ...) around adjustedInputTokens) clamps input to
+    // zero so cost stays non-negative. The invariant `input + cache.read +
+    // cache.write === inputTotal` still holds — just at the clamped value
+    // (0 + 2000 + 0 = 2000), not the algebraic value (-1000 + 2000 + 0 = 1000).
     const result = Session.getUsage({
       model: fakeModel("@ai-sdk/openai"),
       usage: {
@@ -191,16 +206,13 @@ describe("Session.getUsage — provider edge cases", () => {
       metadata: {} as any,
     })
 
-    // Current behavior: tokens.input = inputTokens - cacheRead - cacheWrite = -1000
-    // The invariant `input + cache.read + cache.write === inputTotal` still
-    // holds algebraically (-1000 + 2000 + 0 = 1000 = inputTotal). But the
-    // negative value is surprising. If safe() is ever updated to clamp at
-    // zero, this test will fail and force a deliberate decision about the
-    // invariant.
+    expect(result.tokens.input).toBe(0)
     expect(result.tokens.input + result.tokens.cache.read + result.tokens.cache.write).toBe(
       result.tokens.inputTotal,
     )
-    expect(result.tokens.inputTotal).toBe(1000)
+    expect(result.tokens.inputTotal).toBe(2000)
+    // Cost must be non-negative — this is the actual user-facing concern.
+    expect(result.cost).toBeGreaterThanOrEqual(0)
   })
 })
 
