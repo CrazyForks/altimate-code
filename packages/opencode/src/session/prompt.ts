@@ -84,7 +84,11 @@ export namespace SessionPrompt {
   // emits below so they can never drift. Future telemetry events with an `agent`
   // field should route through this helper too.
   function normalizeAgentName(name: string | undefined): string {
-    if (!name || name === "build") return "builder"
+    // Case-insensitive guard: a future config, custom prompt, or hand-edited
+    // persisted session could surface "Build" or "BUILD" and the phantom
+    // bucket would come back. One toLowerCase() costs nothing and pins the
+    // contract regardless of caller hygiene.
+    if (!name || name.toLowerCase() === "build") return "builder"
     return name
   }
   // altimate_change end

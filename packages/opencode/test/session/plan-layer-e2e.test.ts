@@ -315,6 +315,24 @@ describe("sessionAgentName fix safety", () => {
     const declarations = promptTs.match(/function\s+normalizeAgentName\s*\(/g) ?? []
     expect(declarations.length).toBe(1)
   })
+
+  test("normalizeAgentName comparison is case-insensitive", async () => {
+    // A future config, custom prompt, or hand-edited persisted session
+    // could surface "Build" or "BUILD". Without case-folding, the phantom
+    // bucket comes back. Pin that the helper does the toLowerCase() guard
+    // so a refactor can't silently drop it.
+    const promptTs = await fs.readFile(
+      path.join(__dirname, "../../src/session/prompt.ts"),
+      "utf-8",
+    )
+    const declIdx = promptTs.indexOf("function normalizeAgentName")
+    expect(declIdx).toBeGreaterThan(-1)
+    const body = promptTs.slice(declIdx, declIdx + 400)
+    // The body should case-fold before comparing — either toLowerCase() or
+    // toUpperCase() before the equality check. Anchored so a refactor to a
+    // raw string compare fails this test.
+    expect(body).toMatch(/name\.toLowerCase\(\)\s*===\s*"build"/)
+  })
 })
 
 // ---------------------------------------------------------------------------
