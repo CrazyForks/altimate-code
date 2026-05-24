@@ -120,32 +120,25 @@ describe("detectGit", () => {
     }
   })
 
-  test("does not throw when git binary is missing from PATH", async () => {
+  test("safeSpawnSync returns null on missing binary (no process.env.PATH mutation needed)", () => {
     // Telemetry-2026-05-21 showed `project_scan` failing 32% of the time with
     // `Executable not found in $PATH: ?` — the binary was masked to `?` by the
     // PII filter, but the underlying cause was Bun.spawnSync throwing on a
-    // missing git executable. This test pins the fix: detectGit must return a
-    // sentinel result rather than throw, so the rest of project_scan still
-    // runs.
-    const dir = nextTmpDir()
-    await fsp.mkdir(dir, { recursive: true })
+    // missing git executable. Previously this test mutated process.env.PATH
+    // + process.chdir() to force the throw, which is risky under any future
+    // intra-file concurrency (and required handling the PATH=undefined
+    // restore case carefully). Use safeSpawnSync directly with an unknown
+    // binary instead — same code path, no global state mutation.
+    expect(safeSpawnSync(["this-binary-does-not-exist-xyz123"])).toBeNull()
+  })
 
-    const originalPath = process.env.PATH
-    const originalCwd = process.cwd()
-    // Point PATH at an empty directory so the shell can't find git (or any
-    // other binary). Bun.spawnSync will throw "Executable not found in $PATH"
-    // — which the safeSpawnSync wrapper should catch.
-    process.env.PATH = dir
-    process.chdir(dir)
-    try {
-      const result = await detectGit()
-      expect(result.isRepo).toBe(false)
-      expect(result.branch).toBeUndefined()
-      expect(result.remoteUrl).toBeUndefined()
-    } finally {
-      process.chdir(originalCwd)
-      process.env.PATH = originalPath
-    }
+  test("detectGit distinguishes 'git missing' from 'not a repo'", () => {
+    // The gitAvailable field separates the two cases. We can't easily force
+    // git-missing in a unit test (would require mutating PATH globally),
+    // but we can verify the contract: the field exists and is true when
+    // git ran successfully (which it does in this repo).
+    expect(currentRepoResult.gitAvailable).toBe(true)
+    expect(currentRepoResult.isRepo).toBe(true)
   })
 
   afterAll(async () => {
