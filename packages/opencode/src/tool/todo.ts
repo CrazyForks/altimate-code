@@ -32,8 +32,17 @@ export const TODOWRITE_WARN_THRESHOLD = 25
 export const TODOWRITE_REFUSE_THRESHOLD = 50
 
 // Clear counters on session deletion so daemon-mode processes don't
-// accumulate entries indefinitely. Subscribing at module load is the
-// established pattern in `share/share-next.ts` and `session/projectors.ts`.
+// accumulate entries indefinitely. Subscribing lazily on first call avoids
+// requiring an init step in callers — safe because Node is single-threaded
+// and `recordTodoWriteCall` has no awaits before the guard flips, so two
+// concurrent first-calls cannot both enter the subscribe block.
+//
+// Failure handling: if `Bus.subscribe` throws (Bus not yet initialized in
+// some test contexts), we still flip `_subscribed = true` to avoid retrying
+// every call. The counter remains correct for the in-memory case — only the
+// daemon-mode auto-cleanup is lost, and the explicit `clearTodoWriteCounter`
+// escape hatch remains available. This is a deliberate trade-off: silent
+// retry every call would noisily re-throw on every todowrite invocation.
 let _subscribed = false
 function ensureSessionDeletedSubscription(): void {
   if (_subscribed) return
@@ -43,8 +52,7 @@ function ensureSessionDeletedSubscription(): void {
       todoWriteCallsBySession.delete(evt.properties.info.id)
     })
   } catch {
-    // Bus may not be initialized in some test contexts; the counter still
-    // works correctly for the in-memory case. Subscription is best-effort.
+    // See comment above — subscription is best-effort, no retry by design.
   }
 }
 
@@ -80,6 +88,10 @@ export function recordTodoWriteCall(sessionID: string): {
  * counter cleared without ending the session. The operator can call this
  * from a debug context. Sessions reset automatically on `session.deleted`,
  * so most users never need this.
+ *
+ * No auth check: the CLI runs as a single local user with no remote callers;
+ * the worst case is a user resetting their own session's counter. Same
+ * privilege boundary as any other in-process import.
  */
 export function clearTodoWriteCounter(sessionID: string): void {
   todoWriteCallsBySession.delete(sessionID)
@@ -175,8 +187,8 @@ export const TodoWriteTool = Tool.define("todowrite", {
           `${JSON.stringify(params.todos, null, 2)}\n\n` +
           `WARNING: todowrite has been called ${decision.count} times this session. ` +
           `Typical usage is 5-15 calls. Consider whether you're updating the list ` +
-          `more often than needed — the list will be discarded if you exceed ` +
-          `${TODOWRITE_REFUSE_THRESHOLD} calls.`,
+          `more often than needed — further updates will be refused if you exceed ` +
+          `${TODOWRITE_REFUSE_THRESHOLD} calls. (Your current list is preserved.)`,
         metadata: {
           todos: params.todos,
           warning_emitted: true,
