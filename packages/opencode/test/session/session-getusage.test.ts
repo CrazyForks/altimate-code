@@ -164,13 +164,23 @@ describe("Session.getUsage — provider edge cases", () => {
     expect(result.tokens.inputTotal).toBe(800 + 2000 + 600)
   })
 
-  test("tokens.input is never negative even with inconsistent provider counts", () => {
+  test("invariant holds even when tokens.input goes negative on inconsistent provider counts", () => {
+    // Renamed from "tokens.input is never negative" — the previous name was
+    // the OPPOSITE of what this test verifies. The test pins that the
+    // algebraic invariant `input + cache.read + cache.write === inputTotal`
+    // holds even when input is negative.
+    //
     // Hypothetical: OpenAI returns inputTokens=1000 but cachedInputTokens=2000
     // (inconsistent — should never happen but providers occasionally surface
-    // weird numbers). Verify the subtraction doesn't underflow into negative
-    // territory; safe() clamps via Number.isFinite but does NOT clamp
-    // negatives. Document the current behavior so a future refactor that
-    // changes it is forced through this test.
+    // weird numbers). Verify the invariant holds even though `safe()`
+    // clamps non-finite values but does NOT clamp negatives. Documents the
+    // current behavior so a future refactor that changes it is forced
+    // through this test.
+    //
+    // Note: negative tokens.input flows into cost calculation as a
+    // negative contribution. Pre-existing concern — not introduced by
+    // this PR. Tracked as a follow-up to either clamp at zero or accept
+    // the offset.
     const result = Session.getUsage({
       model: fakeModel("@ai-sdk/openai"),
       usage: {
