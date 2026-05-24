@@ -15,8 +15,12 @@ const BROWSER_UA =
 // Status codes that warrant a retry with a different User-Agent
 const RETRYABLE_STATUSES = new Set([403, 406])
 
-// altimate_change start — session-level URL failure cache (#471)
-// Prevents repeated fetches to URLs that already returned 404/410 in this session.
+// altimate_change start — process-level URL failure cache (#471)
+// Prevents repeated fetches to URLs that already returned 404/410 in this
+// process. Cache is module-scope so in daemon mode (`altimate serve`) and
+// long-running MCP servers it persists across logical sessions — fine for
+// 404/410 (resource-permanent) but worth flagging for 451 (geo/legal block,
+// observer-conditional). See cacheUrlFailure comment for TTL rationale.
 //
 // 2026-05-22 follow-up to telemetry-2026-05-21 (486 residual webfetch 404s,
 // down from March's 2,222 but still meaningful):
@@ -24,12 +28,15 @@ const RETRYABLE_STATUSES = new Set([403, 406])
 //     within a session, and many sessions run longer than 5 min so the
 //     short window was letting agents re-hit the same dead URL multiple
 //     times in one session.
-//   - Cache key is the URL with tracking-only params (utm_*, ref, fbclid,
-//     gclid, mc_*, _ga, _gl, igshid, mibextid, __cf_chl_*) stripped, so
-//     LLM-generated tracking variations of a known-bad URL all hit cache.
-//     Functional query params (page, id, q, etc.) are preserved.
+//   - Cache key is the URL with tracking-only params (utm_*, fbclid,
+//     gclid, mc_*, _ga, _gl, igshid, mibextid, __cf_chl_*, plus HubSpot/
+//     Marketo/Adobe/Matomo variants) stripped, so LLM-generated tracking
+//     variations of a known-bad URL all hit cache. Functional query params
+//     (page, id, q, ref, etc.) are preserved — see exclusions block below
+//     for the rationale on `ref` specifically.
 const failedUrls = new Map<string, { status: number; timestamp: number }>()
-const FAILURE_CACHE_TTL = 30 * 60 * 1000 // 30 minutes
+const FAILURE_CACHE_TTL = 30 * 60 * 1000 // 30 minutes — 404/410 (resource-permanent)
+const FAILURE_CACHE_TTL_451 = 5 * 60 * 1000 // 5 minutes — 451 is observer-conditional (VPN swap, travel)
 
 /**
  * Param names that are universally tracking-only — stripping them never
@@ -135,11 +142,15 @@ export function normalizeUrlForCache(url: string): string {
   }
 }
 
+function ttlForStatus(status: number): number {
+  return status === 451 ? FAILURE_CACHE_TTL_451 : FAILURE_CACHE_TTL
+}
+
 function isUrlCachedFailure(url: string): { status: number } | null {
   const key = normalizeUrlForCache(url)
   const entry = failedUrls.get(key)
   if (!entry) return null
-  if (Date.now() - entry.timestamp > FAILURE_CACHE_TTL) {
+  if (Date.now() - entry.timestamp > ttlForStatus(entry.status)) {
     failedUrls.delete(key)
     return null
   }
@@ -149,12 +160,15 @@ function isUrlCachedFailure(url: string): { status: number } | null {
 const MAX_CACHED_URLS = 500
 
 function cacheUrlFailure(url: string, status: number): void {
-  // 404 (permanent), 410 (gone), and 451 (legal block) get the same TTL
-  // here intentionally. 410 is spec-permanent (won't lift), 404 is
-  // overwhelmingly permanent in practice (typos, removed docs), and 451
-  // can lift but rarely within a single session. Caching all three at
-  // 30 min is a deliberate simplification — split TTLs would be marginal
-  // complexity for marginal benefit.
+  // TTL by status:
+  //   404 (resource not found) + 410 (gone) — 30 min. Both are
+  //   resource-permanent; 410 is spec-permanent, 404 is overwhelmingly
+  //   permanent in practice (typos, removed docs).
+  //   451 (unavailable for legal reasons) — 5 min. Observer-conditional:
+  //   if the agent swaps networks (VPN, travel, mobile hotspot) the URL
+  //   may become reachable from the new vantage point, so a long TTL is
+  //   wrong. 5 min keeps the immediate-retry suppression but lets a
+  //   network change unblock the URL.
   if (status === 404 || status === 410 || status === 451) {
     const key = normalizeUrlForCache(url)
     // Re-touch semantics: if the key is already in the cache, delete first
@@ -185,6 +199,31 @@ export function _resetFailureCache(): void {
  */
 export function _failureCacheSize(): number {
   return failedUrls.size
+}
+
+/**
+ * Drive the cache state machine from tests — same code path as production.
+ * @internal — only used by tests; do not call from production code.
+ */
+export function _cacheUrlFailureForTest(url: string, status: number): void {
+  cacheUrlFailure(url, status)
+}
+
+/**
+ * Read cache key insertion order — the order entries would be evicted under
+ * FIFO/LRU pressure. Returns normalized cache keys, not raw URLs.
+ * @internal — only used by tests; do not call from production code.
+ */
+export function _failureCacheKeysInOrder(): string[] {
+  return [...failedUrls.keys()]
+}
+
+/**
+ * Probe the cache for a URL — same code path as production lookups.
+ * @internal — only used by tests; do not call from production code.
+ */
+export function _isUrlCachedFailureForTest(url: string): { status: number } | null {
+  return isUrlCachedFailure(url)
 }
 
 /** Strip query string from URL to avoid leaking auth tokens in error messages. */

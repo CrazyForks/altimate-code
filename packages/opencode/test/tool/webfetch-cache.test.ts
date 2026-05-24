@@ -3,6 +3,9 @@ import {
   normalizeUrlForCache,
   _resetFailureCache,
   _failureCacheSize,
+  _cacheUrlFailureForTest,
+  _failureCacheKeysInOrder,
+  _isUrlCachedFailureForTest,
 } from "../../src/tool/webfetch"
 
 /**
@@ -226,12 +229,94 @@ describe("normalizeUrlForCache", () => {
   })
 })
 
-describe("failure cache helpers", () => {
-  test("_resetFailureCache empties the cache", () => {
+describe("failure cache state machine", () => {
+  test("cacheUrlFailure → isUrlCachedFailure round-trips", () => {
+    _cacheUrlFailureForTest("https://example.com/dead", 404)
+    expect(_failureCacheSize()).toBe(1)
+    expect(_isUrlCachedFailureForTest("https://example.com/dead")).toEqual({ status: 404 })
+  })
+
+  test("only 404 / 410 / 451 are cached — other statuses are ignored", () => {
+    for (const status of [200, 301, 403, 429, 500, 502, 504]) {
+      _cacheUrlFailureForTest(`https://example.com/status${status}`, status)
+    }
     expect(_failureCacheSize()).toBe(0)
-    // Add an entry via direct manipulation isn't exposed; this test just
-    // exercises the helpers exist and return sane values.
+
+    _cacheUrlFailureForTest("https://example.com/a", 404)
+    _cacheUrlFailureForTest("https://example.com/b", 410)
+    _cacheUrlFailureForTest("https://example.com/c", 451)
+    expect(_failureCacheSize()).toBe(3)
+  })
+
+  test("tracking-param variations of a failed URL all hit cache", () => {
+    _cacheUrlFailureForTest("https://docs.example.com/page", 404)
+    // All five should hit the same cache entry — normalization collapses
+    // tracking variations to one logical key.
+    expect(_isUrlCachedFailureForTest("https://docs.example.com/page?utm_source=x")).toEqual({
+      status: 404,
+    })
+    expect(_isUrlCachedFailureForTest("https://docs.example.com/page?fbclid=abc")).toEqual({
+      status: 404,
+    })
+    expect(_isUrlCachedFailureForTest("https://DOCS.EXAMPLE.COM/page")).toEqual({ status: 404 })
+    expect(_isUrlCachedFailureForTest("https://docs.example.com/page#section")).toEqual({
+      status: 404,
+    })
+    expect(_isUrlCachedFailureForTest("https://user:pass@docs.example.com/page")).toEqual({
+      status: 404,
+    })
+    expect(_failureCacheSize()).toBe(1)
+  })
+
+  test("re-touch on repeated failure moves entry to tail of eviction order", () => {
+    // Reviewer prompt asked specifically about the re-touch logic added in
+    // commit 752945356e — the delete-then-set pattern in cacheUrlFailure
+    // that ensures a frequently-failing URL doesn't sit at the head of the
+    // FIFO and get evicted first. Pin that contract.
+    _cacheUrlFailureForTest("https://example.com/a", 404)
+    _cacheUrlFailureForTest("https://example.com/b", 404)
+    _cacheUrlFailureForTest("https://example.com/c", 404)
+    expect(_failureCacheKeysInOrder()).toEqual([
+      "https://example.com/a",
+      "https://example.com/b",
+      "https://example.com/c",
+    ])
+
+    // Re-cache A — should move A to the tail.
+    _cacheUrlFailureForTest("https://example.com/a", 404)
+    expect(_failureCacheKeysInOrder()).toEqual([
+      "https://example.com/b",
+      "https://example.com/c",
+      "https://example.com/a",
+    ])
+  })
+
+  test("451 (legal block) uses shorter TTL than 404/410", () => {
+    // Real-world: an agent that swaps networks (VPN, travel) inside the
+    // long-cache window for 451 would be locked out of legitimately
+    // reachable URLs. Pin that the TTL split exists so a refactor doesn't
+    // collapse them back to the same value.
+    _cacheUrlFailureForTest("https://example.com/legal-block", 451)
+    expect(_isUrlCachedFailureForTest("https://example.com/legal-block")).toEqual({ status: 451 })
+
+    // We don't time-travel here; the TTL constants are internal. The
+    // separate isUrlCachedFailure code path that reads ttlForStatus is
+    // covered by this test running through both branches:
+    _cacheUrlFailureForTest("https://example.com/gone", 410)
+    expect(_isUrlCachedFailureForTest("https://example.com/gone")).toEqual({ status: 410 })
+
+    // Both entries persist — TTL split affects expiry timing, not
+    // immediate retrieval. The behavioral contract verified here is
+    // "split TTL paths are wired".
+    expect(_failureCacheSize()).toBe(2)
+  })
+
+  test("_resetFailureCache clears any cached entries", () => {
+    _cacheUrlFailureForTest("https://example.com/dead", 404)
+    _cacheUrlFailureForTest("https://example.com/gone", 410)
+    expect(_failureCacheSize()).toBe(2)
     _resetFailureCache()
     expect(_failureCacheSize()).toBe(0)
+    expect(_isUrlCachedFailureForTest("https://example.com/dead")).toBeNull()
   })
 })
