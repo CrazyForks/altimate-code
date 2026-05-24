@@ -6,13 +6,13 @@
 
 import * as Registry from "../connections/registry"
 import { bqRegionFor, interpolateBqRegion } from "./bq-utils"
-import { resolveFinopsWarehouse } from "./warehouse-resolver"
+import { resolveFinopsWarehouse, DEFAULT_FINOPS_TYPES } from "./warehouse-resolver"
 import type {
   UnusedResourcesParams,
   UnusedResourcesResult,
 } from "../types"
 
-const UNUSED_RESOURCES_SUPPORTED_TYPES = ["snowflake", "bigquery", "databricks"] as const
+const UNUSED_RESOURCES_SUPPORTED_TYPES = DEFAULT_FINOPS_TYPES
 
 // ---------------------------------------------------------------------------
 // Snowflake SQL templates

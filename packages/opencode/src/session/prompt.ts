@@ -84,12 +84,25 @@ export namespace SessionPrompt {
   // emits below so they can never drift. Future telemetry events with an `agent`
   // field should route through this helper too.
   function normalizeAgentName(name: string | undefined): string {
-    // Case-insensitive guard: a future config, custom prompt, or hand-edited
-    // persisted session could surface "Build" or "BUILD" and the phantom
-    // bucket would come back. One toLowerCase() costs nothing and pins the
-    // contract regardless of caller hygiene.
-    if (!name || name.toLowerCase() === "build") return "builder"
-    return name
+    // Defence-in-depth before the legacy-name compare:
+    //   1. Strip C0 control characters (\x00-\x1f) — neutralizes log-injection
+    //      via embedded newlines/CRs that would split the telemetry field into
+    //      two fake events on App Insights.
+    //   2. Unicode-normalize (NFKC) — collapses visually-identical homoglyphs
+    //      so "ｂｕｉｌｄｅｒ" (fullwidth) doesn't create a separate bucket.
+    //   3. Cap at 64 chars — agent names should be slugs; anything larger is
+    //      a cardinality bomb or an injection vector. The agent registry's
+    //      longest legitimate name is well under this cap.
+    if (!name) return "builder"
+    const cleaned = name
+      .replace(/[\x00-\x1f\x7f]/g, "")
+      .normalize("NFKC")
+      .slice(0, 64)
+    // Case-insensitive legacy-name guard: a future config, custom prompt, or
+    // hand-edited persisted session could surface "Build"/"BUILD" and the
+    // phantom telemetry bucket would come back.
+    if (!cleaned || cleaned.toLowerCase() === "build") return "builder"
+    return cleaned
   }
   // altimate_change end
 

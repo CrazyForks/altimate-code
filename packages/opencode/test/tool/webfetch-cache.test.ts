@@ -245,10 +245,15 @@ describe("normalizeUrlForCache", () => {
 })
 
 describe("failure cache state machine", () => {
-  test("cacheUrlFailure → isUrlCachedFailure round-trips", () => {
+  test("cacheUrlFailure → isUrlCachedFailure round-trips with status + ageMs", () => {
     _cacheUrlFailureForTest("https://example.com/dead", 404)
     expect(_failureCacheSize()).toBe(1)
-    expect(_isUrlCachedFailureForTest("https://example.com/dead")).toEqual({ status: 404 })
+    const hit = _isUrlCachedFailureForTest("https://example.com/dead")
+    expect(hit?.status).toBe(404)
+    // ageMs is the time since the entry was cached; should be small (just
+    // cached) but non-negative.
+    expect(hit?.ageMs).toBeGreaterThanOrEqual(0)
+    expect(hit?.ageMs).toBeLessThan(60_000)
   })
 
   test("only 404 / 410 / 451 are cached — other statuses are ignored", () => {
@@ -267,19 +272,15 @@ describe("failure cache state machine", () => {
     _cacheUrlFailureForTest("https://docs.example.com/page", 404)
     // All five should hit the same cache entry — normalization collapses
     // tracking variations to one logical key.
-    expect(_isUrlCachedFailureForTest("https://docs.example.com/page?utm_source=x")).toEqual({
-      status: 404,
-    })
-    expect(_isUrlCachedFailureForTest("https://docs.example.com/page?fbclid=abc")).toEqual({
-      status: 404,
-    })
-    expect(_isUrlCachedFailureForTest("https://DOCS.EXAMPLE.COM/page")).toEqual({ status: 404 })
-    expect(_isUrlCachedFailureForTest("https://docs.example.com/page#section")).toEqual({
-      status: 404,
-    })
-    expect(_isUrlCachedFailureForTest("https://user:pass@docs.example.com/page")).toEqual({
-      status: 404,
-    })
+    for (const variant of [
+      "https://docs.example.com/page?utm_source=x",
+      "https://docs.example.com/page?fbclid=abc",
+      "https://DOCS.EXAMPLE.COM/page",
+      "https://docs.example.com/page#section",
+      "https://user:pass@docs.example.com/page",
+    ]) {
+      expect(_isUrlCachedFailureForTest(variant)?.status).toBe(404)
+    }
     expect(_failureCacheSize()).toBe(1)
   })
 
@@ -312,13 +313,13 @@ describe("failure cache state machine", () => {
     // reachable URLs. Pin that the TTL split exists so a refactor doesn't
     // collapse them back to the same value.
     _cacheUrlFailureForTest("https://example.com/legal-block", 451)
-    expect(_isUrlCachedFailureForTest("https://example.com/legal-block")).toEqual({ status: 451 })
+    expect(_isUrlCachedFailureForTest("https://example.com/legal-block")?.status).toBe(451)
 
     // We don't time-travel here; the TTL constants are internal. The
     // separate isUrlCachedFailure code path that reads ttlForStatus is
     // covered by this test running through both branches:
     _cacheUrlFailureForTest("https://example.com/gone", 410)
-    expect(_isUrlCachedFailureForTest("https://example.com/gone")).toEqual({ status: 410 })
+    expect(_isUrlCachedFailureForTest("https://example.com/gone")?.status).toBe(410)
 
     // Both entries persist — TTL split affects expiry timing, not
     // immediate retrieval. The behavioral contract verified here is

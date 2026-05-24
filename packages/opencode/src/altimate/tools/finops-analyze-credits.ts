@@ -73,7 +73,14 @@ export const FinopsAnalyzeCreditsTool = Tool.define("finops_analyze_credits", {
       ),
     days: z.number().optional().default(30).describe("Days of history to analyze"),
     limit: z.number().optional().default(50).describe("Max daily records"),
-    warehouse_filter: z.string().optional().describe("Filter to a specific Snowflake warehouse"),
+    warehouse_filter: z
+      .string()
+      .optional()
+      .describe(
+        "Filter result rows by an in-warehouse Snowflake compute name (NOT the connection name). " +
+          "Distinct from `warehouse`: `warehouse` picks which connection to query; `warehouse_filter` narrows " +
+          "which Snowflake virtual warehouse's queries are returned in the result set. Snowflake only.",
+      ),
   }),
   async execute(args, ctx) {
     try {

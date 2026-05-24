@@ -6,7 +6,7 @@
 
 import * as Registry from "../connections/registry"
 import { bqRegionFor, interpolateBqRegion } from "./bq-utils"
-import { resolveFinopsWarehouse } from "./warehouse-resolver"
+import { resolveFinopsWarehouse, DEFAULT_FINOPS_TYPES } from "./warehouse-resolver"
 import type {
   RoleGrantsParams,
   RoleGrantsResult,
@@ -108,7 +108,7 @@ LIMIT ?
 // Helpers
 // ---------------------------------------------------------------------------
 
-const GRANTS_SUPPORTED_TYPES = ["snowflake", "bigquery", "databricks"] as const
+const GRANTS_SUPPORTED_TYPES = DEFAULT_FINOPS_TYPES
 const SNOWFLAKE_ONLY_TYPES = ["snowflake"] as const
 
 function rowsToRecords(result: { columns: string[]; rows: any[][] }): Record<string, unknown>[] {

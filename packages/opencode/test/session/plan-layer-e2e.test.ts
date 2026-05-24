@@ -327,11 +327,32 @@ describe("sessionAgentName fix safety", () => {
     )
     const declIdx = promptTs.indexOf("function normalizeAgentName")
     expect(declIdx).toBeGreaterThan(-1)
-    const body = promptTs.slice(declIdx, declIdx + 400)
+    const body = promptTs.slice(declIdx, declIdx + 1200)
     // The body should case-fold before comparing — either toLowerCase() or
-    // toUpperCase() before the equality check. Anchored so a refactor to a
-    // raw string compare fails this test.
-    expect(body).toMatch(/name\.toLowerCase\(\)\s*===\s*"build"/)
+    // toUpperCase() before the equality check. Anchored to the legacy-name
+    // check specifically (variable name allowed to drift, the .toLowerCase()
+    // adjacent to "build" is what matters).
+    expect(body).toMatch(/\.toLowerCase\(\)\s*===\s*"build"/)
+  })
+
+  test("normalizeAgentName hardens against adversarial input (control chars, length, unicode)", async () => {
+    // Reviewer (compliance / chaos, 2026-05-24) flagged that the helper
+    // accepted arbitrary user-supplied agent names without sanitization:
+    // a 50KB string, embedded newlines (log-injection on App Insights),
+    // or fullwidth homoglyphs would create separate telemetry buckets
+    // or split events. Pin that the helper:
+    //   - strips control chars
+    //   - NFKC-normalizes
+    //   - caps length
+    const promptTs = await fs.readFile(
+      path.join(__dirname, "../../src/session/prompt.ts"),
+      "utf-8",
+    )
+    const declIdx = promptTs.indexOf("function normalizeAgentName")
+    const body = promptTs.slice(declIdx, declIdx + 1200)
+    expect(body).toMatch(/\[\\x00-\\x1f/) // C0 strip
+    expect(body).toMatch(/normalize\(\s*["']NFKC["']\s*\)/)
+    expect(body).toMatch(/\.slice\(\s*0\s*,\s*\d{2,3}\s*\)/) // length cap (2-3 digit, e.g. 64)
   })
 })
 

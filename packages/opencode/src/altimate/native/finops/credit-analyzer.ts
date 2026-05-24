@@ -6,7 +6,7 @@
 
 import * as Registry from "../connections/registry"
 import { bqRegionFor, interpolateBqRegion } from "./bq-utils"
-import { resolveFinopsWarehouse } from "./warehouse-resolver"
+import { resolveFinopsWarehouse, DEFAULT_FINOPS_TYPES } from "./warehouse-resolver"
 import type {
   CreditAnalysisParams,
   CreditAnalysisResult,
@@ -14,7 +14,7 @@ import type {
   ExpensiveQueriesResult,
 } from "../types"
 
-const CREDIT_SUPPORTED_TYPES = ["snowflake", "bigquery", "databricks"] as const
+const CREDIT_SUPPORTED_TYPES = DEFAULT_FINOPS_TYPES
 
 // ---------------------------------------------------------------------------
 // Snowflake SQL templates

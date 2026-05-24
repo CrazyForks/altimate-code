@@ -101,6 +101,35 @@ const TRACKING_PARAMS = new Set([
   "piwik_keyword",
 ])
 
+// Auth-bearing query params. These are *functional* (they change what the
+// server returns — a different signature accesses a different resource view)
+// so they're NOT in TRACKING_PARAMS (which is "safe to drop, doesn't change
+// the resource"). But for cache-key purposes we DO want to drop them:
+//   1. Compliance — presigned-S3 URLs, GCS signed URLs, and bearer-token
+//      query strings shouldn't sit in an in-memory Map for 30 min where
+//      heap dumps, debug bundles, and process snapshots could capture them.
+//   2. Equivalence — a 404 on `?signature=A` strongly implies a 404 on
+//      `?signature=B` for the same path (the path is wrong, not the sig),
+//      so collapsing them is the *right* cache behaviour.
+// We do NOT strip these from the URL we actually fetch — only from the
+// cache key. That happens via `AUTH_PARAMS_FOR_CACHE_KEY` in
+// `normalizeUrlForCache` below.
+const AUTH_PARAMS_FOR_CACHE_KEY = new Set([
+  "token",
+  "access_token",
+  "id_token",
+  "api_key",
+  "apikey",
+  "key", // GCS / GCP signed URLs
+  "signature",
+  "sig",
+  "x-amz-signature",
+  "x-amz-credential",
+  "x-amz-security-token",
+  "x-goog-signature",
+  "x-goog-credential",
+])
+
 function isTrackingParamPrefix(name: string): boolean {
   return name.startsWith("__cf_chl_") || name.startsWith("utm_")
 }
@@ -123,6 +152,10 @@ export function normalizeUrlForCache(url: string): string {
     const kept: [string, string][] = []
     for (const [k, v] of parsed.searchParams) {
       if (TRACKING_PARAMS.has(k) || isTrackingParamPrefix(k)) continue
+      // Drop auth-bearing params from the cache key — see
+      // AUTH_PARAMS_FOR_CACHE_KEY comment for the why. The actual fetch
+      // still uses the raw URL with creds intact.
+      if (AUTH_PARAMS_FOR_CACHE_KEY.has(k.toLowerCase())) continue
       kept.push([k, v])
     }
     // Sort by (key, value) so duplicate-key params produce a stable order:
@@ -146,15 +179,16 @@ function ttlForStatus(status: number): number {
   return status === 451 ? FAILURE_CACHE_TTL_451 : FAILURE_CACHE_TTL
 }
 
-function isUrlCachedFailure(url: string): { status: number } | null {
+function isUrlCachedFailure(url: string): { status: number; ageMs: number } | null {
   const key = normalizeUrlForCache(url)
   const entry = failedUrls.get(key)
   if (!entry) return null
-  if (Date.now() - entry.timestamp > ttlForStatus(entry.status)) {
+  const ageMs = Date.now() - entry.timestamp
+  if (ageMs > ttlForStatus(entry.status)) {
     failedUrls.delete(key)
     return null
   }
-  return { status: entry.status }
+  return { status: entry.status, ageMs }
 }
 
 const MAX_CACHED_URLS = 500
@@ -222,7 +256,7 @@ export function _failureCacheKeysInOrder(): string[] {
  * Probe the cache for a URL — same code path as production lookups.
  * @internal — only used by tests; do not call from production code.
  */
-export function _isUrlCachedFailureForTest(url: string): { status: number } | null {
+export function _isUrlCachedFailureForTest(url: string): { status: number; ageMs: number } | null {
   return isUrlCachedFailure(url)
 }
 
@@ -280,10 +314,15 @@ export const WebFetchTool = Tool.define("webfetch", {
       throw new Error(`Invalid URL: "${params.url.slice(0, 200)}" is not a valid URL. Check the format and try again.`)
     }
 
-    // Check failure cache — avoid re-fetching URLs that already returned 404/410
+    // Check failure cache — avoid re-fetching URLs that already returned 404/410/451.
+    // Prefix with "(cached failure, Nm ago)" so the agent can tell a cache-hit
+    // refusal apart from a live network call. Otherwise an LLM debugging
+    // "why is this instant?" has no signal that the URL was normalized and
+    // collapsed onto a prior failure.
     const cached = isUrlCachedFailure(params.url)
     if (cached) {
-      throw new Error(buildFetchError(params.url, cached.status))
+      const ageMin = Math.max(1, Math.round(cached.ageMs / 60_000))
+      throw new Error(`(cached failure, ${ageMin}m ago) ${buildFetchError(params.url, cached.status)}`)
     }
     // altimate_change end
 

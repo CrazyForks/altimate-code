@@ -18,6 +18,17 @@
 
 import * as Registry from "../connections/registry"
 
+/**
+ * Default supported driver types for finops operations that work against any
+ * cloud warehouse with usage/billing tables (credit analysis, sizing advice,
+ * unused-resource detection, etc.). Centralized here so adding a new
+ * warehouse driver doesn't require touching 3+ handler files.
+ *
+ * Operations with narrower support (e.g. Snowflake-only role hierarchy,
+ * postgres-aware query history) declare their own const arrays.
+ */
+export const DEFAULT_FINOPS_TYPES = ["snowflake", "bigquery", "databricks"] as const
+
 export type FinopsWarehouseResolution =
   | { kind: "ok"; warehouse: string; type: string; autoPicked: boolean }
   | { kind: "error"; error: string }

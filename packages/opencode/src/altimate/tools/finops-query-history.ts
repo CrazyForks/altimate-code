@@ -61,7 +61,14 @@ export const FinopsQueryHistoryTool = Tool.define("finops_query_history", {
     days: z.number().optional().default(7).describe("How many days of history to fetch"),
     limit: z.number().optional().default(100).describe("Maximum number of queries to return"),
     user: z.string().optional().describe("Filter to a specific user (Snowflake only)"),
-    warehouse_filter: z.string().optional().describe("Filter to a specific warehouse name (Snowflake only)"),
+    warehouse_filter: z
+      .string()
+      .optional()
+      .describe(
+        "Filter result rows by an in-warehouse Snowflake compute name (NOT the connection name). " +
+          "Distinct from `warehouse`: `warehouse` picks which connection to query; `warehouse_filter` narrows " +
+          "which Snowflake virtual warehouse's queries are returned in the result set. Snowflake only.",
+      ),
   }),
   async execute(args, ctx) {
     try {

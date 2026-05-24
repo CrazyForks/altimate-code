@@ -132,10 +132,18 @@ export async function detectGit(): Promise<GitInfo> {
     if (isRepoResult.exitCode === 128) {
       return { isRepo: false, gitAvailable: true }
     }
+    // Run stderr through the telemetry masker BEFORE persisting so emails,
+    // bearer tokens, and api-keys can't leak into LLM-visible metadata,
+    // session transcripts, or App Insights via `metadata.git.gitError`.
+    // Cap at 240 chars after masking (mask replacements can shorten or
+    // lengthen the input minimally).
+    const maskedStderr = isRepoResult.stderr
+      ? Telemetry.maskString(isRepoResult.stderr.trim()).slice(0, 240) || undefined
+      : undefined
     return {
       isRepo: false,
       gitAvailable: true,
-      gitError: { exitCode: isRepoResult.exitCode, stderr: isRepoResult.stderr?.trim() || undefined },
+      gitError: { exitCode: isRepoResult.exitCode, stderr: maskedStderr },
     }
   }
 
@@ -146,10 +154,38 @@ export async function detectGit(): Promise<GitInfo> {
   let remoteUrl: string | undefined
   const remoteResult = safeSpawnSync(["git", "remote", "get-url", "origin"])
   if (remoteResult && remoteResult.exitCode === 0) {
-    remoteUrl = remoteResult.stdout.trim()
+    remoteUrl = stripGitRemoteCredentials(remoteResult.stdout.trim())
   }
 
   return { isRepo: true, gitAvailable: true, branch, remoteUrl }
+}
+
+/**
+ * Strip embedded credentials from a git remote URL before surfacing it.
+ *
+ * `git remote get-url origin` returns the URL verbatim including HTTPS
+ * basic-auth (e.g. `https://x-access-token:ghp_xxx@github.com/...`) when
+ * the user committed creds into the remote. `remoteUrl` flows into tool
+ * result metadata that ships to the LLM provider AND is persisted in
+ * session transcripts — leaving creds in there is a recurring exfil path.
+ *
+ * SSH-form remotes (`git@github.com:owner/repo.git`) have no userinfo
+ * concept and are left untouched. URLs we can't parse are dropped to
+ * undefined (better to lose the breadcrumb than leak creds).
+ */
+function stripGitRemoteCredentials(url: string): string | undefined {
+  if (!url) return undefined
+  // SSH form: `git@host:path` — no creds to strip.
+  if (/^[\w.-]+@[\w.-]+:/.test(url) && !url.includes("://")) return url
+  try {
+    const parsed = new URL(url)
+    parsed.username = ""
+    parsed.password = ""
+    return parsed.toString()
+  } catch {
+    // Unparseable — drop entirely rather than risk leaking embedded creds.
+    return undefined
+  }
 }
 
 export async function detectDbtProject(startDir: string): Promise<DbtProjectInfo> {

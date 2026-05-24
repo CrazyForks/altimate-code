@@ -6,7 +6,7 @@
 
 import * as Registry from "../connections/registry"
 import { bqRegionFor, interpolateBqRegion } from "./bq-utils"
-import { resolveFinopsWarehouse } from "./warehouse-resolver"
+import { resolveFinopsWarehouse, DEFAULT_FINOPS_TYPES } from "./warehouse-resolver"
 import type {
   WarehouseAdvisorParams,
   WarehouseAdvisorResult,
@@ -123,7 +123,7 @@ const SIZE_ORDER = ["X-Small", "Small", "Medium", "Large", "X-Large", "2X-Large"
 // Helpers
 // ---------------------------------------------------------------------------
 
-const ADVISOR_SUPPORTED_TYPES = ["snowflake", "bigquery", "databricks"] as const
+const ADVISOR_SUPPORTED_TYPES = DEFAULT_FINOPS_TYPES
 
 function buildLoadSql(whType: string, days: number, bqRegion?: unknown): string | null {
   if (whType === "snowflake") return SNOWFLAKE_LOAD_SQL.replace("{days}", String(days))
