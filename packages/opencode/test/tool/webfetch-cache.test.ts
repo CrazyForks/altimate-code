@@ -191,7 +191,13 @@ describe("normalizeUrlForCache", () => {
     ).toBe("https://example.com/page")
   })
 
-  test("strips Piwik/Matomo tracking params (pk_*, piwik_*)", () => {
+  test("strips enumerated Piwik/Matomo tracking params (pk_campaign, pk_kwd, pk_source, pk_medium, pk_content, piwik_campaign, piwik_keyword)", () => {
+    // NOTE: this is an exact-name match against TRACKING_PARAMS, NOT a
+    // pk_* / piwik_* prefix match. New Matomo params (e.g. a hypothetical
+    // `pk_term`) would NOT be stripped until added explicitly. The
+    // restraint is deliberate — prefix-stripping `pk_` would risk false
+    // positives on functional params from unrelated services that happen
+    // to start with the same two letters.
     expect(
       normalizeUrlForCache(
         "https://example.com/page?pk_campaign=spring&pk_kwd=hello&pk_source=email&pk_medium=newsletter&pk_content=banner",
@@ -202,6 +208,15 @@ describe("normalizeUrlForCache", () => {
         "https://example.com/page?piwik_campaign=summer&piwik_keyword=ai",
       ),
     ).toBe("https://example.com/page")
+    // Non-enumerated pk_* / piwik_* are preserved — pins the "exact-name,
+    // not prefix" contract so a future refactor can't silently flip to
+    // prefix-stripping.
+    expect(normalizeUrlForCache("https://example.com/page?pk_unknown=x")).toBe(
+      "https://example.com/page?pk_unknown=x",
+    )
+    expect(normalizeUrlForCache("https://example.com/page?piwik_unknown=x")).toBe(
+      "https://example.com/page?piwik_unknown=x",
+    )
   })
 
   test("real-world: HubSpot/Marketo email link variations collapse to one cache key", () => {
