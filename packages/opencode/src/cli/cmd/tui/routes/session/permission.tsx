@@ -620,7 +620,7 @@ function Prompt<const T extends Record<string, string>>(props: {
             position: "relative",
           })}
     >
-      <box gap={1} paddingLeft={1} paddingRight={3} paddingTop={1} paddingBottom={1} flexGrow={1}>
+      <box gap={1} paddingLeft={1} paddingRight={3} paddingTop={1} paddingBottom={1} flexGrow={1} flexShrink={1} overflow="hidden">
         <Show
           when={props.header}
           fallback={
