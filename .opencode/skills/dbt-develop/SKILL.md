@@ -166,6 +166,29 @@ ls models/                                                   # confirm every req
 altimate-dbt info                                            # confirm every requested model is in the project
 ```
 
+**Diff column shape against the spec.** For each model the task asked for,
+get the actual column header and compare against the spec (whatever the task
+references — `schema.yml`, `_models.yml`, an inline column list in the
+prompt). Same column count, same order, same names — not "close enough."
+
+```bash
+altimate-dbt columns --model <name>                          # if altimate-dbt is available
+# or: dbt show --select <name> --limit 0                     # plain dbt fallback — produces the header row
+```
+
+Compare against the spec as ordered lists and explicitly enumerate:
+
+- `columns_extra`: in your model, NOT in the spec — REMOVE them
+- `columns_missing`: in the spec, NOT in your model — ADD them
+- `columns_reordered`: in both but at different positions — REORDER your `SELECT`
+
+If any of those three lists is non-empty, the model is **not done**. Fix the
+model SQL to match the spec — do not reinterpret the spec, do not assume
+extra columns will be tolerated, do not assume column order is cosmetic.
+Many automatic equality tests check the column tuple exactly: `(name, type,
+position)`. The model contract is what the spec says, not what you think
+would be more useful.
+
 **Verify the output:**
 ```bash
 altimate-dbt columns --model <name>                        # confirm expected columns exist
@@ -197,6 +220,7 @@ Use `altimate-dbt children` and `altimate-dbt parents` to verify the DAG is inta
 5. **Fix ALL errors, not just yours.** After creating/modifying models, run a full `dbt build`. If ANY model fails — even pre-existing ones you didn't touch — fix them. Your job is to leave the project in a fully working state.
 6. **Verify transformation correctness, not just mechanics.** For non-trivial models, generate and run dbt unit tests as part of the validate step (use the `dbt-unit-tests` skill). Passing `dbt build` only proves the SQL is syntactically valid — it doesn't prove the *values* are right.
 7. **Enumerate deliverables, then check them off.** The task is not done until every model, column, test, and config change explicitly requested exists on disk and in the manifest. Re-read the prompt at the end and verify each requested item — don't trust your own intermediate "done" feeling.
+8. **Match the column spec exactly — same names, same types, same order, no extras.** If the task references a `schema.yml`, `_models.yml`, or an explicit column list, the new model's column tuple must match the spec verbatim. Adding "helpful" extras (rank breakdowns, name-resolved fields, lineage metadata), reordering columns "more logically", or substituting synonyms (`supplier_id` for `supplier_company`, `transaction_type_name` for `transaction_type`) all break equality tests. The contract is what the spec says, not what you think would be useful. If you genuinely believe a column should be there and the spec disagrees, the spec wins.
 
 ## Common Pitfalls in Transformation Logic
 
@@ -292,6 +316,66 @@ models** feature, not a sibling `.sql` file with a `_v2` suffix:
    `{{ ref('dim_accounts', v=2) }}`. Without the `versions:` block, dbt
    treats `dim_accounts_v2` as an unrelated sibling model — versioning
    tests will fail and v1↔v2 lineage won't appear in the DAG.
+
+### Refactoring a CTE into its own model — preserve row-count semantics
+
+When a task asks to extract a CTE from a larger model into its own
+intermediate model, the new model's row count must match what the CTE
+produced inside the original. Common bug: the CTE was on the parent side of
+a `LEFT JOIN` that preserved parent rows with no children; the agent's
+extracted model starts `FROM child_table` and joins back to the parent,
+silently dropping parents that have no children.
+
+**Rule of thumb:** the extracted model should start `FROM` the same table
+the CTE started from. Build the extracted model inside-out from the
+parent's perspective, not the child's.
+
+```sql
+-- Original CTE (inside the larger model):
+--   WITH agg_users AS (
+--     SELECT p.project_id, listagg(u.user_id) AS users
+--     FROM projects p
+--     LEFT JOIN project_users u ON u.project_id = p.project_id
+--     GROUP BY p.project_id
+--   )
+--
+-- Right refactor — preserves projects with no users:
+SELECT p.project_id, listagg(u.user_id) AS users
+FROM {{ ref('projects') }} p
+LEFT JOIN {{ ref('project_users') }} u ON u.project_id = p.project_id
+GROUP BY p.project_id
+
+-- Wrong refactor — drops projects with no users:
+SELECT u.project_id, listagg(u.user_id) AS users
+FROM {{ ref('project_users') }} u
+GROUP BY u.project_id                            -- projects with zero users vanish
+```
+
+**Verification** (in order of preference):
+
+```sql
+-- If dbt_utils is installed, add to schema.yml on the extracted model:
+tests:
+  - dbt_utils.equal_rowcount:
+      compare_model: ref('<parent_table>')
+
+-- If dbt-audit-helper is installed:
+{{ audit_helper.compare_relations(
+    a_relation=ref('<original_or_parent>'),
+    b_relation=ref('<extracted>'),
+    primary_key='<key>'
+) }}
+
+-- Manual fallback — always available:
+SELECT (SELECT COUNT(*) FROM {{ ref('<parent>') }})   AS parent_rows,
+       (SELECT COUNT(*) FROM {{ ref('<extracted>') }}) AS extracted_rows
+-- These must match if the original CTE was LEFT-joined to its parent.
+```
+
+If `extracted_rows < parent_rows`, the refactor is wrong — you've turned a
+LEFT JOIN into an INNER JOIN somewhere. Same trap shows up when filtering a
+right-side column in `WHERE` (silently converts the LEFT JOIN to an INNER
+JOIN); move that filter into the `ON` clause.
 
 ### Uniqueness when the schema implies it
 
