@@ -303,13 +303,15 @@ export namespace SessionPrompt {
     const s = state()
     const match = s[sessionID]
     if (!match) {
+      // Session already ended or was never started — set idle directly since no processor will do it
       await SessionStatus.set(sessionID, { type: "idle" })
       return
     }
     match.abort.abort()
     delete s[sessionID]
-    await SessionStatus.set(sessionID, { type: "idle" })
-    return
+    // Do NOT call SessionStatus.set(idle) here — on abort the processor's catch block
+    // publishes session.error THEN sets idle, preserving correct event ordering.
+    // On normal completion, loop() sets idle after the while loop exits.
   }
   // altimate_change end
 
@@ -1110,6 +1112,11 @@ export namespace SessionPrompt {
       }
       continue
     }
+    // altimate_change start — set idle on normal loop exit; abort path is handled by processor catch block
+    if (!abort.aborted) {
+      await SessionStatus.set(sessionID, { type: "idle" })
+    }
+    // altimate_change end
     SessionCompaction.prune({ sessionID })
     // altimate_change start — session end telemetry
     const outcome = abort.aborted
