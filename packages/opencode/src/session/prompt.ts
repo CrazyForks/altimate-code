@@ -52,6 +52,11 @@ import { Truncate } from "@/tool/truncation"
 import { decodeDataUrl } from "@/util/data-url"
 // altimate_change start - import fingerprint for env-based skill selection
 import { Fingerprint } from "../altimate/fingerprint"
+// altimate_change end
+
+// altimate_change start - validator framework (see session/validators/README in types.ts)
+import { ValidatorRegistry } from "./validators/registry"
+import "../altimate/validators" // side-effect: registers altimate validators on module load
 import { Config } from "../config/config"
 import { Tracer } from "../altimate/observability/tracing"
 // altimate_change end
@@ -322,6 +327,9 @@ export namespace SessionPrompt {
     let sessionTotalTokens = 0
     let toolCallCount = 0
     let compactionCount = 0
+    // altimate_change start — validator framework retry counter
+    let validatorRetryCount = 0
+    // altimate_change end
     let sessionAgentName = ""
     let sessionHadError = false
     // altimate_change start — plan refinement tracking
@@ -1055,6 +1063,108 @@ export namespace SessionPrompt {
       if (agent.name === "plan" && !planHasWritten) {
         const planPath = Session.plan(session)
         planHasWritten = await Filesystem.exists(planPath)
+      }
+      // altimate_change end
+
+      // altimate_change start — validator dispatch (harness-side completion gate)
+      // Fires when the model declares a clean stop on this step (finish === "stop"
+      // and no tool calls outstanding). Runs all registered validators that
+      // declare themselves applicable to this session. If any validator says
+      // the work is not done, the framework injects a synthetic user message
+      // describing the gap and continues the loop — the model gets one more
+      // turn to fix the issue. Bounded by a per-session retry budget; once
+      // exhausted the loop falls through to the natural break.
+      //
+      // Feature flag: ALTIMATE_VALIDATORS_ENABLED=1 opts in. Default OFF so
+      // existing sessions are unaffected until validators are vetted in
+      // production. Telemetry fires regardless of opt-in so we can see how
+      // often validators *would* have fired against historical traffic.
+      const validatorsEnabled = process.env.ALTIMATE_VALIDATORS_ENABLED === "1"
+      const maxValidatorRetries = Number(process.env.ALTIMATE_VALIDATORS_MAX_RETRIES ?? "3")
+      if (
+        result !== "stop" &&
+        result !== "compact" &&
+        processor.message.finish === "stop" &&
+        !processor.message.error &&
+        ValidatorRegistry.list().length > 0
+      ) {
+        try {
+          const vCtx = {
+            sessionID,
+            workingDirectory: process.cwd(),
+            sessionStartMs: sessionStartTime,
+            step,
+            retryCount: validatorRetryCount,
+          }
+          const checks = await ValidatorRegistry.runAll(vCtx)
+          const failures = checks.filter((c) => !c.result.ok)
+
+          // Telemetry: emit one event per validator that ran, plus a session
+          // rollup. Always emitted, even when the feature flag is off, so we
+          // can measure baseline fire rate vs prompt-only enforcement.
+          for (const { validator, result: vRes } of checks) {
+            Telemetry.track({
+              type: "validator_check",
+              timestamp: Date.now(),
+              session_id: sessionID,
+              validator_name: validator.name,
+              ok: vRes.ok,
+              step,
+              retry_count: validatorRetryCount,
+              enforced: validatorsEnabled,
+              ...(vRes.details && { details: vRes.details }),
+            } as any)
+          }
+
+          if (failures.length > 0 && validatorsEnabled && validatorRetryCount < maxValidatorRetries) {
+            // Build a single synthetic user-turn body that aggregates every
+            // failing validator's reason + fixHint. The agent sees this as
+            // the next user message and gets one more turn to address it.
+            const body = failures
+              .map(({ validator, result: vRes }) => {
+                const head = `[altimate-validator: ${validator.name}] ${vRes.reason ?? "validation failed"}`
+                const tail = vRes.fixHint ? `\n${vRes.fixHint}` : ""
+                return head + tail
+              })
+              .join("\n\n")
+
+            log.info("validator failures detected, injecting synthetic user turn", {
+              sessionID,
+              failures: failures.map((f) => f.validator.name),
+              retry: validatorRetryCount + 1,
+            })
+
+            const syntheticMessageID = MessageID.ascending()
+            await Session.updateMessage({
+              id: syntheticMessageID,
+              role: "user" as const,
+              sessionID,
+              time: { created: Date.now() },
+              agent: lastUser.agent,
+              model: lastUser.model,
+            } as MessageV2.Info)
+
+            // Append the validator body as a text part on the new user message.
+            await Session.updatePart({
+              id: PartID.ascending(),
+              messageID: syntheticMessageID,
+              sessionID,
+              type: "text",
+              text: body,
+              time: { start: Date.now(), end: Date.now() },
+            })
+
+            validatorRetryCount++
+            // Fall through to `continue`; the next iteration's top-of-loop
+            // sees the newer user message and does NOT break.
+          }
+        } catch (e) {
+          // A bug in the validator framework should never block the agent loop.
+          log.warn("validator dispatch errored, skipping", {
+            sessionID,
+            error: e instanceof Error ? e.message : String(e),
+          })
+        }
       }
       // altimate_change end
 
