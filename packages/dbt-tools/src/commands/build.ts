@@ -1,4 +1,5 @@
 import type { DBTProjectIntegrationAdapter, CommandProcessResult } from "@altimateai/dbt-integration"
+import { schemaVerify } from "./schema-verify"
 
 export async function build(adapter: DBTProjectIntegrationAdapter, args: string[]) {
   const model = flag(args, "model")
@@ -12,7 +13,31 @@ export async function build(adapter: DBTProjectIntegrationAdapter, args: string[
     modelName: model,
     plusOperatorRight: downstream ? "+" : "",
   })
-  return format(result)
+  const formatted = format(result)
+
+  // Auto-run schema-verify after a successful single-model build. Surfacing
+  // the verdict in the same tool result the agent just received is the
+  // closest a CLI command can get to harness-level enforcement: the agent
+  // cannot see a green build without also seeing the schema-verify diff.
+  // Failures here are non-fatal — verify is advisory feedback, not a build
+  // step. `no-spec` is reported so the agent knows there was no spec to
+  // grade against.
+  if (!("error" in formatted)) {
+    try {
+      const verify = await schemaVerify(adapter, ["--model", model])
+      return { ...formatted, schema_verify: verify }
+    } catch (e) {
+      // Don't let verify failures mask a successful build.
+      return {
+        ...formatted,
+        schema_verify: {
+          error: `schema-verify failed: ${e instanceof Error ? e.message : String(e)}. Run \`altimate-dbt schema-verify --model ${model}\` manually to inspect.`,
+        },
+      }
+    }
+  }
+
+  return formatted
 }
 
 export async function run(adapter: DBTProjectIntegrationAdapter, args: string[]) {

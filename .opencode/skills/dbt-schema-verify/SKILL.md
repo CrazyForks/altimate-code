@@ -46,6 +46,13 @@ just the last one. A `build` is not a verify.
 altimate-dbt schema-verify --model <name>
 ```
 
+**Note**: `altimate-dbt build --model <name>` already runs schema-verify
+automatically after a successful build and includes the verdict in its
+response under a `schema_verify` field. You will see the diff in the same
+result that reported the build outcome — read it there before deciding
+the task is done. If you need to re-check after editing, call
+`schema-verify` directly.
+
 Returns a structured JSON result:
 
 ```json
