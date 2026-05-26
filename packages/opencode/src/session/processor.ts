@@ -533,6 +533,18 @@ export namespace SessionProcessor {
                 sessionID: input.assistantMessage.sessionID,
                 error: input.assistantMessage.error,
               })
+              // altimate_change start — telemetry for unhandled streaming errors (non-retry, non-overflow)
+              // Covers: MessageAbortedError (Stop/dispose), UnknownError (SSE chunk timeout),
+              // APIError (provider failures after retry exhaustion), AuthError, and any other streaming error.
+              Telemetry.track({
+                type: "error",
+                timestamp: Date.now(),
+                session_id: input.assistantMessage.sessionID,
+                error_name: error.name,
+                error_message: (error.data as any)?.message ?? String((e as any)?.message ?? ""),
+                context: "streaming",
+              })
+              // altimate_change end
               // altimate_change start — SessionStatus.set became async; await so idle state flushes before exit
               await SessionStatus.set(input.sessionID, { type: "idle" })
               // altimate_change end
