@@ -21,12 +21,17 @@ function makeAdapter(overrides: Partial<DBTProjectIntegrationAdapter> = {}): DBT
 }
 
 describe("build command", () => {
-  test("build without --model builds entire project", async () => {
+  test("build without --model builds entire project and reports schema-verify summary", async () => {
     const adapter = makeAdapter()
     const result = await build(adapter, [])
     expect(adapter.unsafeBuildProjectImmediately).toHaveBeenCalledTimes(1)
     expect(adapter.unsafeBuildModelImmediately).not.toHaveBeenCalled()
-    expect(result).toEqual({ stdout: "project built" })
+    // After a project-wide build, schema-verify is auto-run against every
+    // model with declared columns (none in this empty-mock case).
+    expect((result as Record<string, unknown>).stdout).toBe("project built")
+    expect((result as Record<string, unknown>).schema_verify_summary).toBeDefined()
+    const summary = (result as unknown as { schema_verify_summary: { models_checked: number } }).schema_verify_summary
+    expect(summary.models_checked).toBe(0) // empty manifest in the mock
   })
 
   test("build --model <name> builds single model and auto-runs schema-verify", async () => {
@@ -63,6 +68,52 @@ describe("build command", () => {
     expect(result).toEqual({ error: "--downstream requires --model" })
     expect(adapter.unsafeBuildProjectImmediately).not.toHaveBeenCalled()
     expect(adapter.unsafeBuildModelImmediately).not.toHaveBeenCalled()
+  })
+
+  test("project-wide build collects per-model schema-verify mismatches", async () => {
+    // Mock manifest with 3 models: one matching spec, one mismatch (extra col), one no-spec.
+    const matchingNode = {
+      resource_type: "model",
+      name: "users_dim",
+      columns: { id: { name: "id", description: "", data_type: "INT" } },
+    }
+    const mismatchNode = {
+      resource_type: "model",
+      name: "products_dim",
+      columns: { id: { name: "id", description: "", data_type: "INT" } },
+    }
+    const nospecNode = { resource_type: "model", name: "legacy_facts", columns: {} }
+    const nodes = [matchingNode, mismatchNode, nospecNode]
+
+    const adapter = makeAdapter({
+      parseManifest: mock(() => Promise.resolve({
+        nodeMetaMap: {
+          lookupByBaseName: mock((name: string) => nodes.find((n) => n.name === name)),
+          lookupByUniqueId: mock(() => undefined),
+          nodes: mock(() => nodes[Symbol.iterator]()),
+        },
+      } as never)),
+      getColumnsOfModel: mock((modelName: string) => {
+        if (modelName === "users_dim") return Promise.resolve([{ column: "id", dtype: "INT" }])
+        if (modelName === "products_dim")
+          return Promise.resolve([{ column: "id", dtype: "INT" }, { column: "extra_col", dtype: "STRING" }])
+        return Promise.resolve([{ column: "anything", dtype: "STRING" }])
+      }),
+    })
+
+    const result = await build(adapter, [])
+    const summary = (result as unknown as { schema_verify_summary: {
+      models_checked: number; match: number; mismatch: number; no_spec: number; errored: number;
+      mismatches: Array<{ model: string; columns_extra: string[] }>
+    } }).schema_verify_summary
+
+    expect(summary.models_checked).toBe(2) // users_dim + products_dim (no_spec is skipped from the per-model verify list)
+    expect(summary.match).toBe(1)
+    expect(summary.mismatch).toBe(1)
+    expect(summary.no_spec).toBe(1)
+    expect(summary.errored).toBe(0)
+    expect(summary.mismatches[0]?.model).toBe("products_dim")
+    expect(summary.mismatches[0]?.columns_extra).toContain("extra_col")
   })
 
   test("build surfaces stderr as error", async () => {
