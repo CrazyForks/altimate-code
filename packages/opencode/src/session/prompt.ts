@@ -1085,10 +1085,10 @@ export namespace SessionPrompt {
       const validatorsEnabled = process.env.ALTIMATE_VALIDATORS_ENABLED === "1"
       const maxValidatorRetries = Number(process.env.ALTIMATE_VALIDATORS_MAX_RETRIES ?? "3")
       const validatorCount = ValidatorRegistry.list().length
-      // Diagnostic — emit a single log line per step so we can confirm the
-      // hook is reached even when no validators fire. Logged at info so it
-      // shows up in standard agent logs.
-      log.info("validator_hook_reached", {
+      // Diagnostic — emit to BOTH opencode's file log AND stderr so the
+      // signal is captured by the benchmark harness (which only sees stderr).
+      const diag = {
+        kind: "validator_hook_reached",
         sessionID,
         step,
         result,
@@ -1096,7 +1096,10 @@ export namespace SessionPrompt {
         validatorsEnabled,
         validatorCount,
         validatorRetryCount,
-      })
+      }
+      log.info("validator_hook_reached", diag)
+      // eslint-disable-next-line no-console
+      console.error("[altimate-validators] " + JSON.stringify(diag))
       if (
         result !== "stop" &&
         result !== "compact" &&
