@@ -54,9 +54,12 @@ import { decodeDataUrl } from "@/util/data-url"
 import { Fingerprint } from "../altimate/fingerprint"
 // altimate_change end
 
-// altimate_change start - validator framework (see session/validators/README in types.ts)
+// altimate_change start - validator framework (see session/validators/types.ts header)
 import { ValidatorRegistry } from "./validators/registry"
-import "../altimate/validators" // side-effect: registers altimate validators on module load
+import { registerAltimateValidators } from "../altimate/validators"
+// Explicit registration call (not a side-effect import) so bun's --single
+// bundler cannot tree-shake the validator registrations.
+registerAltimateValidators()
 import { Config } from "../config/config"
 import { Tracer } from "../altimate/observability/tracing"
 // altimate_change end
@@ -1081,12 +1084,25 @@ export namespace SessionPrompt {
       // often validators *would* have fired against historical traffic.
       const validatorsEnabled = process.env.ALTIMATE_VALIDATORS_ENABLED === "1"
       const maxValidatorRetries = Number(process.env.ALTIMATE_VALIDATORS_MAX_RETRIES ?? "3")
+      const validatorCount = ValidatorRegistry.list().length
+      // Diagnostic — emit a single log line per step so we can confirm the
+      // hook is reached even when no validators fire. Logged at info so it
+      // shows up in standard agent logs.
+      log.info("validator_hook_reached", {
+        sessionID,
+        step,
+        result,
+        finish: processor.message.finish,
+        validatorsEnabled,
+        validatorCount,
+        validatorRetryCount,
+      })
       if (
         result !== "stop" &&
         result !== "compact" &&
         processor.message.finish === "stop" &&
         !processor.message.error &&
-        ValidatorRegistry.list().length > 0
+        validatorCount > 0
       ) {
         try {
           const vCtx = {

@@ -1,13 +1,17 @@
-// altimate_change start — auto-register altimate-domain validators
+// altimate_change start — explicit registration entry point for altimate validators
 import { ValidatorRegistry } from "../../session/validators/registry"
 import { DbtSchemaVerifyValidator } from "./dbt-schema-verify"
 
 /**
- * Side-effect import: registers all altimate-domain validators on module load.
- * Importing this module is enough to make the validators dispatch.
+ * Explicit registration function for the altimate-domain validators. Called
+ * from prompt.ts at the validator hook site (NOT as a side-effect import) so
+ * bun's --single bundler cannot tree-shake the registration away when no
+ * other code imports `ValidatorRegistry`.
  *
- * New domains add a registration here. The framework itself
- * (`session/validators/`) is domain-agnostic.
+ * Idempotent: ValidatorRegistry.register is keyed by name so repeat calls
+ * just overwrite.
  */
-ValidatorRegistry.register(DbtSchemaVerifyValidator)
+export function registerAltimateValidators(): void {
+  ValidatorRegistry.register(DbtSchemaVerifyValidator)
+}
 // altimate_change end
