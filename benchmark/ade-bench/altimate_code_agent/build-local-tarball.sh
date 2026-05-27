@@ -69,7 +69,8 @@ cat > "$STAGE/package.json" <<EOF
   "license": "MIT",
   "bin": {
     "altimate": "./bin/altimate",
-    "altimate-code": "./bin/altimate-code"
+    "altimate-code": "./bin/altimate-code",
+    "altimate-dbt": "./dbt-tools/bin/altimate-dbt"
   },
   "dependencies": {
     "@altimateai/altimate-core": "${ALTIMATE_CORE_DEP}"

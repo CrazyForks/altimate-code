@@ -119,10 +119,9 @@ export namespace SystemPrompt {
       // version of them here and a less verbose version in tool description, rather than vice versa.
       Skill.fmt(filtered, { verbose: true }),
     )
-    // altimate_change end
-
     return parts.join("\n")
   }
+  // altimate_change end
 
   // altimate_change start — helpers for auto-load skill selection
   const autoLoadLog = Log.create({ service: "system-prompt-autoload" })

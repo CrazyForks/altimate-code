@@ -1084,23 +1084,30 @@ export namespace SessionPrompt {
       // often validators *would* have fired against historical traffic.
       const validatorsEnabled = process.env.ALTIMATE_VALIDATORS_ENABLED === "1"
       const maxValidatorRetries = Number(process.env.ALTIMATE_VALIDATORS_MAX_RETRIES ?? "3")
+      const validatorsDebug = process.env.ALTIMATE_VALIDATORS_DEBUG === "1"
       const validatorCount = ValidatorRegistry.list().length
-      // Diagnostic — emit to BOTH opencode's file log AND stderr so the
-      // signal is captured by the benchmark harness (which only sees stderr).
+      // Always emit to opencode's file log. Mirror to stderr only when
+      // ALTIMATE_VALIDATORS_DEBUG=1 — needed during framework bring-up so
+      // benchmark harness logs capture the hook signal, but noisy enough
+      // that we keep it off by default for normal sessions.
       const diag = {
         kind: "validator_hook_reached",
         sessionID,
         step,
         result,
         finish: processor.message.finish,
+        hasError: Boolean(processor.message.error),
         validatorsEnabled,
         validatorCount,
         validatorRetryCount,
       }
       log.info("validator_hook_reached", diag)
-      // eslint-disable-next-line no-console
-      console.error("[altimate-validators] " + JSON.stringify(diag))
+      if (validatorsDebug) {
+        // eslint-disable-next-line no-console
+        console.error("[altimate-validators] " + JSON.stringify(diag))
+      }
       if (
+        validatorsEnabled &&
         result !== "stop" &&
         result !== "compact" &&
         processor.message.finish === "stop" &&
@@ -1115,7 +1122,27 @@ export namespace SessionPrompt {
             step,
             retryCount: validatorRetryCount,
           }
+          if (validatorsDebug) {
+            // eslint-disable-next-line no-console
+            console.error(
+              "[altimate-validators] " +
+                JSON.stringify({ kind: "dispatch_enter", sessionID, step, cwd: vCtx.workingDirectory, sessionStartMs: vCtx.sessionStartMs }),
+            )
+          }
           const checks = await ValidatorRegistry.runAll(vCtx)
+          if (validatorsDebug) {
+            // eslint-disable-next-line no-console
+            console.error(
+              "[altimate-validators] " +
+                JSON.stringify({
+                  kind: "dispatch_result",
+                  sessionID,
+                  step,
+                  checks_count: checks.length,
+                  results: checks.map((c) => ({ name: c.validator.name, ok: c.result.ok, details: c.result.details })),
+                }),
+            )
+          }
           const failures = checks.filter((c) => !c.result.ok)
 
           // Telemetry: emit one event per validator that ran, plus a session
@@ -1183,6 +1210,13 @@ export namespace SessionPrompt {
             sessionID,
             error: e instanceof Error ? e.message : String(e),
           })
+          if (validatorsDebug) {
+            // eslint-disable-next-line no-console
+            console.error(
+              "[altimate-validators] " +
+                JSON.stringify({ kind: "dispatch_error", sessionID, step, error: e instanceof Error ? e.message : String(e) }),
+            )
+          }
         }
       }
       // altimate_change end

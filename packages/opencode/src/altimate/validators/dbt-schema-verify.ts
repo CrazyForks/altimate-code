@@ -102,10 +102,80 @@ function modelNameFromPath(p: string): string {
 }
 
 /**
+ * Extract a SchemaVerifyOutput JSON object from mixed stdout.
+ * `altimate-dbt schema-verify` may emit dbt log noise (ANSI codes, parser
+ * warnings) before the verdict JSON. Strategy:
+ *   1. Try JSON.parse on the full stdout (fast path for clean output).
+ *   2. Otherwise, scan for the LAST balanced `{...}` substring and parse that.
+ *
+ * Returns null if no parseable JSON object is found.
+ */
+function parseSchemaVerifyOutput(stdout: string): SchemaVerifyOutput | null {
+  if (!stdout) return null
+  // Fast path: stdout is pure JSON
+  try {
+    return JSON.parse(stdout) as SchemaVerifyOutput
+  } catch {
+    // fall through
+  }
+  // Find each `{` and try to parse a JSON object starting there. Take the
+  // LAST one that parses to a SchemaVerifyOutput-shaped result. dbt log
+  // noise may include `{` inside log lines, so we accept the last verdict
+  // (verdict / model / error key) we can parse end-to-end.
+  let best: SchemaVerifyOutput | null = null
+  for (let i = 0; i < stdout.length; i++) {
+    if (stdout[i] !== "{") continue
+    // Scan forward to find the matching closing brace.
+    let depth = 0
+    let inString: '"' | null = null
+    let escaped = false
+    for (let j = i; j < stdout.length; j++) {
+      const ch = stdout[j]
+      if (escaped) {
+        escaped = false
+        continue
+      }
+      if (ch === "\\") {
+        escaped = true
+        continue
+      }
+      if (inString) {
+        if (ch === inString) inString = null
+        continue
+      }
+      if (ch === '"') {
+        inString = '"'
+        continue
+      }
+      if (ch === "{") depth++
+      else if (ch === "}") {
+        depth--
+        if (depth === 0) {
+          try {
+            const parsed = JSON.parse(stdout.slice(i, j + 1)) as SchemaVerifyOutput
+            if (
+              parsed &&
+              (parsed.verdict !== undefined || parsed.error !== undefined || parsed.model !== undefined)
+            ) {
+              best = parsed
+            }
+          } catch {
+            // not parseable; skip
+          }
+          break
+        }
+      }
+    }
+  }
+  return best
+}
+
+/**
  * Run `altimate-dbt schema-verify --model <name>` and parse its JSON output.
  * Returns null on spawn failure so the caller can fall back gracefully.
  */
 async function runSchemaVerify(model: string, cwd: string): Promise<SchemaVerifyOutput | null> {
+  const debug = process.env.ALTIMATE_VALIDATORS_DEBUG === "1"
   return new Promise((resolve) => {
     const child = spawn("altimate-dbt", ["schema-verify", "--model", model], {
       cwd,
@@ -116,14 +186,41 @@ async function runSchemaVerify(model: string, cwd: string): Promise<SchemaVerify
     let stderr = ""
     child.stdout.on("data", (chunk) => (stdout += String(chunk)))
     child.stderr.on("data", (chunk) => (stderr += String(chunk)))
-    child.on("error", () => resolve(null))
-    child.on("close", () => {
-      try {
-        const parsed = JSON.parse(stdout) as SchemaVerifyOutput
+    child.on("error", (e) => {
+      if (debug) {
+        // eslint-disable-next-line no-console
+        console.error(
+          "[altimate-validators] " +
+            JSON.stringify({ kind: "spawn_error", model, message: e.message }),
+        )
+      }
+      resolve(null)
+    })
+    child.on("close", (code) => {
+      if (debug) {
+        // eslint-disable-next-line no-console
+        console.error(
+          "[altimate-validators] " +
+            JSON.stringify({
+              kind: "spawn_close",
+              model,
+              code,
+              stdoutLen: stdout.length,
+              stderrLen: stderr.length,
+              stdoutHead: stdout.slice(0, 400),
+              stderrHead: stderr.slice(0, 400),
+            }),
+        )
+      }
+      const parsed = parseSchemaVerifyOutput(stdout)
+      if (parsed) {
         resolve(parsed)
-      } catch {
-        if (stderr) resolve({ error: stderr.slice(0, 500) })
-        else resolve(null)
+      } else if (stderr) {
+        resolve({ error: stderr.slice(0, 500) })
+      } else if (stdout) {
+        resolve({ error: `non-json stdout: ${stdout.slice(-400)}` })
+      } else {
+        resolve(null)
       }
     })
   })
