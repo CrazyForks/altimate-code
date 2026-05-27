@@ -309,9 +309,9 @@ export namespace SessionPrompt {
     }
     match.abort.abort()
     delete s[sessionID]
-    // Do NOT call SessionStatus.set(idle) here — on abort the processor's catch block
+    // Do NOT set idle status here — on abort the processor's catch block
     // publishes session.error THEN sets idle, preserving correct event ordering.
-    // On normal completion, loop() sets idle after the while loop exits.
+    // On normal completion, loop() sets idle after the while loop exits (see below).
   }
   // altimate_change end
 
