@@ -14,10 +14,15 @@
  * by the agent — see types.ts header for the rationale.
  */
 
-import { promises as fs } from "fs"
-import { join } from "path"
 import { spawn } from "child_process"
 import type { Validator, ValidatorContext, ValidatorResult } from "../../session/validators/types"
+import {
+  VALIDATOR_TIMEOUT_MS,
+  findDbtProjectRoot,
+  modelsModifiedSince,
+  modelNameFromPath,
+  extractLastJsonObject,
+} from "./validator-utils"
 
 interface SchemaVerifyOutput {
   model?: string
@@ -30,149 +35,26 @@ interface SchemaVerifyOutput {
 }
 
 /**
- * Best-effort check that the working directory looks like a dbt project.
- * Scans the directory itself and one level of subdirs for `dbt_project.yml`.
- */
-async function isDbtProject(cwd: string): Promise<boolean> {
-  try {
-    const direct = await fs.stat(join(cwd, "dbt_project.yml")).then(
-      () => true,
-      () => false,
-    )
-    if (direct) return true
-    // Some benchmark layouts nest the project one level deep. Cheap scan.
-    const entries = await fs.readdir(cwd, { withFileTypes: true })
-    for (const e of entries) {
-      if (!e.isDirectory()) continue
-      const nested = await fs.stat(join(cwd, e.name, "dbt_project.yml")).then(
-        () => true,
-        () => false,
-      )
-      if (nested) return true
-    }
-    return false
-  } catch {
-    return false
-  }
-}
-
-/**
- * Find dbt model `.sql` files under the working directory that were modified
- * since the session started. Limited to two-level deep search to keep cost
- * bounded on large projects.
- */
-async function modelsModifiedSince(cwd: string, sinceMs: number): Promise<string[]> {
-  const found: string[] = []
-  async function scan(dir: string, depth: number): Promise<void> {
-    if (depth > 4) return
-    let entries: import("fs").Dirent[]
-    try {
-      entries = await fs.readdir(dir, { withFileTypes: true })
-    } catch {
-      return
-    }
-    for (const entry of entries) {
-      if (entry.name.startsWith(".") || entry.name === "node_modules" || entry.name === "target") continue
-      const full = join(dir, entry.name)
-      if (entry.isDirectory()) {
-        await scan(full, depth + 1)
-      } else if (entry.isFile() && entry.name.endsWith(".sql")) {
-        try {
-          const stat = await fs.stat(full)
-          if (stat.mtimeMs >= sinceMs) {
-            // Convention: dbt models live under a `models/` ancestor.
-            if (full.split("/").includes("models")) {
-              found.push(full)
-            }
-          }
-        } catch {
-          // ignore unstattable files
-        }
-      }
-    }
-  }
-  await scan(cwd, 0)
-  return found
-}
-
-/** Extract bare model name from a `.sql` file path. `models/marts/foo.sql` -> `foo`. */
-function modelNameFromPath(p: string): string {
-  const base = p.split("/").pop() ?? p
-  return base.replace(/\.sql$/i, "")
-}
-
-/**
  * Extract a SchemaVerifyOutput JSON object from mixed stdout.
  * `altimate-dbt schema-verify` may emit dbt log noise (ANSI codes, parser
- * warnings) before the verdict JSON. Strategy:
- *   1. Try JSON.parse on the full stdout (fast path for clean output).
- *   2. Otherwise, scan for the LAST balanced `{...}` substring and parse that.
- *
- * Returns null if no parseable JSON object is found.
+ * warnings) before the verdict JSON. Delegates to the shared
+ * extractLastJsonObject utility which already handles noisy stdout and
+ * validates the envelope shape.
  */
 function parseSchemaVerifyOutput(stdout: string): SchemaVerifyOutput | null {
-  if (!stdout) return null
-  // Fast path: stdout is pure JSON
-  try {
-    return JSON.parse(stdout) as SchemaVerifyOutput
-  } catch {
-    // fall through
-  }
-  // Find each `{` and try to parse a JSON object starting there. Take the
-  // LAST one that parses to a SchemaVerifyOutput-shaped result. dbt log
-  // noise may include `{` inside log lines, so we accept the last verdict
-  // (verdict / model / error key) we can parse end-to-end.
-  let best: SchemaVerifyOutput | null = null
-  for (let i = 0; i < stdout.length; i++) {
-    if (stdout[i] !== "{") continue
-    // Scan forward to find the matching closing brace.
-    let depth = 0
-    let inString: '"' | null = null
-    let escaped = false
-    for (let j = i; j < stdout.length; j++) {
-      const ch = stdout[j]
-      if (escaped) {
-        escaped = false
-        continue
-      }
-      if (ch === "\\") {
-        escaped = true
-        continue
-      }
-      if (inString) {
-        if (ch === inString) inString = null
-        continue
-      }
-      if (ch === '"') {
-        inString = '"'
-        continue
-      }
-      if (ch === "{") depth++
-      else if (ch === "}") {
-        depth--
-        if (depth === 0) {
-          try {
-            const parsed = JSON.parse(stdout.slice(i, j + 1)) as SchemaVerifyOutput
-            if (
-              parsed &&
-              (parsed.verdict !== undefined || parsed.error !== undefined || parsed.model !== undefined)
-            ) {
-              best = parsed
-            }
-          } catch {
-            // not parseable; skip
-          }
-          break
-        }
-      }
-    }
-  }
-  return best
+  const obj = extractLastJsonObject(stdout)
+  if (!obj) return null
+  return obj as SchemaVerifyOutput
 }
 
 /**
  * Run `altimate-dbt schema-verify --model <name>` and parse its JSON output.
- * Returns null on spawn failure so the caller can fall back gracefully.
+ *
+ * Times out after ALTIMATE_VALIDATORS_TIMEOUT_MS (default 60 s) and kills the
+ * subprocess to prevent the agent loop from hanging indefinitely on stalled
+ * warehouse connections or DuckDB file-lock contention.
+ *
+ * Returns null on spawn failure so the caller can track it separately.
  */
 async function runSchemaVerify(model: string, cwd: string): Promise<SchemaVerifyOutput | null> {
   const debug = process.env.ALTIMATE_VALIDATORS_DEBUG === "1"
@@ -182,11 +64,16 @@ async function runSchemaVerify(model: string, cwd: string): Promise<SchemaVerify
       env: process.env,
       stdio: ["ignore", "pipe", "pipe"],
     })
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL")
+      resolve({ error: `timed out after ${VALIDATOR_TIMEOUT_MS}ms` })
+    }, VALIDATOR_TIMEOUT_MS)
     let stdout = ""
     let stderr = ""
     child.stdout.on("data", (chunk) => (stdout += String(chunk)))
     child.stderr.on("data", (chunk) => (stderr += String(chunk)))
     child.on("error", (e) => {
+      clearTimeout(timer)
       if (debug) {
         // eslint-disable-next-line no-console
         console.error(
@@ -197,6 +84,7 @@ async function runSchemaVerify(model: string, cwd: string): Promise<SchemaVerify
       resolve(null)
     })
     child.on("close", (code) => {
+      clearTimeout(timer)
       if (debug) {
         // eslint-disable-next-line no-console
         console.error(
@@ -255,21 +143,33 @@ export const DbtSchemaVerifyValidator: Validator = {
 
   async appliesTo(ctx: ValidatorContext): Promise<boolean> {
     // Only run for sessions that took place inside a dbt project. Quick check.
-    return isDbtProject(ctx.workingDirectory)
+    return (await findDbtProjectRoot(ctx.workingDirectory)) !== null
   },
 
   async check(ctx: ValidatorContext): Promise<ValidatorResult> {
-    const touched = await modelsModifiedSince(ctx.workingDirectory, ctx.sessionStartMs)
+    const dbtRoot = await findDbtProjectRoot(ctx.workingDirectory)
+    if (!dbtRoot) return { ok: true, details: { models_touched: 0 } }
+
+    const touched = await modelsModifiedSince(dbtRoot, ctx.sessionStartMs)
     if (touched.length === 0) {
       // No models touched — nothing to verify.
       return { ok: true, details: { models_touched: 0 } }
     }
 
+    // Run all schema-verify calls in parallel; track spawn failures separately.
+    let spawnFailures = 0
+    const outputs = await Promise.all(
+      touched.map((path) => runSchemaVerify(modelNameFromPath(path), dbtRoot)),
+    )
     const results: SchemaVerifyOutput[] = []
-    for (const path of touched) {
-      const name = modelNameFromPath(path)
-      const out = await runSchemaVerify(name, ctx.workingDirectory)
-      if (out) results.push({ ...out, model: out.model ?? name })
+    for (let i = 0; i < outputs.length; i++) {
+      const out = outputs[i]!
+      const name = modelNameFromPath(touched[i]!)
+      if (out !== null) {
+        results.push({ ...out, model: out.model ?? name })
+      } else {
+        spawnFailures++
+      }
     }
 
     const mismatches = results.filter((r) => r.verdict === "mismatch")
@@ -286,6 +186,7 @@ export const DbtSchemaVerifyValidator: Validator = {
           match: matches,
           no_spec: noSpec,
           errored,
+          spawn_failures: spawnFailures,
         },
       }
     }
@@ -303,6 +204,7 @@ export const DbtSchemaVerifyValidator: Validator = {
         mismatch: mismatches.length,
         no_spec: noSpec,
         errored,
+        spawn_failures: spawnFailures,
         mismatch_models: mismatches.map((m) => m.model).filter(Boolean),
       },
     }

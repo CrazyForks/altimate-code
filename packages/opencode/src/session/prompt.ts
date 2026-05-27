@@ -1107,7 +1107,6 @@ export namespace SessionPrompt {
         console.error("[altimate-validators] " + JSON.stringify(diag))
       }
       if (
-        validatorsEnabled &&
         result !== "stop" &&
         result !== "compact" &&
         processor.message.finish === "stop" &&
@@ -1203,6 +1202,22 @@ export namespace SessionPrompt {
             validatorRetryCount++
             // Fall through to `continue`; the next iteration's top-of-loop
             // sees the newer user message and does NOT break.
+          } else if (failures.length > 0 && validatorsEnabled && validatorRetryCount >= maxValidatorRetries) {
+            // Retry budget exhausted with outstanding failures. Session will
+            // terminate on the natural break below. Emit an explicit signal so
+            // the operator dashboard can distinguish "completed cleanly" from
+            // "completed with unresolved validator failures".
+            log.warn("validator retries exhausted, session terminating with unresolved failures", {
+              sessionID,
+              failures: failures.map((f) => f.validator.name),
+            })
+            Telemetry.track({
+              type: "validator_retries_exhausted",
+              timestamp: Date.now(),
+              session_id: sessionID,
+              step,
+              validator_names: failures.map((f) => f.validator.name),
+            } as any)
           }
         } catch (e) {
           // A bug in the validator framework should never block the agent loop.

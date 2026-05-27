@@ -81,9 +81,9 @@ EOF
 # Pack with bun pm pack — produces altimate-code-<ver>-local.tgz
 ( cd "$STAGE" && bun pm pack >/dev/null )
 
-TARBALL="$(ls -1 "$STAGE"/altimate-code-*.tgz | head -1)"
-if [[ -z "$TARBALL" ]]; then
-  echo "pack failed: no tarball produced" >&2
+TARBALL="$STAGE/altimate-code-${VERSION}-local.tgz"
+if [[ ! -f "$TARBALL" ]]; then
+  echo "pack failed: expected $TARBALL" >&2
   exit 1
 fi
 mv "$TARBALL" "$SCRIPT_DIR/altimate-code-local.tgz"

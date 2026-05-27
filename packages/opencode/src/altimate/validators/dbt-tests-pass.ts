@@ -17,12 +17,17 @@
  * to force one more turn. See types.ts header for the rationale.
  */
 
-import { promises as fs } from "fs"
-import { join } from "path"
 import { spawn } from "child_process"
 import type { Validator, ValidatorContext, ValidatorResult } from "../../session/validators/types"
+import {
+  VALIDATOR_TIMEOUT_MS,
+  findDbtProjectRoot,
+  modelsModifiedSince,
+  modelNameFromPath,
+  extractLastJsonObject,
+} from "./validator-utils"
 
-interface TestSummary {
+export interface TestSummary {
   /** Total tests run for this model (across the dbt test invocation). */
   total: number
   /** Tests that passed. */
@@ -43,92 +48,26 @@ interface TestRunOutput {
 }
 
 /**
- * Best-effort check that the working directory looks like a dbt project.
- * Scans the directory itself and one level of subdirs for `dbt_project.yml`.
- */
-async function isDbtProject(cwd: string): Promise<boolean> {
-  try {
-    const direct = await fs.stat(join(cwd, "dbt_project.yml")).then(
-      () => true,
-      () => false,
-    )
-    if (direct) return true
-    const entries = await fs.readdir(cwd, { withFileTypes: true })
-    for (const e of entries) {
-      if (!e.isDirectory()) continue
-      const nested = await fs.stat(join(cwd, e.name, "dbt_project.yml")).then(
-        () => true,
-        () => false,
-      )
-      if (nested) return true
-    }
-    return false
-  } catch {
-    return false
-  }
-}
-
-/**
- * Find dbt model `.sql` files under the working directory that were modified
- * since the session started.
- */
-async function modelsModifiedSince(cwd: string, sinceMs: number): Promise<string[]> {
-  const found: string[] = []
-  async function scan(dir: string, depth: number): Promise<void> {
-    if (depth > 4) return
-    let entries: import("fs").Dirent[]
-    try {
-      entries = await fs.readdir(dir, { withFileTypes: true })
-    } catch {
-      return
-    }
-    for (const entry of entries) {
-      if (entry.name.startsWith(".") || entry.name === "node_modules" || entry.name === "target") continue
-      const full = join(dir, entry.name)
-      if (entry.isDirectory()) {
-        await scan(full, depth + 1)
-      } else if (entry.isFile() && entry.name.endsWith(".sql")) {
-        try {
-          const stat = await fs.stat(full)
-          if (stat.mtimeMs >= sinceMs) {
-            if (full.split("/").includes("models")) {
-              found.push(full)
-            }
-          }
-        } catch {
-          // ignore unstattable files
-        }
-      }
-    }
-  }
-  await scan(cwd, 0)
-  return found
-}
-
-/** Extract bare model name from a `.sql` file path. `models/marts/foo.sql` -> `foo`. */
-function modelNameFromPath(p: string): string {
-  const base = p.split("/").pop() ?? p
-  return base.replace(/\.sql$/i, "")
-}
-
-/**
  * Parse a dbt `test` output blob into a structured summary. Looks for the
  * `Done. PASS=X WARN=Y ERROR=Z SKIP=W NO-OP=V TOTAL=N` line that dbt prints
  * at the end. Also extracts the names of failing tests from per-line output
  * (`N of M FAIL ... <test_name>` / `N of M ERROR ... <test_name>`).
  *
+ * Uses named capture groups so the parser is resilient to future field
+ * reordering in dbt's summary line format.
+ *
  * Returns null if no summary line is found (e.g. dbt itself errored before
  * running tests, or the output was clipped).
  */
-function parseDbtTestOutput(stdout: string): TestSummary | null {
+export function parseDbtTestOutput(stdout: string): TestSummary | null {
   if (!stdout) return null
   const summaryMatch = stdout.match(
-    /Done\.\s+PASS=(\d+)\s+WARN=(\d+)\s+ERROR=(\d+)\s+SKIP=(\d+)(?:\s+NO-OP=\d+)?\s+TOTAL=(\d+)/i,
+    /Done\.\s+PASS=(?<pass>\d+)\s+WARN=(?<warn>\d+)\s+ERROR=(?<err>\d+)\s+SKIP=(?<skip>\d+)(?:\s+NO-OP=\d+)?\s+TOTAL=(?<total>\d+)/i,
   )
   if (!summaryMatch) return null
-  const pass = parseInt(summaryMatch[1] ?? "0", 10)
-  const error = parseInt(summaryMatch[3] ?? "0", 10)
-  const total = parseInt(summaryMatch[5] ?? "0", 10)
+  const pass = parseInt(summaryMatch.groups?.pass ?? "0", 10)
+  const error = parseInt(summaryMatch.groups?.err ?? "0", 10)
+  const total = parseInt(summaryMatch.groups?.total ?? "0", 10)
   // Pull individual FAIL/ERROR test names. dbt formats lines like:
   //   17:04:14  3 of 7 FAIL 5 unique_my_model_id [FAIL 5 in 0.05s]
   //   17:04:14  4 of 7 ERROR not_null_my_model_id [ERROR in 0.05s]
@@ -150,7 +89,11 @@ function parseDbtTestOutput(stdout: string): TestSummary | null {
  * CLI wraps dbt's stdout in a `{"stdout": "..."}` JSON envelope on success
  * (or `{"error": "..."}` on failure). We unwrap then parse the dbt text.
  *
- * Returns null on spawn failure so the caller can fall back gracefully.
+ * Times out after ALTIMATE_VALIDATORS_TIMEOUT_MS (default 60 s) and kills the
+ * subprocess to prevent the agent loop from hanging indefinitely on stalled
+ * warehouse connections or DuckDB file-lock contention.
+ *
+ * Returns null on spawn failure so the caller can track it separately.
  */
 async function runDbtTest(model: string, cwd: string): Promise<TestRunOutput | null> {
   return new Promise((resolve) => {
@@ -159,12 +102,20 @@ async function runDbtTest(model: string, cwd: string): Promise<TestRunOutput | n
       env: process.env,
       stdio: ["ignore", "pipe", "pipe"],
     })
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL")
+      resolve({ model, error: `timed out after ${VALIDATOR_TIMEOUT_MS}ms` })
+    }, VALIDATOR_TIMEOUT_MS)
     let stdout = ""
     let stderr = ""
     child.stdout.on("data", (chunk) => (stdout += String(chunk)))
     child.stderr.on("data", (chunk) => (stderr += String(chunk)))
-    child.on("error", () => resolve(null))
+    child.on("error", () => {
+      clearTimeout(timer)
+      resolve(null)
+    })
     child.on("close", () => {
+      clearTimeout(timer)
       // altimate-dbt writes its envelope JSON to stdout. The envelope itself
       // is either { "stdout": "<dbt log>" } or { "error": "...", "stdout": "..." }.
       // Find the last balanced { ... } block (the envelope tends to be at the
@@ -189,61 +140,6 @@ async function runDbtTest(model: string, cwd: string): Promise<TestRunOutput | n
       resolve({ model, summary })
     })
   })
-}
-
-/**
- * Find the LAST top-level `{ ... }` block in a string and JSON-parse it.
- * Mirrors the helper in dbt-schema-verify.ts — keeps each validator file
- * standalone, no shared utility to import.
- */
-function extractLastJsonObject(stdout: string): Record<string, unknown> | null {
-  if (!stdout) return null
-  // Fast path
-  try {
-    return JSON.parse(stdout) as Record<string, unknown>
-  } catch {
-    // fall through
-  }
-  let best: Record<string, unknown> | null = null
-  for (let i = 0; i < stdout.length; i++) {
-    if (stdout[i] !== "{") continue
-    let depth = 0
-    let inString: '"' | null = null
-    let escaped = false
-    for (let j = i; j < stdout.length; j++) {
-      const ch = stdout[j]
-      if (escaped) {
-        escaped = false
-        continue
-      }
-      if (ch === "\\") {
-        escaped = true
-        continue
-      }
-      if (inString) {
-        if (ch === inString) inString = null
-        continue
-      }
-      if (ch === '"') {
-        inString = '"'
-        continue
-      }
-      if (ch === "{") depth++
-      else if (ch === "}") {
-        depth--
-        if (depth === 0) {
-          try {
-            const parsed = JSON.parse(stdout.slice(i, j + 1)) as Record<string, unknown>
-            best = parsed
-          } catch {
-            // skip
-          }
-          break
-        }
-      }
-    }
-  }
-  return best
 }
 
 /** Format a list of failing-test runs into a single concise synthetic-message block. */
@@ -275,20 +171,28 @@ export const DbtTestsPassValidator: Validator = {
     "After the agent declares done, runs `altimate-dbt test` against every dbt model the agent modified during this session and refuses to terminate if any model's tests fail or error. Catches row-data correctness errors (relationships, unique, not_null, accepted_values, AUTO_*_equality) that column-shape verification cannot detect.",
 
   async appliesTo(ctx: ValidatorContext): Promise<boolean> {
-    return isDbtProject(ctx.workingDirectory)
+    return (await findDbtProjectRoot(ctx.workingDirectory)) !== null
   },
 
   async check(ctx: ValidatorContext): Promise<ValidatorResult> {
-    const touched = await modelsModifiedSince(ctx.workingDirectory, ctx.sessionStartMs)
+    const dbtRoot = await findDbtProjectRoot(ctx.workingDirectory)
+    if (!dbtRoot) return { ok: true, details: { models_touched: 0 } }
+
+    const touched = await modelsModifiedSince(dbtRoot, ctx.sessionStartMs)
     if (touched.length === 0) {
       return { ok: true, details: { models_touched: 0 } }
     }
 
+    // Run all model tests in parallel; track spawn failures separately so the
+    // caller can see which models were not verifiable vs which passed/failed.
+    let spawnFailures = 0
+    const outputs = await Promise.all(
+      touched.map((path) => runDbtTest(modelNameFromPath(path), dbtRoot)),
+    )
     const results: TestRunOutput[] = []
-    for (const path of touched) {
-      const name = modelNameFromPath(path)
-      const out = await runDbtTest(name, ctx.workingDirectory)
+    for (const out of outputs) {
       if (out) results.push(out)
+      else spawnFailures++
     }
 
     const failures = results.filter((r) => r.summary && r.summary.error > 0)
@@ -305,6 +209,7 @@ export const DbtTestsPassValidator: Validator = {
           checked: results.length,
           passed: passed.length,
           no_tests: noTests.length,
+          spawn_failures: spawnFailures,
         },
       }
     }
@@ -325,6 +230,7 @@ export const DbtTestsPassValidator: Validator = {
         passed: passed.length,
         failed: failures.length,
         errored: errored.length,
+        spawn_failures: spawnFailures,
         failing_models: failures.map((f) => f.model),
         errored_models: errored.map((f) => f.model),
       },
