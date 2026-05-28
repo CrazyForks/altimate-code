@@ -225,7 +225,7 @@ class AltimateCodeAgent(AbstractInstalledAgent):
         command = f"echo 'AGENT RESPONSE: ' && altimate-code run --format json --yolo"
 
         if self._model_name:
-            command += f" --model {self._model_name}"
+            command += f" --model {shlex.quote(self._model_name)}"
         command += f" --max-turns 80 {escaped_prompt}"
 
         return [

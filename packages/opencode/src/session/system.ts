@@ -106,7 +106,7 @@ export namespace SystemPrompt {
       )
       for (const skill of autoLoaded) {
         parts.push("")
-        parts.push(`<auto_loaded_skill name="${skill.name}">`)
+        parts.push(`<auto_loaded_skill name="${escapeXmlAttr(skill.name)}">`)
         parts.push(skill.content.trim())
         parts.push(`</auto_loaded_skill>`)
       }
@@ -125,6 +125,11 @@ export namespace SystemPrompt {
 
   // altimate_change start — helpers for auto-load skill selection
   const autoLoadLog = Log.create({ service: "system-prompt-autoload" })
+
+  /** Escape special characters so a skill name is safe inside an XML attribute. */
+  function escapeXmlAttr(s: string): string {
+    return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  }
 
   async function collectAutoLoadedSkills(list: Skill.Info[]): Promise<Skill.Info[]> {
     const out: Skill.Info[] = []
@@ -160,6 +165,8 @@ export namespace SystemPrompt {
   async function anyMatchInWorktree(globs: string[]): Promise<boolean> {
     // Search from worktree root so a skill that wants `dbt_project.yml`
     // catches the file no matter how deep the user's cwd is.
+    // Errors propagate to the caller's try/catch (collectAutoLoadedSkills)
+    // so the warning log there actually fires.
     const root = Instance.worktree
     for (const g of globs) {
       const matches = await Glob.scan(g, {
@@ -168,7 +175,7 @@ export namespace SystemPrompt {
         include: "file",
         dot: false,
         symlink: false,
-      }).catch(() => [] as string[])
+      })
       if (matches.length > 0) return true
     }
     return false

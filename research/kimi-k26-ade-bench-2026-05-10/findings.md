@@ -108,7 +108,7 @@ This is the headline behavioral finding. Aggregated over 9.56 hours of total wal
 | Phase | Total time | Share of wall |
 |---|---:|---:|
 | Step duration (`step_start → step_finish`: model generation + tool dispatch) | 22,745 s | 66.1% |
-| Step-to-step gaps (`step_start → next step_start`) | 30,672 s | 89.2% |
+| Step-to-step intervals (`step_start → next step_start`, start-to-start, includes step duration) | 30,672 s | 89.2% |
 | Tool execution (sum of all individual `tool_use` durations) | 1,690 s | 4.9% |
 | Total runtime | 34,402 s | 100% |
 
@@ -233,7 +233,7 @@ Across 19 failing trials, the pattern is rarely "model produced unparseable SQL.
 | **Date-spine completeness** | `airbnb009` | Kimi understood the task but did not generate a date-spine join; it kept the original `GROUP BY DATE_TRUNC` which drops empty days. dbt_utils was installed; Kimi just didn't reach for it. |
 | **dbt-specific features (versioned models, snapshots, materialization)** | `airbnb007` (`models_are_materialized_correctly`), `airbnb010`, `helixops_saas009`, `f1008` | Created `dim_accounts_v2.sql` instead of using dbt's `versions:` keyword. Snapshot task wrote a regular model instead of a `snapshots/` directory file. |
 | **Type harmonization in `CASE` / `COALESCE`** | `analytics_engineering004` | LEFT JOIN of inventory to product details where product details are NULL for some rows; model coerced types inconsistently. |
-| **Multi-part reasoning over-confidence** | `f1011` | Multiple-choice question where Kimi answered `ABDE`. Only `check_option_b` passed; Kimi rationalized E with apparent confidence, but the gold answer set differed. |
+| **Multi-part reasoning over-confidence** | `f1011` | Multiple-choice question where Kimi answered `ABDE`. Only `check_option_b` failed (6/7 sub-tests passed); Kimi rationalized E with apparent confidence, but the gold answer set differed. |
 | **Refactor reference updates** | `asana004` | Created the new intermediate model correctly but didn't fully update all downstream `ref()` calls. `check_task_references` failed. |
 | **Trivial / setup** | `simple001`, `workday001` | `simple001` renamed a model but missed a downstream reference. `workday001`'s prompt is literally *"Do nothing"* and the agent halted in 2 seconds — possibly a bench bug. |
 
@@ -247,7 +247,7 @@ Across 19 failing trials, the pattern is rarely "model produced unparseable SQL.
 
 ### Failure distribution
 
-The 19 failures span every task domain: 3 of 13 airbnb, 2 of 7 analytics_engineering, 4 of 5 asana variants, 5 of 13 f1 variants, 4 of 18 helixops_saas variants, 1 of 3 intercom, 1 of 2 simple, 1 of 1 workday. No domain-specific weakness — failures are uniformly distributed by domain and concentrated by failure mode.
+The 19 failures span every task domain: 3 of 13 airbnb, 2 of 7 analytics_engineering, 3 of 5 asana variants, 4 of 13 f1 variants, 4 of 18 helixops_saas variants, 1 of 3 intercom, 1 of 2 simple, 1 of 1 workday. No domain-specific weakness — failures are uniformly distributed by domain and concentrated by failure mode.
 
 ---
 

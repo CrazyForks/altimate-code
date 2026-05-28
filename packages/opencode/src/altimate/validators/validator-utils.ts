@@ -21,8 +21,14 @@ import { join, sep, basename } from "path"
  * killing it and treating the model as unverifiable. Overrideable via
  * ALTIMATE_VALIDATORS_TIMEOUT_MS for benchmark environments where dbt startup
  * time varies.
+ *
+ * Parses with a finite/positive guard: NaN, 0, or negative values are rejected
+ * and fall back to the 60 s default, preventing immediate SIGKILL of the process.
  */
-export const VALIDATOR_TIMEOUT_MS = Number(process.env.ALTIMATE_VALIDATORS_TIMEOUT_MS ?? "60000")
+const DEFAULT_TIMEOUT_MS = 60_000
+const _parsed = Number(process.env.ALTIMATE_VALIDATORS_TIMEOUT_MS)
+export const VALIDATOR_TIMEOUT_MS =
+  Number.isFinite(_parsed) && _parsed > 0 ? _parsed : DEFAULT_TIMEOUT_MS
 
 // ---------------------------------------------------------------------------
 // Project detection
@@ -84,7 +90,7 @@ export async function modelsModifiedSince(cwd: string, sinceMs: number): Promise
       const full = join(dir, entry.name)
       if (entry.isDirectory()) {
         await scan(full, depth + 1)
-      } else if (entry.isFile() && entry.name.endsWith(".sql")) {
+      } else if (entry.isFile() && entry.name.toLowerCase().endsWith(".sql")) {
         try {
           const stat = await fs.stat(full)
           if (stat.mtimeMs >= sinceMs) {
@@ -115,6 +121,42 @@ export async function modelsModifiedSince(cwd: string, sinceMs: number): Promise
 export function modelNameFromPath(p: string): string {
   return basename(p).replace(/\.sql$/i, "")
 }
+
+// ---------------------------------------------------------------------------
+// Concurrency utilities
+// ---------------------------------------------------------------------------
+
+/**
+ * Run `fn` over `items` with at most `limit` concurrent tasks at a time.
+ *
+ * Unbounded Promise.all over model lists can spawn too many simultaneous dbt
+ * subprocesses, causing resource contention, port conflicts, or flaky results.
+ * This helper caps the active workers while preserving output order.
+ */
+export async function runWithConcurrencyLimit<In, Out>(
+  items: In[],
+  fn: (item: In) => Promise<Out>,
+  limit: number,
+): Promise<Out[]> {
+  const results: Out[] = new Array(items.length)
+  let next = 0
+  async function worker(): Promise<void> {
+    while (next < items.length) {
+      const i = next++
+      results[i] = await fn(items[i]!)
+    }
+  }
+  const workers = Array.from({ length: Math.min(limit, items.length) }, worker)
+  await Promise.all(workers)
+  return results
+}
+
+/** Maximum simultaneous altimate-dbt subprocesses per validator run. */
+export const VALIDATOR_CONCURRENCY =
+  (() => {
+    const v = Number(process.env.ALTIMATE_VALIDATORS_CONCURRENCY)
+    return Number.isFinite(v) && v > 0 ? Math.floor(v) : 4
+  })()
 
 // ---------------------------------------------------------------------------
 // JSON extraction

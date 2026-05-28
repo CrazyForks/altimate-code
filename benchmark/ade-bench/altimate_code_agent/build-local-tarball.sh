@@ -8,7 +8,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../../../../../.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 PKG_DIR="$REPO_ROOT/packages/opencode"
 DBT_TOOLS_DIR="$REPO_ROOT/packages/dbt-tools"
 SKILLS_DIR="$REPO_ROOT/.opencode/skills"

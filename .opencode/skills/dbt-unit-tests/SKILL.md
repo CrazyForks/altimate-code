@@ -40,7 +40,7 @@ description: Generate dbt unit tests automatically for any model. Analyzes SQL l
    - **`/` division** → row where the denominator is `0` or `NULL`
    - **`CASE WHEN`** → at least one row matching each branch, including the implicit `ELSE NULL` if no explicit `ELSE` is set
    - **`COALESCE` / `IFNULL`** → row where every argument is `NULL`
-   - **Window functions (`OVER`)** → an empty partition, a partition of size 1, and a row at the partition boundary
+   - **Window functions (`OVER`)** → a partition of size 1 (single-row group exercises rank/first/last edge cases), a row at the partition boundary, and a tie-break row (two rows with the same ORDER BY key)
    - **Date arithmetic / date spines** → a row at the start of range, end of range, and a gap day with no events
    - **Aggregations with `GROUP BY`** → at least one group of size 1 (often masks fan-out bugs) and one group whose key is `NULL`
    - **Incremental merge keys** → both an "insert" row and an "update" row matching an existing key

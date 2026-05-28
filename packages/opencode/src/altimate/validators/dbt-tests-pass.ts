@@ -21,10 +21,12 @@ import { spawn } from "child_process"
 import type { Validator, ValidatorContext, ValidatorResult } from "../../session/validators/types"
 import {
   VALIDATOR_TIMEOUT_MS,
+  VALIDATOR_CONCURRENCY,
   findDbtProjectRoot,
   modelsModifiedSince,
   modelNameFromPath,
   extractLastJsonObject,
+  runWithConcurrencyLimit,
 } from "./validator-utils"
 
 export interface TestSummary {
@@ -183,11 +185,13 @@ export const DbtTestsPassValidator: Validator = {
       return { ok: true, details: { models_touched: 0 } }
     }
 
-    // Run all model tests in parallel; track spawn failures separately so the
-    // caller can see which models were not verifiable vs which passed/failed.
+    // Run model tests with a bounded concurrency limit to prevent resource
+    // contention from spawning too many simultaneous dbt processes (flaky failures).
     let spawnFailures = 0
-    const outputs = await Promise.all(
-      touched.map((path) => runDbtTest(modelNameFromPath(path), dbtRoot)),
+    const outputs = await runWithConcurrencyLimit(
+      touched,
+      (path) => runDbtTest(modelNameFromPath(path), dbtRoot),
+      VALIDATOR_CONCURRENCY,
     )
     const results: TestRunOutput[] = []
     for (const out of outputs) {

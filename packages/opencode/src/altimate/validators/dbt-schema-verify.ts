@@ -18,10 +18,12 @@ import { spawn } from "child_process"
 import type { Validator, ValidatorContext, ValidatorResult } from "../../session/validators/types"
 import {
   VALIDATOR_TIMEOUT_MS,
+  VALIDATOR_CONCURRENCY,
   findDbtProjectRoot,
   modelsModifiedSince,
   modelNameFromPath,
   extractLastJsonObject,
+  runWithConcurrencyLimit,
 } from "./validator-utils"
 
 interface SchemaVerifyOutput {
@@ -156,10 +158,13 @@ export const DbtSchemaVerifyValidator: Validator = {
       return { ok: true, details: { models_touched: 0 } }
     }
 
-    // Run all schema-verify calls in parallel; track spawn failures separately.
+    // Run schema-verify calls with a bounded concurrency limit to prevent
+    // resource contention from too many simultaneous dbt processes.
     let spawnFailures = 0
-    const outputs = await Promise.all(
-      touched.map((path) => runSchemaVerify(modelNameFromPath(path), dbtRoot)),
+    const outputs = await runWithConcurrencyLimit(
+      touched,
+      (path) => runSchemaVerify(modelNameFromPath(path), dbtRoot),
+      VALIDATOR_CONCURRENCY,
     )
     const results: SchemaVerifyOutput[] = []
     for (let i = 0; i < outputs.length; i++) {
@@ -169,6 +174,9 @@ export const DbtSchemaVerifyValidator: Validator = {
         results.push({ ...out, model: out.model ?? name })
       } else {
         spawnFailures++
+        // Track spawn failures as errored results so they appear in telemetry
+        // and detail counts rather than being silently dropped (fails open).
+        results.push({ model: name, error: "spawn failed: subprocess did not start" })
       }
     }
 
@@ -177,7 +185,10 @@ export const DbtSchemaVerifyValidator: Validator = {
     const matches = results.filter((r) => r.verdict === "match").length
     const errored = results.filter((r) => r.error).length
 
-    if (mismatches.length === 0) {
+    // Fail closed: return ok only when every model was verified and none mismatched.
+    // Errors (spawn failures, schema-verify tool errors) prevent a clean pass because
+    // we cannot rule out drift on models we failed to inspect.
+    if (mismatches.length === 0 && errored === 0) {
       return {
         ok: true,
         details: {
@@ -191,12 +202,19 @@ export const DbtSchemaVerifyValidator: Validator = {
       }
     }
 
+    const reason =
+      mismatches.length > 0
+        ? `${mismatches.length} of ${results.length} models you edited have a column-shape mismatch against schema.yml. The build may be green, but equality tests will fail.`
+        : `${errored} model(s) could not be schema-verified (spawn or tool errors) — schema drift cannot be ruled out. Investigate before declaring done.`
+
     return {
       ok: false,
-      reason: `${mismatches.length} of ${results.length} models you edited have a column-shape mismatch against schema.yml. The build may be green, but equality tests will fail.`,
+      reason,
       fixHint:
-        formatFixHint(mismatches) +
-        `\n\nFix the model SQL to match the schema.yml spec (do not edit the spec), rebuild, and the harness will re-check before declaring done.`,
+        mismatches.length > 0
+          ? formatFixHint(mismatches) +
+            `\n\nFix the model SQL to match the schema.yml spec (do not edit the spec), rebuild, and the harness will re-check before declaring done.`
+          : `Run \`altimate-dbt schema-verify <model>\` manually to diagnose the error. Check that altimate-dbt is on PATH and that the dbt project compiles cleanly.`,
       details: {
         models_touched: touched.length,
         verified: results.length,

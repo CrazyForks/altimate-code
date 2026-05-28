@@ -25,8 +25,11 @@ if [[ -f "$LOCAL_TARBALL" ]]; then
   cp "$SRC" "$PKG_BIN_DIR/.altimate"
   chmod 755 "$PKG_BIN_DIR/.altimate-code" "$PKG_BIN_DIR/.altimate"
 else
-  echo "Local tarball not staged; falling back to latest published"
-  npm install -g --no-audit --no-fund @altimateai/altimate-code@latest
+  # Abort rather than silently install an uncontrolled @latest version.
+  # Benchmark reproducibility requires the exact local build under test.
+  # Stage the tarball via build-local-tarball.sh before running this script.
+  echo "ERROR: local tarball $LOCAL_TARBALL not found. Run build-local-tarball.sh first." >&2
+  exit 1
 fi
 
 altimate-code --version
@@ -97,6 +100,7 @@ ${PROVIDERS}
   }
 }
 EOF
+  chmod 600 "$CONFIG_DIR/altimate-code.json"
   echo "Wrote altimate-code config; providers registered:"
   grep -oE '"(azure-foundry|openrouter)":' "$CONFIG_DIR/altimate-code.json" | tr -d '":' | sed 's/^/  - /'
 else

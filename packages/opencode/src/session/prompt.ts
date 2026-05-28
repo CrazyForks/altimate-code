@@ -1116,7 +1116,7 @@ export namespace SessionPrompt {
         try {
           const vCtx = {
             sessionID,
-            workingDirectory: process.cwd(),
+            workingDirectory: Instance.directory,
             sessionStartMs: sessionStartTime,
             step,
             retryCount: validatorRetryCount,
@@ -1200,8 +1200,7 @@ export namespace SessionPrompt {
             })
 
             validatorRetryCount++
-            // Fall through to `continue`; the next iteration's top-of-loop
-            // sees the newer user message and does NOT break.
+            continue
           } else if (failures.length > 0 && validatorsEnabled && validatorRetryCount >= maxValidatorRetries) {
             // Retry budget exhausted with outstanding failures. Session will
             // terminate on the natural break below. Emit an explicit signal so

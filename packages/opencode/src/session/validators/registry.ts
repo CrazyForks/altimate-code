@@ -45,8 +45,16 @@ export const ValidatorRegistry = {
       let applies = false
       try {
         applies = await v.appliesTo(ctx)
-      } catch {
+      } catch (e) {
         // appliesTo() throwing is a validator bug; skip rather than block agent.
+        // Record as a soft pass so callers can observe the skipped-with-error.
+        out.push({
+          validator: v,
+          result: {
+            ok: true,
+            details: { error: e instanceof Error ? e.message : String(e), skipped_due_to_appliesTo_error: true },
+          },
+        })
         continue
       }
       if (!applies) continue

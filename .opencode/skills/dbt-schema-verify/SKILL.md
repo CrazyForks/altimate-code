@@ -114,8 +114,10 @@ Then run `altimate-dbt build --model <name>` again, then re-run
 If `which altimate-dbt` returns nothing, do the same diff by hand:
 
 ```bash
-# 1. Read expected columns from schema.yml
-cat models/**/schema.yml | grep -A 50 "name: <name>"   # or yq
+# 1. Read expected columns from any YAML spec under models/
+#    dbt allows any .yml filename; common patterns include schema.yml,
+#    _models.yml, models.yml, sources.yml, etc.
+cat models/**/*.yml | grep -A 50 "name: <name>"   # or: yq eval '...' models/**/*.yml
 
 # 2. Read actual columns from the materialized table
 dbt show --select <name> --limit 0
