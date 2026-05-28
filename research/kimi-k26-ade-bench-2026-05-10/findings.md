@@ -2,7 +2,7 @@
 
 *Notes from running the Moonshot Kimi-K2.6 model (via OpenRouter) inside altimate-code's dbt-aware agent loop on the ADE-Bench analytics/data-engineering benchmark.*
 
-Date: 2026-05-10. Model id: `openrouter/moonshotai/kimi-k2.6-20260420`. Harness: altimate-code (a fork of OpenCode wrapping the model in a coding-agent loop with extra dbt/SQL/warehouse tools).
+Date: 2026-05-10. Model id: `openrouter/moonshotai/kimi-k2.6-20260420`. Harness: altimate-code (an agent loop with extra dbt/SQL/warehouse tools).
 
 ---
 
@@ -27,7 +27,7 @@ ADE-Bench ships ~45 base task IDs, each scaffolded as a dbt project. Some tasks 
 Each trial:
 
 1. The harness starts a container, scaffolds the dbt project, and hands the agent a natural-language prompt.
-2. altimate-code spins up its agent loop. The model is Kimi-K2.6 routed through OpenRouter using altimate-code's OpenAI-compatible provider. The agent has the standard OpenCode toolset (`bash`, `read`, `write`, `edit`, `glob`, `grep`, `todowrite`) plus altimate-specific tools (`project_scan`, `sql_analyze`, `sql_execute`, `warehouse_*`, `dbt_manifest`, `dbt_profiles`, `dbt_lineage`, `altimate_core_validate`, `altimate_memory_*`, `schema_*`, `lineage_check`, `skill`, `tool_lookup`).
+2. altimate-code spins up its agent loop. The model is Kimi-K2.6 routed through OpenRouter using altimate-code's OpenAI-compatible provider. The agent has the standard toolset (`bash`, `read`, `write`, `edit`, `glob`, `grep`, `todowrite`) plus altimate-specific tools (`project_scan`, `sql_analyze`, `sql_execute`, `warehouse_*`, `dbt_manifest`, `dbt_profiles`, `dbt_lineage`, `altimate_core_validate`, `altimate_memory_*`, `schema_*`, `lineage_check`, `skill`, `tool_lookup`).
 3. The agent gets up to ~1,800 wall-seconds. When it stops, the harness runs the task's dbt tests and grades pass/fail.
 4. Per-trial we capture `results.json`, the full JSON event stream in `sessions/agent.log`, dbt test output, and the readable transcript.
 
@@ -273,7 +273,7 @@ The right fix is provider-side: have the OpenAI-compatible adapter project the `
 
 ## 6. Where the custom tools helped (or didn't)
 
-altimate-code ships dbt-specific tools beyond OpenCode's base set. Pass-rate correlations:
+altimate-code ships dbt-specific tools beyond the base set. Pass-rate correlations:
 
 | Tool | Used in trials | Pass when used | Pass when not used | Delta |
 |---|---:|---:|---:|---:|
