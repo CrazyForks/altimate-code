@@ -72,8 +72,11 @@ export interface OrchestrateInput {
   rubric: Rubric
   mode: ReviewMode
   runner: ReviewRunner
-  /** Resolve file contents from the working tree / git refs. */
+  /** Resolve RAW model contents (Jinja) from the working tree / git refs. */
   getContent?: (file: string, side: "old" | "new") => Promise<string | undefined>
+  /** Resolve dbt-COMPILED SQL (rendered) for the engine lanes; undefined when
+   *  no compiled artifact exists. The dbt-patterns lane always uses raw. */
+  getCompiled?: (file: string, side: "old" | "new") => Promise<string | undefined>
   generatedAt?: string
   manifestHash?: string
   coreVersion?: string
@@ -310,14 +313,19 @@ interface ModelContext {
   file: ChangedFile & { kind: string }
   impact: ImpactResult
   pii: string[]
+  /** RAW Jinja SQL (for the dbt-patterns lane + the diff). */
   newSql?: string
   oldSql?: string
+  /** dbt-COMPILED SQL (preferred) for the engine lanes; falls back to raw. */
+  engineNewSql?: string
+  engineOldSql?: string
 }
 
 export async function runReview(input: OrchestrateInput): Promise<VerdictEnvelope> {
   const reviewable = filterChangedFiles(input.changedFiles, input.rubric.exclusions.excludeGlobs)
   const dialect = input.config.dialect
   const getContent = input.getContent
+  const getCompiled = input.getCompiled
 
   // Pre-compute every engine result ONCE per model file: blast radius (for
   // tiering + lineage), PII columns (hard-floor → must precede tiering), and
@@ -330,14 +338,20 @@ export async function runReview(input: OrchestrateInput): Promise<VerdictEnvelop
       const model = modelNameFromPath(file.path)
       // For renames the previous content lives at oldPath, not the new path.
       const oldRef = file.oldPath ?? file.path
-      const [newSql, oldSql] = await Promise.all([
+      const [newSql, oldSql, compiledNew, compiledOld] = await Promise.all([
         file.status !== "deleted" ? getContent?.(file.path, "new") : Promise.resolve(undefined),
         file.status === "modified" ? getContent?.(oldRef, "old") : Promise.resolve(undefined),
+        file.status !== "deleted" ? getCompiled?.(file.path, "new") : Promise.resolve(undefined),
+        file.status === "modified" ? getCompiled?.(oldRef, "old") : Promise.resolve(undefined),
       ])
+      // Engine lanes prefer dbt-compiled SQL (correct rendered SQL); raw is the
+      // fallback. The dbt-patterns lane always uses raw (it needs the Jinja).
+      const engineNewSql = compiledNew ?? newSql
+      const engineOldSql = compiledOld ?? oldSql
       const impact = await input.runner.impact(model)
       if (impact.hasManifest) anyManifest = true
-      const pii = newSql ? (await input.runner.detectPii(newSql, dialect)).columns : []
-      ctxByPath.set(file.path, { file, impact, pii, newSql, oldSql })
+      const pii = engineNewSql ? (await input.runner.detectPii(engineNewSql, dialect)).columns : []
+      ctxByPath.set(file.path, { file, impact, pii, newSql, oldSql, engineNewSql, engineOldSql })
     }),
   )
 
@@ -357,13 +371,24 @@ export async function runReview(input: OrchestrateInput): Promise<VerdictEnvelop
   const all: Finding[][] = []
   for (const ctx of ctxByPath.values()) {
     const tasks: Promise<Finding[]>[] = []
+    // Engine lanes consume COMPILED SQL (rendered by dbt) when available.
     if (lanes.has("sql_quality") || lanes.has("warehouse_cost"))
-      tasks.push(qualityLane(ctx.file, input.runner, ctx.newSql, dialect))
+      tasks.push(qualityLane(ctx.file, input.runner, ctx.engineNewSql, dialect))
     if (lanes.has("semantic_change"))
-      tasks.push(semanticChangeLane(ctx.file, input.runner, ctx.oldSql, ctx.newSql, dialect, ctx.impact, input.rubric))
+      tasks.push(
+        semanticChangeLane(
+          ctx.file,
+          input.runner,
+          ctx.engineOldSql,
+          ctx.engineNewSql,
+          dialect,
+          ctx.impact,
+          input.rubric,
+        ),
+      )
     if (lanes.has("lineage_breakage")) all.push(lineageBreakageLane(ctx.file, ctx.impact, input.rubric))
     if (lanes.has("pii_exposure")) all.push(piiLane(ctx.file, ctx.pii))
-    // Deterministic dbt anti-pattern detectors (raw SQL + diff; no engine needed).
+    // Deterministic dbt anti-pattern detectors run on RAW SQL + diff (need Jinja).
     if (lanes.has("dbt_patterns")) all.push(detectModelPatterns(ctx.file, ctx.newSql, input.rubric))
     all.push(...(await Promise.all(tasks)))
   }

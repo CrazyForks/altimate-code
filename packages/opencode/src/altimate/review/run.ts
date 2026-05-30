@@ -2,6 +2,7 @@ import path from "node:path"
 import { loadReviewConfig, resolveRubric } from "./config"
 import type { Severity } from "./finding"
 import { collectChangedFiles, makeContentResolver, defaultBaseRef, manifestHash } from "./git"
+import { makeCompiledResolver, dbtProjectName } from "./compiled"
 import { createDispatcherRunner } from "./runner"
 import { runReview } from "./orchestrate"
 import type { ReviewMode, VerdictEnvelope } from "./verdict"
@@ -56,6 +57,11 @@ export async function reviewPullRequest(opts: ReviewPullRequestOptions): Promise
   const runner = createDispatcherRunner({ manifestPath: manifestAbs })
   const mhash = await manifestHash(manifestAbs, opts.cwd)
 
+  // Prefer dbt's COMPILED SQL (target/compiled) for the engine lanes — the clean
+  // approach (Datafold/Recce/Fusion all render-then-analyze rather than parse Jinja).
+  const projectName = await dbtProjectName(opts.cwd)
+  const getCompiled = opts.getContent ? undefined : makeCompiledResolver({ cwd: opts.cwd, projectName })
+
   return runReview({
     changedFiles,
     config,
@@ -63,6 +69,7 @@ export async function reviewPullRequest(opts: ReviewPullRequestOptions): Promise
     mode: config.mode,
     runner,
     getContent,
+    getCompiled,
     generatedAt: new Date().toISOString(),
     manifestHash: mhash,
     modelVersion: opts.modelVersion,

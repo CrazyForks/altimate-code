@@ -35,6 +35,16 @@ function piiColumnOf(issue: any): string | undefined {
   return issue?.column ?? issue?.target ?? issue?.name ?? undefined
 }
 
+/** The engine returns a numeric confidence (0..1); map it to a band. */
+function bandConfidence(c: unknown): "high" | "medium" | "low" {
+  if (typeof c === "string") {
+    const s = c.toLowerCase()
+    if (s === "high" || s === "medium" || s === "low") return s
+  }
+  const n = typeof c === "number" ? c : 0.5
+  return n >= 0.8 ? "high" : n >= 0.5 ? "medium" : "low"
+}
+
 export interface DispatcherRunnerOptions {
   manifestPath: string
   /** Optional inline schema context to enable real equivalence proofs. */
@@ -210,11 +220,20 @@ export function createDispatcherRunner(opts: DispatcherRunnerOptions): ReviewRun
           validationErrors.length === 0 &&
           !!schema
         if (!decided) return { decided: false }
+        // The engine flags column-reorder etc. as `minor` but still sets
+        // equivalent:true for a row-changing filter (noting a `semantic` diff).
+        // Treat ANY semantic/major/breaking difference as NOT equivalent — a
+        // dropped/added row predicate must never be cleared as "safe".
+        const diffs = asArray<any>(data.differences)
+        const hasMaterialDiff = diffs.some((d) =>
+          /^(semantic|major|breaking|critical)$/i.test(String(d?.severity ?? "")),
+        )
+        const equivalent = data.equivalent === true && !hasMaterialDiff
         return {
           decided: true,
-          equivalent: data.equivalent,
-          differences: asArray<any>(data.differences).map((d) => d?.description ?? String(d)),
-          confidence: data.confidence ?? "medium",
+          equivalent,
+          differences: diffs.map((d) => d?.description ?? String(d)),
+          confidence: bandConfidence(data.confidence),
         }
       } catch {
         return { decided: false }
