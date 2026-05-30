@@ -99,6 +99,23 @@ rubric:
     skipNonProdModels: true
 ```
 
+## How models are rendered (Jinja → analyzable SQL)
+
+dbt models are Jinja templates, so the SQL engine needs *rendered* SQL. The
+reviewer does **not** re-implement Jinja — it consumes dbt's own compiled output
+(the same render-then-analyze split dbt-Fusion uses, and what Datafold/Recce do):
+
+1. **Deterministic `dbt-patterns` lane** reads the **raw** model + diff — it needs
+   the Jinja (`{{ config(materialized) }}`, `is_incremental()`, `{{ ref }}`) and
+   the unified diff to detect structural anti-patterns. This lane needs no
+   warehouse and catches the majority of real-world failures.
+2. **Engine lanes** (equivalence, grade, lint, PII) consume **dbt-compiled SQL**
+   from `target/compiled/<project>/…` (HEAD) and `target-base/compiled/…` (BASE),
+   produced by `dbt compile`. To enable full equivalence verdicts, compile both
+   the base and head refs in CI (the base into `target-base/`, the Recce
+   convention). Without compiled SQL the engine lanes fall back to raw and stay
+   *undecidable* (never fabricated) — the `dbt-patterns` lane still runs.
+
 ## How it works
 
 1. **Risk-tiering (no LLM).** A deterministic pre-pass classifies the change on
