@@ -1,6 +1,7 @@
 import { type Finding, type Severity, type ReviewCategory, makeFinding } from "./finding"
 import { type ChangedFile, classifyDbtFile } from "./diff-filter"
 import { type Rubric, clampSeverity, exclusionReason } from "./rubric"
+import { GENERATED } from "./rule-generators"
 import path from "node:path"
 
 /**
@@ -2392,4 +2393,5 @@ CATALOG.push(
   ...STYLE,
   ...MISC,
   ...MISC2,
+  ...GENERATED,
 )

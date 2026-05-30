@@ -19,7 +19,7 @@ describe("rule catalog (self-verifying scenario corpus)", () => {
     expect(failures.length).toBe(0)
   })
 
-  test("catalog covers >= 200 distinct use-cases", () => {
-    expect(CATALOG.length).toBeGreaterThanOrEqual(200)
+  test("catalog covers >= 1000 distinct use-cases", () => {
+    expect(CATALOG.length).toBeGreaterThanOrEqual(1000)
   })
 })
