@@ -33,11 +33,34 @@ export namespace Installation {
     }).then((x) => x.text)
   }
 
+  // altimate_change start — curl-upgrade endpoint config
+  // Upstream uses opencode.ai/install. We fetch the altimate install script
+  // from www.altimate.sh/install (the apex altimate.sh isn't routed to the
+  // Amplify Next.js app — tracked separately; revisit when apex DNS is fixed).
+  // Bounded timeout so a stalled CDN/origin can't hang `altimate upgrade` forever.
+  const UPGRADE_INSTALL_URL = "https://www.altimate.sh/install"
+  const UPGRADE_FETCH_TIMEOUT_MS = 15_000
+  // altimate_change end
+
   async function upgradeCurl(target: string) {
-    const body = await fetch("https://altimate.ai/install").then((res) => {
-      if (!res.ok) throw new Error(res.statusText)
-      return res.text()
-    })
+    // altimate_change start — friendly fetch error + manual-recovery hint
+    let body: string
+    try {
+      body = await fetch(UPGRADE_INSTALL_URL, {
+        signal: AbortSignal.timeout(UPGRADE_FETCH_TIMEOUT_MS),
+      }).then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`)
+        return res.text()
+      })
+    } catch (err) {
+      const cause = err instanceof Error ? err.message : String(err)
+      throw new Error(
+        `Could not download install script from ${UPGRADE_INSTALL_URL}: ${cause}. ` +
+          `Re-run the install manually: curl -fsSL ${UPGRADE_INSTALL_URL} | bash — ` +
+          `or download a release binary directly from https://github.com/AltimateAI/altimate-code/releases/latest`,
+      )
+    }
+    // altimate_change end
     const proc = Process.spawn(["bash"], {
       stdin: "pipe",
       stdout: "pipe",
@@ -100,6 +123,12 @@ export namespace Installation {
   }
 
   export async function method() {
+    // altimate_change start — detect altimate-code curl install at ~/.altimate/bin
+    // (the standalone install dir was renamed in v0.7.1; `.opencode/bin` is kept
+    // for users still on a pre-rename layout, `.local/bin` for distros that
+    // resolve there).
+    if (process.execPath.includes(path.join(".altimate", "bin"))) return "curl"
+    // altimate_change end
     if (process.execPath.includes(path.join(".opencode", "bin"))) return "curl"
     if (process.execPath.includes(path.join(".local", "bin"))) return "curl"
     const exec = process.execPath.toLowerCase()

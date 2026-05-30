@@ -327,10 +327,15 @@ export namespace SessionProcessor {
                     duration_ms: Date.now() - stepStartTime,
                     tokens_input: usage.tokens.input,
                     tokens_output: usage.tokens.output,
-                    // altimate_change start — include total input tokens (with cache) when they differ from tokens_input
-                    ...(usage.tokens.inputTotal !== usage.tokens.input && {
-                      tokens_input_total: usage.tokens.inputTotal,
-                    }),
+                    // altimate_change start — always emit tokens_input_total so dashboard
+                    // queries can rely on it without null-handling. Pre-2026-05-22 this
+                    // was conditional on `inputTotal !== input` to save 12 bytes per event,
+                    // but the absent field looked like a bug in queries that didn't know
+                    // to coalesce — the false-positive "Anthropic tokens_input=0 broken"
+                    // finding in telemetry-2026-05-21 was driven by this. See the comment
+                    // block on the `generation` event type in telemetry/index.ts for the
+                    // canonical semantics. Cost: ~12 bytes × generations/day, negligible.
+                    tokens_input_total: usage.tokens.inputTotal,
                     // altimate_change end
                     ...(value.usage.reasoningTokens !== undefined && { tokens_reasoning: usage.tokens.reasoning }),
                     ...(value.usage.cachedInputTokens !== undefined && { tokens_cache_read: usage.tokens.cache.read }),
@@ -528,6 +533,18 @@ export namespace SessionProcessor {
                 sessionID: input.assistantMessage.sessionID,
                 error: input.assistantMessage.error,
               })
+              // altimate_change start — telemetry for unhandled streaming errors (non-retry, non-overflow)
+              // Covers: MessageAbortedError (Stop/dispose), UnknownError (SSE chunk timeout),
+              // APIError (provider failures after retry exhaustion), AuthError, and any other streaming error.
+              Telemetry.track({
+                type: "error",
+                timestamp: Date.now(),
+                session_id: input.assistantMessage.sessionID,
+                error_name: error.name,
+                error_message: (error.data as any)?.message ?? String((e as any)?.message ?? ""),
+                context: "streaming",
+              })
+              // altimate_change end
               // altimate_change start — SessionStatus.set became async; await so idle state flushes before exit
               await SessionStatus.set(input.sessionID, { type: "idle" })
               // altimate_change end

@@ -281,11 +281,78 @@ describe("sessionAgentName fix safety", () => {
       "utf-8",
     )
 
-    // Find agent_outcome emission
+    // Find agent_outcome emission and assert it routes through the shared
+    // `normalizeAgentName` helper. Anchored regex (not a token-presence check
+    // inside a wide window) so this fails if anyone replaces the helper call
+    // with a literal or accidentally bypasses normalization.
     const outcomeIdx = promptTs.indexOf('type: "agent_outcome"')
     expect(outcomeIdx).toBeGreaterThan(-1)
-    const block = promptTs.slice(outcomeIdx, outcomeIdx + 400)
-    expect(block).toContain("agent: sessionAgentName")
+    const block = promptTs.slice(outcomeIdx, outcomeIdx + 600)
+    expect(block).toMatch(/agent:\s*normalizeAgentName\(sessionAgentName\)/)
+  })
+
+  test("session_start telemetry normalizes the agent name (parity with agent_outcome)", async () => {
+    // Funnel analysis from session_start → agent_outcome must see the same
+    // bucket name; otherwise sessions appear to "vanish" when the legacy
+    // "build" value at start gets normalized to "builder" at end.
+    const promptTs = await fs.readFile(
+      path.join(__dirname, "../../src/session/prompt.ts"),
+      "utf-8",
+    )
+    const startIdx = promptTs.indexOf('type: "session_start"')
+    expect(startIdx).toBeGreaterThan(-1)
+    const block = promptTs.slice(startIdx, startIdx + 600)
+    expect(block).toMatch(/agent:\s*normalizeAgentName\(lastUser\.agent\)/)
+  })
+
+  test("normalizeAgentName helper is declared exactly once (single source of truth)", async () => {
+    // If a second normalizer is ever introduced the two will inevitably drift.
+    // Pin a single implementation.
+    const promptTs = await fs.readFile(
+      path.join(__dirname, "../../src/session/prompt.ts"),
+      "utf-8",
+    )
+    const declarations = promptTs.match(/function\s+normalizeAgentName\s*\(/g) ?? []
+    expect(declarations.length).toBe(1)
+  })
+
+  test("normalizeAgentName comparison is case-insensitive", async () => {
+    // A future config, custom prompt, or hand-edited persisted session
+    // could surface "Build" or "BUILD". Without case-folding, the phantom
+    // bucket comes back. Pin that the helper does the toLowerCase() guard
+    // so a refactor can't silently drop it.
+    const promptTs = await fs.readFile(
+      path.join(__dirname, "../../src/session/prompt.ts"),
+      "utf-8",
+    )
+    const declIdx = promptTs.indexOf("function normalizeAgentName")
+    expect(declIdx).toBeGreaterThan(-1)
+    const body = promptTs.slice(declIdx, declIdx + 1200)
+    // The body should case-fold before comparing — either toLowerCase() or
+    // toUpperCase() before the equality check. Anchored to the legacy-name
+    // check specifically (variable name allowed to drift, the .toLowerCase()
+    // adjacent to "build" is what matters).
+    expect(body).toMatch(/\.toLowerCase\(\)\s*===\s*"build"/)
+  })
+
+  test("normalizeAgentName hardens against adversarial input (control chars, length, unicode)", async () => {
+    // Reviewer (compliance / chaos, 2026-05-24) flagged that the helper
+    // accepted arbitrary user-supplied agent names without sanitization:
+    // a 50KB string, embedded newlines (log-injection on App Insights),
+    // or fullwidth homoglyphs would create separate telemetry buckets
+    // or split events. Pin that the helper:
+    //   - strips control chars
+    //   - NFKC-normalizes
+    //   - caps length
+    const promptTs = await fs.readFile(
+      path.join(__dirname, "../../src/session/prompt.ts"),
+      "utf-8",
+    )
+    const declIdx = promptTs.indexOf("function normalizeAgentName")
+    const body = promptTs.slice(declIdx, declIdx + 1200)
+    expect(body).toMatch(/\[\\x00-\\x1f/) // C0 strip
+    expect(body).toMatch(/normalize\(\s*["']NFKC["']\s*\)/)
+    expect(body).toMatch(/\.slice\(\s*0\s*,\s*\d{2,3}\s*\)/) // length cap (2-3 digit, e.g. 64)
   })
 })
 
