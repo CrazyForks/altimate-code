@@ -185,3 +185,96 @@ where o.customer_id is null`
     expect(f.length).toBe(0)
   })
 })
+
+describe("dbt-patterns extended battery", () => {
+  const M = "models/marts/m.sql"
+  const fire = (newSql: string, added: string[], removed: string[] = []) =>
+    detectModelPatterns(modelFile(M, newSql, added, removed), newSql, DEFAULT_RUBRIC)
+
+  test("COALESCE removed → semantic_change", () =>
+    expect(has(fire("select a from t", [], ["coalesce(a, 0) as a"]), "semantic_change")).toBe(true))
+  test("SELECT DISTINCT added → semantic_change", () =>
+    expect(has(fire("select distinct a from t", ["select distinct a from t"]), "semantic_change")).toBe(true))
+  test("UNION ALL → UNION → warehouse_cost", () =>
+    expect(has(fire("a union b", ["select 1 union select 2"], ["select 1 union all select 2"]), "warehouse_cost")).toBe(
+      true,
+    ))
+  test("UNION → UNION ALL → sql_correctness", () =>
+    expect(
+      has(fire("a union all b", ["select 1 union all select 2"], ["select 1 union select 2"]), "sql_correctness"),
+    ).toBe(true))
+  test("GROUP BY change → semantic_change", () =>
+    expect(has(fire("g", ["group by 1, 2"], ["group by 1"]), "semantic_change")).toBe(true))
+  test("DML in model → critical sql_correctness", () =>
+    expect(has(fire("delete from t", ["delete from t where 1=1"]), "sql_correctness", "critical")).toBe(true))
+  test("LIMIT in model → sql_correctness", () => expect(has(fire("x", ["limit 100"]), "sql_correctness")).toBe(true))
+  test("random() → idempotency", () => expect(has(fire("x", ["select rand() as r"]), "idempotency")).toBe(true))
+  test("= NULL → sql_correctness", () => expect(has(fire("x", ["where a = null"]), "sql_correctness")).toBe(true))
+  test("type narrowing → contract_violation", () =>
+    expect(has(fire("x", ["cast(a as int64)"], ["cast(a as numeric)"]), "contract_violation")).toBe(true))
+  test("full_refresh=true → materialization", () =>
+    expect(has(fire("{{ config(full_refresh=true) }}", ["{{ config(full_refresh=true) }}"]), "materialization")).toBe(
+      true,
+    ))
+  test("incremental no unique_key → dedup", () =>
+    expect(
+      has(
+        fire("{{ config(materialized='incremental') }}\n{% if is_incremental() %}where 1=1{% endif %}", ["where 1=1"]),
+        "dedup",
+      ),
+    ).toBe(true))
+  test("max() subquery boundary → warehouse_cost", () =>
+    expect(has(fire("x", ["where ts >= (select max(ts) from {{ this }})"]), "warehouse_cost")).toBe(true))
+  test("ORDER BY no LIMIT → warehouse_cost", () =>
+    expect(has(fire("select a from t order by 1", ["order by 1"]), "warehouse_cost")).toBe(true))
+  test("leading-wildcard LIKE → warehouse_cost", () =>
+    expect(has(fire("x", ["where name like '%x'"]), "warehouse_cost")).toBe(true))
+  test("constant join ON 1=1 → join_risk", () => expect(has(fire("x", ["join t on 1=1"]), "join_risk")).toBe(true))
+  test("hardcoded relation → sql_quality", () =>
+    expect(has(fire("x", ["from analytics.prod.orders"]), "sql_quality")).toBe(true))
+  test("var() no default → sql_quality", () =>
+    expect(has(fire("x", ["where d > {{ var('cutoff') }}"]), "sql_quality")).toBe(true))
+  test("hardcoded date literal → freshness", () =>
+    expect(has(fire("x", ["where created_at >= '2024-01-01'"]), "freshness")).toBe(true))
+  test("timestamp→date cast → sql_correctness", () =>
+    expect(has(fire("x", ["cast(order_at as date)"]), "sql_correctness")).toBe(true))
+  test("HAVING without GROUP BY → sql_correctness", () =>
+    expect(has(fire("select a from t having count(*) > 1", ["having count(*) > 1"]), "sql_correctness")).toBe(true))
+  test("CASE without ELSE → sql_correctness", () =>
+    expect(has(fire("x", ["case when a > 0 then 1 end"]), "sql_correctness")).toBe(true))
+  test("removed predicate → semantic_change", () =>
+    expect(has(fire("select a from t", [], ["where status = 'active'"]), "semantic_change")).toBe(true))
+  test("comma join → join_risk", () => expect(has(fire("x", ["from a, b"]), "join_risk")).toBe(true))
+  test("NATURAL JOIN → join_risk", () => expect(has(fire("x", ["natural join t"]), "join_risk")).toBe(true))
+  test("self-join (same ref twice) → join_risk", () =>
+    expect(
+      has(
+        fire("from {{ ref('o') }} a join {{ ref('o') }} b on a.id=b.id", ["join {{ ref('o') }} b on a.id=b.id"]),
+        "join_risk",
+      ),
+    ).toBe(true))
+  test("window without PARTITION BY → sql_correctness", () =>
+    expect(has(fire("x", ["sum(a) over (order by b) as r"]), "sql_correctness")).toBe(true))
+  test("BETWEEN on timestamp → sql_correctness", () =>
+    expect(has(fire("x", ["where created_at between '2024-01-01' and '2024-12-31'"]), "sql_correctness")).toBe(true))
+  test("float equality → sql_correctness", () =>
+    expect(has(fire("x", ["where price = 9.99"]), "sql_correctness")).toBe(true))
+  test("division no guard → sql_correctness", () =>
+    expect(has(fire("x", ["select a / b as r"]), "sql_correctness")).toBe(true))
+  test("AND/OR no parens → sql_correctness", () =>
+    expect(has(fire("x", ["where a = 1 and b = 2 or c = 3"]), "sql_correctness")).toBe(true))
+  test("OFFSET no ORDER BY → sql_correctness", () =>
+    expect(has(fire("select a from t offset 5", ["offset 5"]), "sql_correctness")).toBe(true))
+  test("multiple COUNT(DISTINCT) → warehouse_cost", () =>
+    expect(has(fire("x", ["count(distinct a), count(distinct b)"]), "warehouse_cost")).toBe(true))
+
+  // precision: a benign additive change fires NONE of the new detectors
+  test("benign additive column → 0 findings (precision)", () =>
+    expect(
+      fire("select id, upper(name) as name_upper from {{ ref('x') }}", ["    upper(name) as name_upper,"]).length,
+    ).toBe(0))
+  test("division by literal is NOT flagged", () =>
+    expect(has(fire("x", ["select amount / 100 as dollars"]), "sql_correctness")).toBe(false))
+  test("safe_divide is NOT flagged", () =>
+    expect(has(fire("x", ["select safe_divide(a, b) as r"]), "sql_correctness")).toBe(false))
+})
