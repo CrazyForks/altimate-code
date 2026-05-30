@@ -2,6 +2,7 @@ import path from "node:path"
 import { type Finding, type Severity, type ReviewCategory, makeFinding } from "./finding"
 import { type ChangedFile, classifyDbtFile } from "./diff-filter"
 import { type Rubric, clampSeverity, exclusionReason } from "./rubric"
+import { evaluateCatalog } from "./rule-catalog"
 
 /** Local copy to avoid a cycle with orchestrate.ts. */
 function modelNameFromPath(p: string): string {
@@ -1028,6 +1029,8 @@ export function detectModelPatterns(file: ChangedFile, newSql: string | undefine
     const f = d(ctx)
     if (f) out.push({ ...f, severity: clampSeverity(f.category, f.severity, f.confidence) })
   }
+  // Declarative rule catalog (data-driven checks) complements the programmatic detectors.
+  out.push(...evaluateCatalog(file, newSql, added, removed, rubric))
   return out.filter((f) => !exclusionReason(f, rubric))
 }
 

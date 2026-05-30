@@ -127,9 +127,9 @@ where o.customer_id is null`
     const sql = `select o.id, c.ssn from o join c using (id)`
     const f = detectModelPatterns(modelFile("models/marts/m.sql", sql, ["        c.ssn,"]), sql, DEFAULT_RUBRIC)
     expect(has(f, "pii_exposure", "critical")).toBe(true)
-    // same column in a staging model is not a mart-exposure finding
+    // staging PII is flagged (catalog) but NOT as the marts-only critical exposure
     const stg = detectModelPatterns(modelFile("models/staging/m.sql", sql, ["        c.ssn,"]), sql, DEFAULT_RUBRIC)
-    expect(has(stg, "pii_exposure")).toBe(false)
+    expect(has(stg, "pii_exposure", "critical")).toBe(false)
   })
 
   test("partition-pruning-defeating function in WHERE → warehouse_cost suggestion", () => {
