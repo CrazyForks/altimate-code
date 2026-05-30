@@ -107,4 +107,17 @@ else
   echo "WARN: neither AZURE_API_KEY nor OPENROUTER_API_KEY set; skipping provider config"
 fi
 
+# Enable validators for benchmark trials by default. Benchmarks are the
+# whole reason the framework exists — they need the harness-side checks
+# on to measure their impact. Trades 30 s – 2 min per trial of extra
+# wall time for catching cases where the agent declared "done" but the
+# model is actually broken (failing tests, schema drift).
+#
+# Set ALTIMATE_VALIDATORS_BENCH_DISABLE=1 in the bench env to opt out
+# (e.g. for baseline runs that intentionally measure pre-validator state).
+if [[ "${ALTIMATE_VALIDATORS_BENCH_DISABLE:-0}" != "1" ]]; then
+  export ALTIMATE_VALIDATORS_ENABLED=1
+  echo "Validators enabled (ALTIMATE_VALIDATORS_ENABLED=1)"
+fi
+
 echo "Installed Altimate Code"
