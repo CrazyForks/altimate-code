@@ -117,7 +117,7 @@ minute of wall time.
 ## Telemetry
 
 When validators run (either mode), they emit one
-`validator_check` event per applied validator plus a session rollup:
+`validator_check` event per applied validator:
 
 ```json
 {
@@ -156,11 +156,12 @@ When a validator runs, it returns:
   fixHint?: string     // the body injected into the synthetic user turn
   details: {
     models_touched: number
-    checked: number
     dbt_root: string | null
     session_id: string
-    concurrency_limit: number
     elapsed_ms: number
+    // present only when at least one model was touched:
+    checked?: number
+    concurrency_limit?: number
     // validator-specific extras:
     // dbt-tests-pass:
     passed?: number

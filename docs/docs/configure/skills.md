@@ -62,10 +62,12 @@ description: ...
 ---
 ```
 
-At session start, after the standard `<available_skills>` listing, every matched
-skill body is appended to the system prompt under:
+At session start, every matched skill body is prepended to the system prompt
+(BEFORE the standard `<available_skills>` listing — placement matters: putting
+the auto-loaded block first frames the bodies as binding "rules of the road"
+rather than background reference) under:
 
-```
+```xml
 <auto_loaded_skill name="<skill-name>">
 ... full skill body ...
 </auto_loaded_skill>

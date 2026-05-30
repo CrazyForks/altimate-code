@@ -6,7 +6,7 @@ It deliberately does **not** ship the trace files, the per-trial result JSONs, t
 
 ## What's in this folder
 
-```
+```text
 benchmark/ade-bench/
 ├── README.md                              ← you are here
 ├── altimate_code_agent/                   ← drop-in agent module for ade-bench
