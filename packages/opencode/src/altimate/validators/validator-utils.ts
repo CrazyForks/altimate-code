@@ -43,6 +43,12 @@ export const VALIDATOR_TIMEOUT_MS =
  * Returns the directory that contains `dbt_project.yml`, or null if not
  * found. The returned path is the correct `cwd` for subprocess invocations.
  */
+// Subdirectories never considered candidates for a nested dbt project.
+// Mirrors `modelsModifiedSince`'s skip list so a fixture project shipped
+// inside `node_modules/foo/` or a compiled artifact in `target/` doesn't get
+// confused for the user's real project.
+const FIND_DBT_PROJECT_SKIP_DIRS = new Set(["node_modules", "target"])
+
 export async function findDbtProjectRoot(cwd: string): Promise<string | null> {
   try {
     const direct = join(cwd, "dbt_project.yml")
@@ -52,8 +58,11 @@ export async function findDbtProjectRoot(cwd: string): Promise<string | null> {
     )
     // Sort alphabetically so the choice is deterministic when multiple
     // subdirectories contain a dbt_project.yml. fs.readdir's order varies
-    // across filesystems / Node versions.
-    const sorted = entries.filter((e) => e.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))
+    // across filesystems / Node versions. Skip dependency / build dirs.
+    const sorted = entries
+      .filter((e) => e.isDirectory())
+      .filter((e) => !e.name.startsWith(".") && !FIND_DBT_PROJECT_SKIP_DIRS.has(e.name))
+      .sort((a, b) => a.name.localeCompare(b.name))
     for (const e of sorted) {
       const nested = join(cwd, e.name, "dbt_project.yml")
       if (await isProjectFile(nested)) return join(cwd, e.name)
@@ -104,9 +113,25 @@ export async function modelsModifiedSince(cwd: string, sinceMs: number): Promise
       )
         continue
       const full = join(dir, entry.name)
-      if (entry.isDirectory()) {
+      // Follow symlinks: a symlinked SQL file should be discoverable, and a
+      // symlinked directory under `models/` should be entered. Resolve the
+      // target with fs.stat (follows links) instead of relying on Dirent's
+      // entry.isFile()/isDirectory() which return false for symlinks.
+      let isDir = entry.isDirectory()
+      let isFile = entry.isFile()
+      if (entry.isSymbolicLink()) {
+        try {
+          const target = await fs.stat(full)
+          isDir = target.isDirectory()
+          isFile = target.isFile()
+        } catch {
+          // Broken symlink — skip without crashing.
+          continue
+        }
+      }
+      if (isDir) {
         await scan(full, depth + 1)
-      } else if (entry.isFile() && entry.name.toLowerCase().endsWith(".sql")) {
+      } else if (isFile && entry.name.toLowerCase().endsWith(".sql")) {
         try {
           const stat = await fs.stat(full)
           if (stat.mtimeMs >= sinceMs) {
@@ -134,10 +159,23 @@ export async function modelsModifiedSince(cwd: string, sinceMs: number): Promise
 /**
  * Extract the bare model name from a `.sql` file path.
  * `models/marts/foo.sql` -> `foo`
- * Uses path.basename for cross-platform correctness.
+ *
+ * Handles both POSIX (`/`) and Windows (`\\`) path separators so that the
+ * helper works on a Windows-style path even when running on POSIX. Strips
+ * any embedded NUL bytes so the returned name is safe to pass as a shell
+ * argument downstream.
  */
 export function modelNameFromPath(p: string): string {
-  return basename(p).replace(/\.sql$/i, "")
+  if (!p) return ""
+  // Normalise Windows separators to POSIX so basename behaves identically
+  // regardless of host. This is safe because dbt model paths never contain
+  // a literal `\\` as part of the name.
+  const normalised = p.replace(/\\/g, "/")
+  const base = basename(normalised)
+  // Strip the `.sql` extension and any embedded NUL bytes (so the returned
+  // value is safe to pass as a shell argument downstream).
+  // eslint-disable-next-line no-control-regex
+  return base.replace(/\.sql$/i, "").replace(/\x00/g, "")
 }
 
 // ---------------------------------------------------------------------------
@@ -158,11 +196,20 @@ export async function runWithConcurrencyLimit<In, Out>(
 ): Promise<Out[]> {
   const results: Out[] = new Array(items.length)
   if (items.length === 0) return results
-  // Clamp limit to a sensible positive integer. NaN, 0, negatives, and
-  // fractional values < 1 would otherwise produce zero workers and silently
-  // drop every item (sparse `undefined` results). Floor floats and cap at
-  // items.length so we never spawn more workers than there is work to do.
-  const effective = Number.isFinite(limit) && limit >= 1 ? Math.min(Math.floor(limit), items.length) : 1
+  // Determine effective worker count:
+  //   - Infinity → treat as "unbounded" = items.length (full parallel).
+  //   - NaN, 0, negatives, fractional < 1 → fall back to 1 (serial) so we
+  //     never silently drop work via Array.from({length: 0}).
+  //   - Floor positive floats and cap at items.length so we never spawn
+  //     more workers than there is work to do.
+  let effective: number
+  if (limit === Infinity) {
+    effective = items.length
+  } else if (Number.isFinite(limit) && limit >= 1) {
+    effective = Math.min(Math.floor(limit), items.length)
+  } else {
+    effective = 1
+  }
   let next = 0
   async function worker(): Promise<void> {
     while (next < items.length) {

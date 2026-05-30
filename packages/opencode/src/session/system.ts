@@ -126,9 +126,30 @@ export namespace SystemPrompt {
   // altimate_change start — helpers for auto-load skill selection
   const autoLoadLog = Log.create({ service: "system-prompt-autoload" })
 
-  /** Escape special characters so a skill name is safe inside an XML attribute. */
+  /**
+   * Escape special characters so a skill name is safe inside an XML attribute.
+   *
+   * Beyond the four standard XML metacharacters (`&`, `"`, `<`, `>`), this
+   * also handles:
+   *   - Control characters disallowed by XML 1.0 (anything < 0x20 except
+   *     TAB/LF/CR is stripped to avoid invalid XML).
+   *   - Newline (LF), carriage return (CR), TAB encoded as their numeric
+   *     character refs so the attribute value renders on a single line in
+   *     downstream log readers / grep / awk.
+   */
   function escapeXmlAttr(s: string): string {
-    return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    return s
+      .replace(/&/g, "&amp;")
+      .replace(/"/g, "&quot;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\n/g, "&#10;")
+      .replace(/\r/g, "&#13;")
+      .replace(/\t/g, "&#9;")
+      // XML 1.0 forbids most control characters in any value; strip them
+      // entirely. The kept-as-entity TAB/LF/CR cases above are already handled.
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "")
   }
 
   async function collectAutoLoadedSkills(list: Skill.Info[]): Promise<Skill.Info[]> {

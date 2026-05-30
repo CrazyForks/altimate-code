@@ -61,29 +61,66 @@ interface TestRunOutput {
  * Returns null if no summary line is found (e.g. dbt itself errored before
  * running tests, or the output was clipped).
  */
+// Valid dbt test identifier: letters/digits/underscore/dot/colon. Excludes
+// brackets, parens, quotes, URL schemes, commas. Used to filter regex captures
+// so we don't record `Done.`, `[FAIL]`, parenthesised reasons, or quoted noise
+// as "failing tests".
+const VALID_TEST_NAME_RE = /^[A-Za-z0-9_][A-Za-z0-9_./:-]*$/
+
+// Anchored summary regex: requires `Done.` at the start of a line (after
+// optional timestamp/ANSI prefix), prevents mid-word matches like `Predone.`
+// or `Done.` inside a paragraph. WARN, SKIP, NO-OP are all optional so the
+// parser tolerates future field reorderings or omissions; PASS/ERROR/TOTAL
+// are the only required fields. Always scans for the LAST summary so retries
+// produce the latest authoritative numbers.
+const SUMMARY_RE =
+  /(?:^|\n)[^\n]*?\bDone\.\s+(?=[^\n]*\bPASS=)(?=[^\n]*\bERROR=)(?=[^\n]*\bTOTAL=)[^\n]*?\bPASS=(?<pass>\d+)\b[^\n]*?\bERROR=(?<err>\d+)\b[^\n]*?\bTOTAL=(?<total>\d+)/gi
+
 export function parseDbtTestOutput(stdout: string): TestSummary | null {
   if (!stdout) return null
-  const summaryMatch = stdout.match(
-    /Done\.\s+PASS=(?<pass>\d+)\s+WARN=(?<warn>\d+)\s+ERROR=(?<err>\d+)\s+SKIP=(?<skip>\d+)(?:\s+NO-OP=\d+)?\s+TOTAL=(?<total>\d+)/i,
-  )
-  if (!summaryMatch) return null
-  const pass = parseInt(summaryMatch.groups?.pass ?? "0", 10)
-  const error = parseInt(summaryMatch.groups?.err ?? "0", 10)
-  const total = parseInt(summaryMatch.groups?.total ?? "0", 10)
-  // Pull individual FAIL/ERROR test names. dbt formats lines like:
-  //   17:04:14  3 of 7 FAIL 5 unique_my_model_id [FAIL 5 in 0.05s]
-  //   17:04:14  4 of 7 ERROR not_null_my_model_id [ERROR in 0.05s]
-  // The test name follows the optional failure count.
-  const failingTests: string[] = []
-  const lineRe = /\d+\s+of\s+\d+\s+(?:FAIL|ERROR)(?:\s+\d+)?\s+(\S+)/g
+  // Strip ANSI escape sequences so colour codes don't break field matching or
+  // pollute captured test names.
+  const cleaned = stripAnsi(stdout)
+  // Use the global flag and keep the LAST match (retries / multi-summary outputs).
+  let lastMatch: RegExpExecArray | null = null
   let m: RegExpExecArray | null
-  while ((m = lineRe.exec(stdout)) !== null) {
-    const name = m[1]
-    if (name && name !== "[FAIL" && name !== "[ERROR" && !failingTests.includes(name)) {
-      failingTests.push(name)
-    }
+  SUMMARY_RE.lastIndex = 0
+  while ((m = SUMMARY_RE.exec(cleaned)) !== null) lastMatch = m
+  if (!lastMatch) return null
+  // Clamp very large counts so callers don't accidentally rely on imprecise
+  // floats. dbt run counts rarely exceed millions; cap at MAX_SAFE_INTEGER.
+  const safeParse = (s: string): number => {
+    const n = Number(s)
+    if (!Number.isSafeInteger(n)) return Number.MAX_SAFE_INTEGER
+    return n
+  }
+  const pass = safeParse(lastMatch.groups?.pass ?? "0")
+  const error = safeParse(lastMatch.groups?.err ?? "0")
+  const total = safeParse(lastMatch.groups?.total ?? "0")
+  // Pull individual FAIL/ERROR test names. Uses a character class for the
+  // captured name so the match terminates at the first non-identifier
+  // character (`[`, `(`, etc.) — avoids over-capturing trailing log noise.
+  const failingTests: string[] = []
+  // Pattern: `\b<count> of <total> (FAIL|ERROR) [count?] <name>`. The leading
+  // `\b` blocks mid-word matches. The character class bounds the test name.
+  const lineRe = /\b\d+\s+of\s+\d+\s+(?:FAIL|ERROR)\b(?:\s+\d+)?[ \t]+([A-Za-z0-9_./:-]+)/g
+  let lm: RegExpExecArray | null
+  while ((lm = lineRe.exec(cleaned)) !== null) {
+    const name = lm[1]
+    if (!name) continue
+    // Reject names that look like URLs (e.g. error URLs in failure messages).
+    if (name.includes("://")) continue
+    if (!VALID_TEST_NAME_RE.test(name)) continue
+    if (!failingTests.includes(name)) failingTests.push(name)
   }
   return { total, pass, error, failingTests }
+}
+
+/** Strip ANSI CSI/colour escape sequences from a string. */
+function stripAnsi(s: string): string {
+  // Matches CSI sequences (most common: \x1b[...m for colours).
+  // eslint-disable-next-line no-control-regex
+  return s.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "")
 }
 
 /**
