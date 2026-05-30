@@ -151,6 +151,28 @@ export namespace ProviderTransform {
       return result
     }
 
+    // altimate_change start — upstream_fix: ensure deepseek assistant messages always have a reasoning part
+    // Ported from upstream-opencode commit 86715fecc4 (#24180). DeepSeek's OpenAI-compatible
+    // protocol requires every assistant message to carry a `reasoning` part — without it the API
+    // returns 400 on multi-turn sessions. Drop this marker if upstream merges the same shape.
+    if (model.api.id.includes("deepseek")) {
+      msgs = msgs.map((msg) => {
+        if (msg.role !== "assistant") return msg
+        if (Array.isArray(msg.content)) {
+          if (msg.content.some((part: any) => part.type === "reasoning")) return msg
+          return { ...msg, content: [...msg.content, { type: "reasoning", text: "" } as any] }
+        }
+        return {
+          ...msg,
+          content: [
+            ...(msg.content ? [{ type: "text" as const, text: msg.content as unknown as string }] : []),
+            { type: "reasoning" as const, text: "" } as any,
+          ] as any,
+        }
+      })
+    }
+    // altimate_change end
+
     if (typeof model.capabilities.interleaved === "object" && model.capabilities.interleaved.field) {
       const field = model.capabilities.interleaved.field
       return msgs.map((msg) => {
@@ -161,25 +183,23 @@ export namespace ProviderTransform {
           // Filter out reasoning parts from content
           const filteredContent = msg.content.filter((part: any) => part.type !== "reasoning")
 
-          // Include reasoning_content | reasoning_details directly on the message for all assistant messages
-          if (reasoningText) {
-            return {
-              ...msg,
-              content: filteredContent,
-              providerOptions: {
-                ...msg.providerOptions,
-                openaiCompatible: {
-                  ...(msg.providerOptions as any)?.openaiCompatible,
-                  [field]: reasoningText,
-                },
-              },
-            }
-          }
-
+          // altimate_change start — upstream_fix: always set the interleaved reasoning field
+          // even when empty. Ported from upstream-opencode commit 923af96d26 (#24146). DeepSeek
+          // V4 thinking mode may emit empty reasoning_content; the field must still be present
+          // on subsequent requests or the API rejects the message. Drop this marker if upstream
+          // ships the same shape.
           return {
             ...msg,
             content: filteredContent,
+            providerOptions: {
+              ...msg.providerOptions,
+              openaiCompatible: {
+                ...(msg.providerOptions as any)?.openaiCompatible,
+                [field]: reasoningText,
+              },
+            },
           }
+          // altimate_change end
         }
 
         return msg
@@ -283,8 +303,10 @@ export namespace ProviderTransform {
     msgs = normalizeMessages(msgs, model, options)
     if (
       (model.providerID === "anthropic" ||
+        // altimate_change start — altimate-specific Anthropic provider IDs
         model.providerID === "google-vertex-anthropic" ||
         model.providerID === "altimate-backend" ||
+        // altimate_change end
         model.api.id.includes("anthropic") ||
         model.api.id.includes("claude") ||
         model.id.includes("anthropic") ||
@@ -503,7 +525,17 @@ export namespace ProviderTransform {
       case "venice-ai-sdk-provider":
       // https://docs.venice.ai/overview/guides/reasoning-models#reasoning-effort
       case "@ai-sdk/openai-compatible":
-        return Object.fromEntries(WIDELY_SUPPORTED_EFFORTS.map((effort) => [effort, { reasoningEffort: effort }]))
+        // altimate_change start — upstream_fix: add "max" reasoning effort for deepseek-v4
+        // Ported from upstream-opencode commit f8e939d96f (#24163). DeepSeek-v4 advertises a
+        // `max` reasoning effort that the default WIDELY_SUPPORTED_EFFORTS list omits. Drop
+        // this marker if upstream lifts the cap or ships the same shape.
+        return Object.fromEntries(
+          [
+            ...WIDELY_SUPPORTED_EFFORTS,
+            ...(model.api.id.includes("deepseek-v4") ? ["max"] : []),
+          ].map((effort) => [effort, { reasoningEffort: effort }]),
+        )
+        // altimate_change end
 
       case "@ai-sdk/azure":
         // https://v5.ai-sdk.dev/providers/ai-sdk-providers/azure
