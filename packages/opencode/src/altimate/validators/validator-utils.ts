@@ -46,18 +46,31 @@ export const VALIDATOR_TIMEOUT_MS =
 export async function findDbtProjectRoot(cwd: string): Promise<string | null> {
   try {
     const direct = join(cwd, "dbt_project.yml")
-    if (await fs.stat(direct).then(() => true, () => false)) return cwd
+    if (await isProjectFile(direct)) return cwd
     const entries = await fs.readdir(cwd, { withFileTypes: true }).catch(
       () => [] as import("fs").Dirent[],
     )
-    for (const e of entries) {
-      if (!e.isDirectory()) continue
+    // Sort alphabetically so the choice is deterministic when multiple
+    // subdirectories contain a dbt_project.yml. fs.readdir's order varies
+    // across filesystems / Node versions.
+    const sorted = entries.filter((e) => e.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))
+    for (const e of sorted) {
       const nested = join(cwd, e.name, "dbt_project.yml")
-      if (await fs.stat(nested).then(() => true, () => false)) return join(cwd, e.name)
+      if (await isProjectFile(nested)) return join(cwd, e.name)
     }
     return null
   } catch {
     return null
+  }
+}
+
+/** True only if `path` is an existing *file* (not a directory). */
+async function isProjectFile(path: string): Promise<boolean> {
+  try {
+    const stat = await fs.stat(path)
+    return stat.isFile()
+  } catch {
+    return false
   }
 }
 
@@ -67,13 +80,16 @@ export async function findDbtProjectRoot(cwd: string): Promise<string | null> {
 
 /**
  * Find dbt model `.sql` files under `cwd` that were modified since `sinceMs`.
- * Scans up to 4 directory levels deep; skips hidden dirs, node_modules, target.
- * Only returns files under a `models/` ancestor directory (dbt convention).
+ * Scans up to 8 directory levels deep (deep enough for typical dbt layouts
+ * like `models/staging/sources/dl/raw/...`); skips hidden dirs, node_modules,
+ * target. Only returns files under a `models/` ancestor (case-insensitive,
+ * to tolerate case-insensitive volumes on macOS APFS / Windows NTFS).
  */
+const MODELS_MAX_DEPTH = 8
 export async function modelsModifiedSince(cwd: string, sinceMs: number): Promise<string[]> {
   const found: string[] = []
   async function scan(dir: string, depth: number): Promise<void> {
-    if (depth > 4) return
+    if (depth > MODELS_MAX_DEPTH) return
     let entries: import("fs").Dirent[]
     try {
       entries = await fs.readdir(dir, { withFileTypes: true })
@@ -94,8 +110,10 @@ export async function modelsModifiedSince(cwd: string, sinceMs: number): Promise
         try {
           const stat = await fs.stat(full)
           if (stat.mtimeMs >= sinceMs) {
-            // dbt models live under a `models/` ancestor (platform-safe split).
-            if (full.split(sep).includes("models")) {
+            // dbt models live under a `models/` ancestor. Case-insensitive
+            // comparison so `Models/` or `MODELS/` on case-insensitive volumes
+            // are accepted.
+            if (full.split(sep).some((p) => p.toLowerCase() === "models")) {
               found.push(full)
             }
           }
@@ -139,6 +157,12 @@ export async function runWithConcurrencyLimit<In, Out>(
   limit: number,
 ): Promise<Out[]> {
   const results: Out[] = new Array(items.length)
+  if (items.length === 0) return results
+  // Clamp limit to a sensible positive integer. NaN, 0, negatives, and
+  // fractional values < 1 would otherwise produce zero workers and silently
+  // drop every item (sparse `undefined` results). Floor floats and cap at
+  // items.length so we never spawn more workers than there is work to do.
+  const effective = Number.isFinite(limit) && limit >= 1 ? Math.min(Math.floor(limit), items.length) : 1
   let next = 0
   async function worker(): Promise<void> {
     while (next < items.length) {
@@ -146,7 +170,7 @@ export async function runWithConcurrencyLimit<In, Out>(
       results[i] = await fn(items[i]!)
     }
   }
-  const workers = Array.from({ length: Math.min(limit, items.length) }, worker)
+  const workers = Array.from({ length: effective }, worker)
   await Promise.all(workers)
   return results
 }
@@ -235,15 +259,23 @@ export function extractLastJsonObject(stdout: string): Record<string, unknown> |
 /**
  * Guard: returns true only for objects that look like altimate-dbt output
  * envelopes. Rejects stray JSON fragments that happen to be valid JSON.
+ *
+ * Requires at least one envelope key to have a *defined, non-null* value.
+ * `{"verdict": null}` is not a real envelope — it's a stray fragment with
+ * the right shape. (We do allow `error: null` because the historical
+ * test contract treats a present-but-null error as "no error".)
  */
 function isValidEnvelope(obj: Record<string, unknown>): boolean {
+  if (typeof obj !== "object" || obj === null) return false
+  const meaningful = (k: string) => k in obj && obj[k] !== undefined && obj[k] !== null
+  // `error: null` is intentionally allowed (sentinel for "ran cleanly").
   return (
-    "verdict" in obj ||
+    meaningful("verdict") ||
     "error" in obj ||
-    "model" in obj ||
-    "stdout" in obj ||
-    "columns_extra" in obj ||
-    "columns_missing" in obj
+    meaningful("model") ||
+    meaningful("stdout") ||
+    meaningful("columns_extra") ||
+    meaningful("columns_missing")
   )
 }
 // altimate_change end

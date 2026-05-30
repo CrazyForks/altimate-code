@@ -410,14 +410,12 @@ describe("findDbtProjectRoot", () => {
     expect(await findDbtProjectRoot(tmpDir)).toBeNull()
   })
 
-  test("handles dbt_project.yml being a directory (documents stat behavior)", async () => {
-    // If dbt_project.yml is a directory, stat() still returns true.
-    // The function returns cwd since stat succeeds — dbt would fail later,
-    // not our validator's concern.
+  test("rejects dbt_project.yml when it is a directory, not a file", async () => {
+    // A directory named dbt_project.yml is not a valid dbt project marker.
+    // The function should return null rather than mistake it for one.
     await fs.mkdir(join(tmpDir, "dbt_project.yml"))
     const result = await findDbtProjectRoot(tmpDir)
-    // Documents: returns cwd because stat() succeeds for dirs too
-    expect(result).toBe(tmpDir)
+    expect(result).toBeNull()
   })
 
   test("handles directory with many subdirs — returns first dbt project found", async () => {
@@ -541,12 +539,22 @@ describe("modelsModifiedSince", () => {
     expect(result[0]).toContain("deep.sql")
   })
 
-  test("depth boundary: file at depth 5 is EXCLUDED", async () => {
-    // tmpDir/a/b/c/d/e = depth 5; scan stops at depth > 4
-    const tooDeep = join(tmpDir, "a", "b", "c", "d", "models")
-    await fs.mkdir(tooDeep, { recursive: true })
-    await fs.writeFile(join(tooDeep, "too_deep.sql"), "SELECT 1")
-    expect(await modelsModifiedSince(tmpDir, FAR_PAST_MS)).toEqual([])
+  test("depth boundary: file at depth 8 is INCLUDED, depth 9 is EXCLUDED", async () => {
+    // The scan now goes 8 levels deep (was 4). Real dbt layouts like
+    // models/staging/sources/dl/raw/foo.sql need this. Confirm:
+    //   tmpDir/a/b/c/d/e/f/models/in.sql  (depth 8 — included)
+    //   tmpDir/a/b/c/d/e/f/g/h/models/out.sql (depth 10 — excluded; > 8)
+    const includedDir = join(tmpDir, "a", "b", "c", "d", "e", "f", "models")
+    await fs.mkdir(includedDir, { recursive: true })
+    await fs.writeFile(join(includedDir, "in.sql"), "SELECT 1")
+
+    const excludedDir = join(tmpDir, "a", "b", "c", "d", "e", "f", "g", "h", "models")
+    await fs.mkdir(excludedDir, { recursive: true })
+    await fs.writeFile(join(excludedDir, "out.sql"), "SELECT 1")
+
+    const result = await modelsModifiedSince(tmpDir, FAR_PAST_MS)
+    expect(result.some((p) => p.endsWith("in.sql"))).toBe(true)
+    expect(result.some((p) => p.endsWith("out.sql"))).toBe(false)
   })
 
   test("handles non-existent cwd gracefully", async () => {
