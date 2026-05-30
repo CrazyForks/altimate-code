@@ -1080,9 +1080,17 @@ export namespace SessionPrompt {
       //
       // Feature flag: ALTIMATE_VALIDATORS_ENABLED=1 opts in. Default OFF so
       // existing sessions are unaffected until validators are vetted in
-      // production. Telemetry fires regardless of opt-in so we can see how
-      // often validators *would* have fired against historical traffic.
+      // production.
+      //
+      // ALTIMATE_VALIDATORS_SHADOW=1 runs validators WITHOUT enforcement so
+      // telemetry can measure "would have fired" rates against historical
+      // traffic, but no subprocess spawns or synthetic-message retries happen
+      // unless this is also set. By default, NEITHER flag is set so
+      // non-opting-in sessions skip the entire dispatch path (no fs scan,
+      // no subprocess spawn, no perf tax).
       const validatorsEnabled = process.env.ALTIMATE_VALIDATORS_ENABLED === "1"
+      const validatorsShadow = process.env.ALTIMATE_VALIDATORS_SHADOW === "1"
+      const validatorsActive = validatorsEnabled || validatorsShadow
       const maxValidatorRetries = Number(process.env.ALTIMATE_VALIDATORS_MAX_RETRIES ?? "3")
       const validatorsDebug = process.env.ALTIMATE_VALIDATORS_DEBUG === "1"
       const validatorCount = ValidatorRegistry.list().length
@@ -1107,6 +1115,7 @@ export namespace SessionPrompt {
         console.error("[altimate-validators] " + JSON.stringify(diag))
       }
       if (
+        validatorsActive &&
         result !== "stop" &&
         result !== "compact" &&
         processor.message.finish === "stop" &&

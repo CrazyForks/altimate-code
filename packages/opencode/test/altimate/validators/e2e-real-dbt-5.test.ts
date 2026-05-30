@@ -104,7 +104,7 @@ models:
     expect((r.details as any)?.per_model).toBeDefined()
   }, E2E_TIMEOUT)
 
-  test.skip("BUG: validator surfaces the failing model name in the reason", async () => {
+  test("validator surfaces the failing model name in the reason", async () => {
     if (!ENABLE_E2E) return
     await setupProject()
     await writeModel("foo", "select 1 as id, 'a' as extra")
@@ -121,7 +121,7 @@ models:
     expect(r.reason ?? "").toContain("foo")
   }, E2E_TIMEOUT)
 
-  test.skip("BUG: validator result includes elapsed_ms field", async () => {
+  test("validator result includes elapsed_ms field", async () => {
     if (!ENABLE_E2E) return
     await setupProject()
     await writeModel("foo", "select 1 as id")
@@ -202,7 +202,7 @@ models:
     expect(r.reason ?? "").toMatch(/dbt/i)
   }, E2E_TIMEOUT)
 
-  test.skip("BUG: validator includes dbt_root in details (not just cwd)", async () => {
+  test("validator includes dbt_root in details (not just cwd)", async () => {
     if (!ENABLE_E2E) return
     await setupProject()
     await writeModel("foo", "select 1 as id")

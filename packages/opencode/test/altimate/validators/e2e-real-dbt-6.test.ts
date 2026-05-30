@@ -84,7 +84,7 @@ describe("E2E wave 6: even more strict assertions", () => {
     if (dir) await teardown()
   })
 
-  test.skip("BUG: validator includes session_id in details for tracing", async () => {
+  test("validator includes session_id in details for tracing", async () => {
     if (!ENABLE_E2E) return
     await setupProject()
     await writeModel("foo", "select 1 as id")
@@ -151,7 +151,7 @@ models:
     expect((r.details as any)?.total_models_in_project).toBeGreaterThanOrEqual(2)
   }, E2E_TIMEOUT)
 
-  test.skip("BUG: validator includes worker count (concurrency limit) in details", async () => {
+  test("validator includes worker count (concurrency limit) in details", async () => {
     if (!ENABLE_E2E) return
     await setupProject()
     await writeModel("foo", "select 1 as id")

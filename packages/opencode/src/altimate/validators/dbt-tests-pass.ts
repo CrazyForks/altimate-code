@@ -214,12 +214,30 @@ export const DbtTestsPassValidator: Validator = {
   },
 
   async check(ctx: ValidatorContext): Promise<ValidatorResult> {
+    const startedAt = Date.now()
     const dbtRoot = await findDbtProjectRoot(ctx.workingDirectory)
-    if (!dbtRoot) return { ok: true, details: { models_touched: 0 } }
+    if (!dbtRoot)
+      return {
+        ok: true,
+        details: {
+          models_touched: 0,
+          dbt_root: null,
+          session_id: ctx.sessionID,
+          elapsed_ms: Date.now() - startedAt,
+        },
+      }
 
     const touched = await modelsModifiedSince(dbtRoot, ctx.sessionStartMs)
     if (touched.length === 0) {
-      return { ok: true, details: { models_touched: 0 } }
+      return {
+        ok: true,
+        details: {
+          models_touched: 0,
+          dbt_root: dbtRoot,
+          session_id: ctx.sessionID,
+          elapsed_ms: Date.now() - startedAt,
+        },
+      }
     }
 
     // Run model tests with a bounded concurrency limit to prevent resource
@@ -242,12 +260,20 @@ export const DbtTestsPassValidator: Validator = {
     // A model with no tests at all isn't a failure — it's just nothing to verify.
     const noTests = results.filter((r) => r.summary && r.summary.total === 0)
 
+    const baseDetails = {
+      models_touched: touched.length,
+      checked: results.length,
+      dbt_root: dbtRoot,
+      session_id: ctx.sessionID,
+      concurrency_limit: VALIDATOR_CONCURRENCY,
+      elapsed_ms: Date.now() - startedAt,
+    }
+
     if (failures.length === 0 && errored.length === 0) {
       return {
         ok: true,
         details: {
-          models_touched: touched.length,
-          checked: results.length,
+          ...baseDetails,
           passed: passed.length,
           no_tests: noTests.length,
           spawn_failures: spawnFailures,
@@ -256,24 +282,26 @@ export const DbtTestsPassValidator: Validator = {
     }
 
     const hintBlocks: TestRunOutput[] = [...failures, ...errored]
+    const failingNames = failures.map((f) => f.model).filter(Boolean)
+    const erroredNames = errored.map((f) => f.model).filter(Boolean)
+    const reason =
+      failures.length > 0
+        ? `${failures.length} of ${results.length} models you edited have failing dbt tests${failingNames.length ? `: ${failingNames.join(", ")}` : ""}.`
+        : `${errored.length} of ${results.length} models could not be tested${erroredNames.length ? `: ${erroredNames.join(", ")}` : ""}. Investigate before declaring done.`
     return {
       ok: false,
-      reason:
-        failures.length > 0
-          ? `${failures.length} of ${results.length} models you edited have failing dbt tests.`
-          : `${errored.length} of ${results.length} models could not be tested. Investigate before declaring done.`,
+      reason,
       fixHint:
         formatFixHint(hintBlocks) +
         `\n\nFix the model SQL (not the tests). Common causes: wrong JOIN type (LEFT vs INNER changing row counts), missing GROUP BY columns, dropped/added rows from filters, type coercion mismatch on join keys. Rebuild and the harness will re-check before declaring done.`,
       details: {
-        models_touched: touched.length,
-        checked: results.length,
+        ...baseDetails,
         passed: passed.length,
         failed: failures.length,
         errored: errored.length,
         spawn_failures: spawnFailures,
-        failing_models: failures.map((f) => f.model),
-        errored_models: errored.map((f) => f.model),
+        failing_models: failingNames,
+        errored_models: erroredNames,
       },
     }
   },

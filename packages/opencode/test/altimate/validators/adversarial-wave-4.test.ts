@@ -97,7 +97,8 @@ describe("BUG: DbtTestsPassValidator.check with no touched models", () => {
     ctx.sessionStartMs = Date.now() + 10_000 // future
     const r = await DbtTestsPassValidator.check(ctx)
     expect(r.ok).toBe(true)
-    expect(r.details).toEqual({ models_touched: 0 })
+    expect(r.details?.models_touched).toBe(0)
+    expect(r.details?.dbt_root).toBe(dir)
     await fs.rm(dir, { recursive: true, force: true })
   })
 
@@ -118,7 +119,8 @@ describe("BUG: DbtSchemaVerifyValidator.check with no touched models", () => {
     ctx.sessionStartMs = Date.now() + 10_000
     const r = await DbtSchemaVerifyValidator.check(ctx)
     expect(r.ok).toBe(true)
-    expect(r.details).toEqual({ models_touched: 0 })
+    expect(r.details?.models_touched).toBe(0)
+    expect(r.details?.dbt_root).toBe(dir)
     await fs.rm(dir, { recursive: true, force: true })
   })
 })

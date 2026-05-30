@@ -149,13 +149,31 @@ export const DbtSchemaVerifyValidator: Validator = {
   },
 
   async check(ctx: ValidatorContext): Promise<ValidatorResult> {
+    const startedAt = Date.now()
     const dbtRoot = await findDbtProjectRoot(ctx.workingDirectory)
-    if (!dbtRoot) return { ok: true, details: { models_touched: 0 } }
+    if (!dbtRoot)
+      return {
+        ok: true,
+        details: {
+          models_touched: 0,
+          dbt_root: null,
+          session_id: ctx.sessionID,
+          elapsed_ms: Date.now() - startedAt,
+        },
+      }
 
     const touched = await modelsModifiedSince(dbtRoot, ctx.sessionStartMs)
     if (touched.length === 0) {
       // No models touched — nothing to verify.
-      return { ok: true, details: { models_touched: 0 } }
+      return {
+        ok: true,
+        details: {
+          models_touched: 0,
+          dbt_root: dbtRoot,
+          session_id: ctx.sessionID,
+          elapsed_ms: Date.now() - startedAt,
+        },
+      }
     }
 
     // Run schema-verify calls with a bounded concurrency limit to prevent
@@ -185,26 +203,30 @@ export const DbtSchemaVerifyValidator: Validator = {
     const matches = results.filter((r) => r.verdict === "match").length
     const errored = results.filter((r) => r.error).length
 
+    const baseDetails = {
+      models_touched: touched.length,
+      verified: results.length,
+      match: matches,
+      no_spec: noSpec,
+      errored,
+      spawn_failures: spawnFailures,
+      dbt_root: dbtRoot,
+      session_id: ctx.sessionID,
+      concurrency_limit: VALIDATOR_CONCURRENCY,
+      elapsed_ms: Date.now() - startedAt,
+    }
+
     // Fail closed: return ok only when every model was verified and none mismatched.
     // Errors (spawn failures, schema-verify tool errors) prevent a clean pass because
     // we cannot rule out drift on models we failed to inspect.
     if (mismatches.length === 0 && errored === 0) {
-      return {
-        ok: true,
-        details: {
-          models_touched: touched.length,
-          verified: results.length,
-          match: matches,
-          no_spec: noSpec,
-          errored,
-          spawn_failures: spawnFailures,
-        },
-      }
+      return { ok: true, details: baseDetails }
     }
 
+    const mismatchNames = mismatches.map((m) => m.model).filter(Boolean) as string[]
     const reason =
       mismatches.length > 0
-        ? `${mismatches.length} of ${results.length} models you edited have a column-shape mismatch against schema.yml. The build may be green, but equality tests will fail.`
+        ? `${mismatches.length} of ${results.length} models you edited have a column-shape mismatch against schema.yml${mismatchNames.length ? `: ${mismatchNames.join(", ")}` : ""}. The build may be green, but equality tests will fail.`
         : `${errored} model(s) could not be schema-verified (spawn or tool errors) — schema drift cannot be ruled out. Investigate before declaring done.`
 
     return {
@@ -216,14 +238,9 @@ export const DbtSchemaVerifyValidator: Validator = {
             `\n\nFix the model SQL to match the schema.yml spec (do not edit the spec), rebuild, and the harness will re-check before declaring done.`
           : `Run \`altimate-dbt schema-verify <model>\` manually to diagnose the error. Check that altimate-dbt is on PATH and that the dbt project compiles cleanly.`,
       details: {
-        models_touched: touched.length,
-        verified: results.length,
-        match: matches,
+        ...baseDetails,
         mismatch: mismatches.length,
-        no_spec: noSpec,
-        errored,
-        spawn_failures: spawnFailures,
-        mismatch_models: mismatches.map((m) => m.model).filter(Boolean),
+        mismatch_models: mismatchNames,
       },
     }
   },
