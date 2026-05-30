@@ -39,7 +39,17 @@ const Exclusions = z.object({
 export const Rubric = z.object({
   version: z.string().default("1"),
   /** Categories where a `critical` finding forces REQUEST_CHANGES. */
-  blockOn: z.array(z.string()).default(["lineage_breakage", "contract_violation", "pii_exposure", "semantic_change"]),
+  blockOn: z
+    .array(z.string())
+    .default([
+      "lineage_breakage",
+      "contract_violation",
+      "pii_exposure",
+      "semantic_change",
+      "join_risk",
+      "fanout",
+      "sql_correctness",
+    ]),
   /** >= this many `warning` findings is treated as a risk pattern → block. */
   warningPatternThreshold: z.number().int().positive().default(3),
   thresholds: Thresholds.default(Thresholds.parse({})),

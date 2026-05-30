@@ -1,3 +1,4 @@
+import path from "node:path"
 import { loadReviewConfig, resolveRubric } from "./config"
 import type { Severity } from "./finding"
 import { collectChangedFiles, makeContentResolver, defaultBaseRef, manifestHash } from "./git"
@@ -45,8 +46,15 @@ export async function reviewPullRequest(opts: ReviewPullRequestOptions): Promise
   const changedFiles = opts.changedFiles ?? (await collectChangedFiles({ base, head: opts.head, cwd: opts.cwd }))
   const getContent = opts.getContent ?? makeContentResolver({ base, head: opts.head, cwd: opts.cwd })
 
-  const runner = createDispatcherRunner({ manifestPath: config.manifestPath })
-  const mhash = await manifestHash(config.manifestPath, opts.cwd)
+  // Resolve the manifest against the PROJECT being reviewed (cwd), not the
+  // binary's process.cwd() — otherwise a relative path silently misses when the
+  // CLI is invoked from elsewhere, degrading every review to lint-only.
+  const manifestAbs = path.isAbsolute(config.manifestPath)
+    ? config.manifestPath
+    : path.join(opts.cwd, config.manifestPath)
+
+  const runner = createDispatcherRunner({ manifestPath: manifestAbs })
+  const mhash = await manifestHash(manifestAbs, opts.cwd)
 
   return runReview({
     changedFiles,

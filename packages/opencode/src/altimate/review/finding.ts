@@ -46,6 +46,10 @@ export const ReviewCategory = z.enum([
   "sql_quality", // lint / readability / best-practice (graded A–F)
   "idempotency", // non-deterministic transformation (e.g. CURRENT_TIMESTAMP)
   "freshness", // source/schedule freshness regression
+  "join_risk", // LEFT→INNER collapse, cross join, missing/non-unique join key
+  "fanout", // one-to-many join before aggregation → inflated metrics
+  "dedup", // non-deterministic dedup / surrogate-key change
+  "sql_correctness", // NOT IN NULL, COUNT vs COUNT DISTINCT, NULL handling
 ])
 export type ReviewCategory = z.infer<typeof ReviewCategory>
 

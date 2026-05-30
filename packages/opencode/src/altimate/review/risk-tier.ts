@@ -132,8 +132,8 @@ export function classifyPR(files: ChangedFile[], opts: ClassifyOptions = {}): Ti
 
 /** Which reviewer lanes fire at each tier. */
 export const TIER_LANES: Record<RiskTier, string[]> = {
-  trivial: ["sql_quality"],
-  lite: ["sql_quality", "lineage_breakage", "semantic_change", "test_coverage"],
+  trivial: ["sql_quality", "dbt_patterns"],
+  lite: ["sql_quality", "lineage_breakage", "semantic_change", "test_coverage", "dbt_patterns"],
   full: [
     "sql_quality",
     "lineage_breakage",
@@ -144,5 +144,6 @@ export const TIER_LANES: Record<RiskTier, string[]> = {
     "warehouse_cost",
     "test_coverage",
     "idempotency",
+    "dbt_patterns",
   ],
 }

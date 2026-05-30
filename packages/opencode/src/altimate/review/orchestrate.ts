@@ -13,6 +13,7 @@ import { classifyPR, TIER_LANES } from "./risk-tier"
 import { type Rubric, exclusionReason, clampSeverity } from "./rubric"
 import { type ReviewConfig } from "./config"
 import { type ReviewMode, type VerdictEnvelope, buildEnvelope, signEnvelope } from "./verdict"
+import { detectModelPatterns, detectSchemaYmlPatterns } from "./dbt-patterns"
 
 /**
  * The deterministic review recipe.
@@ -362,7 +363,15 @@ export async function runReview(input: OrchestrateInput): Promise<VerdictEnvelop
       tasks.push(semanticChangeLane(ctx.file, input.runner, ctx.oldSql, ctx.newSql, dialect, ctx.impact, input.rubric))
     if (lanes.has("lineage_breakage")) all.push(lineageBreakageLane(ctx.file, ctx.impact, input.rubric))
     if (lanes.has("pii_exposure")) all.push(piiLane(ctx.file, ctx.pii))
+    // Deterministic dbt anti-pattern detectors (raw SQL + diff; no engine needed).
+    if (lanes.has("dbt_patterns")) all.push(detectModelPatterns(ctx.file, ctx.newSql, input.rubric))
     all.push(...(await Promise.all(tasks)))
+  }
+
+  // schema.yml-level detectors (test removal) — run on changed YAML files
+  // regardless of tier, since deleting a guardrail test is always worth flagging.
+  for (const file of reviewable) {
+    if (file.kind === "schema_yml") all.push(detectSchemaYmlPatterns(file, input.rubric))
   }
 
   // Flatten, drop excluded, dedupe, threshold-filter.
