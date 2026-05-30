@@ -1,0 +1,74 @@
+name: "altimate dbt PR review"
+description: "Cloudflare-style AI code review for dbt/SQL pull requests — a signed verdict backed by lineage, query equivalence, PII, and grade."
+branding:
+  icon: "git-pull-request"
+  color: "orange"
+
+inputs:
+  mode:
+    description: "comment (never blocks) | gate (blocks the merge on REQUEST_CHANGES)"
+    required: false
+    default: "comment"
+  manifest_path:
+    description: "Path to the compiled dbt manifest.json. Run `dbt compile` before this step for the full (non-degraded) verdict."
+    required: false
+    default: "target/manifest.json"
+  severity_threshold:
+    description: "Minimum severity to surface: critical | warning | suggestion"
+    required: false
+    default: "suggestion"
+  base:
+    description: "Base git ref to diff against. Defaults to the merge-base with origin/main."
+    required: false
+  head:
+    description: "Head git ref. Defaults to the checked-out PR head."
+    required: false
+  post:
+    description: "Post the verdict to the PR (summary comment + inline review)."
+    required: false
+    default: "true"
+  signing_key:
+    description: "Optional HMAC key to sign the verdict envelope (ALTIMATE_REVIEW_SIGNING_KEY)."
+    required: false
+
+runs:
+  using: "composite"
+  steps:
+    - name: Get altimate-code version
+      id: version
+      shell: bash
+      run: |
+        VERSION=$(curl -sf https://api.github.com/repos/AltimateAI/altimate-code/releases/latest | grep -o '"tag_name": *"[^"]*"' | cut -d'"' -f4)
+        echo "version=${VERSION:-latest}" >> $GITHUB_OUTPUT
+
+    - name: Cache altimate-code
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: ~/.altimate/bin
+        key: altimate-code-${{ runner.os }}-${{ runner.arch }}-${{ steps.version.outputs.version }}
+
+    - name: Install altimate-code
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: curl -fsSL https://www.altimate.sh/install | bash
+
+    - name: Add altimate-code to PATH
+      shell: bash
+      run: echo "$HOME/.altimate/bin" >> $GITHUB_PATH
+
+    - name: Run dbt PR review
+      shell: bash
+      run: |
+        altimate review \
+          --mode "${{ inputs.mode }}" \
+          --manifest "${{ inputs.manifest_path }}" \
+          --severity "${{ inputs.severity_threshold }}" \
+          ${{ inputs.base && format('--base {0}', inputs.base) || '' }} \
+          ${{ inputs.head && format('--head {0}', inputs.head) || '' }} \
+          ${{ inputs.post == 'true' && '--post' || '' }}
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        GITHUB_EVENT_PATH: ${{ github.event_path }}
+        ALTIMATE_REVIEW_SIGNING_KEY: ${{ inputs.signing_key }}

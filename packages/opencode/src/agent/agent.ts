@@ -17,6 +17,7 @@ import PROMPT_TITLE from "./prompt/title.txt"
 // altimate_change start - import custom agent mode prompts
 import PROMPT_BUILDER from "../altimate/prompts/builder.txt"
 import PROMPT_ANALYST from "../altimate/prompts/analyst.txt"
+import PROMPT_REVIEWER from "../altimate/prompts/reviewer.txt"
 // altimate_change end
 import { PermissionNext } from "@/permission/next"
 import { mergeDeep, pipe, sortBy, values } from "remeda"
@@ -235,6 +236,55 @@ export namespace Agent {
         mode: "primary",
         native: true,
       },
+      // altimate_change start — reviewer agent: dbt PR review verdict engine
+      reviewer: {
+        name: "reviewer",
+        description:
+          "Read-only dbt PR reviewer. Runs the dbt_pr_review verdict engine (lineage, equivalence, PII, grade) and posts findings. Cannot modify files or run destructive SQL.",
+        prompt: PROMPT_REVIEWER,
+        options: {},
+        permission: PermissionNext.merge(
+          defaults,
+          PermissionNext.fromConfig({
+            "*": "deny",
+            // The verdict engine + the read-only analysis tools it composes.
+            dbt_pr_review: "allow",
+            impact_analysis: "allow",
+            altimate_core_check: "allow",
+            altimate_core_grade: "allow",
+            altimate_core_equivalence: "allow",
+            altimate_core_column_lineage: "allow",
+            altimate_core_compare: "allow",
+            lineage_check: "allow",
+            sql_analyze: "allow",
+            sql_diff: "allow",
+            schema_detect_pii: "allow",
+            // Writes denied — review never mutates the project.
+            sql_execute_write: "deny",
+            // Read-only file + repo access.
+            read: "allow",
+            grep: "allow",
+            glob: "allow",
+            tool_lookup: "allow",
+            // Bash: read-only git/dbt inspection only (last-match-wins).
+            bash: {
+              "*": "deny",
+              "git diff *": "allow",
+              "git show *": "allow",
+              "git log *": "allow",
+              "git merge-base *": "allow",
+              "ls *": "allow",
+              "cat *": "allow",
+              "dbt ls *": "allow",
+              "dbt list *": "allow",
+            },
+          }),
+          userWithSafety,
+        ),
+        mode: "primary",
+        native: true,
+      },
+      // altimate_change end
       // altimate_change end
       plan: {
         name: "plan",

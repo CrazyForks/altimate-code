@@ -107,6 +107,7 @@ nav:
           - IDE: usage/ide.md
           - GitHub: usage/github.md
           - GitLab: usage/gitlab.md
+          - dbt PR Review: usage/dbt-pr-review.md
       - Guides:
           - Cost Optimization: data-engineering/guides/cost-optimization.md
           - Migration: data-engineering/guides/migration.md
