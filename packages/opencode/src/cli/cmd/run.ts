@@ -10,6 +10,12 @@ import { Filesystem } from "../../util/filesystem"
 import { createOpencodeClient, type Message, type OpencodeClient, type ToolPart } from "@opencode-ai/sdk/v2"
 import { Server } from "../../server/server"
 import { Provider } from "../../provider/provider"
+// altimate_change start — verifier-gated router (run cheap, verify, escalate)
+import { Router } from "../../router/router"
+import { Verifier } from "../../router/verifier"
+import { Verdict } from "../../router/verdict"
+import { Policy } from "../../router/policy"
+// altimate_change end
 import { Agent } from "../../agent/agent"
 import { PermissionNext } from "../../permission/next"
 import { Tool } from "../../tool/tool"
@@ -866,6 +872,67 @@ You are speaking to a non-technical business executive. Follow these rules stric
       }
     }
 
+    // altimate_change start — verifier-gated router orchestration
+    // Deterministic-verify the dbt workspace in cwd (`dbt build`, judged by Verifier).
+    // Only gates real dbt projects; with nothing to prove it returns ok (no escalation).
+    async function verifyWorkspace(): Promise<Verifier.Verdict> {
+      const root = process.cwd()
+      if (!(await Filesystem.exists(path.join(root, "dbt_project.yml"))))
+        return { ok: true, unverifiable: true, reason: "no dbt project to verify", checks: [] }
+      try {
+        const proc = Bun.spawn(["dbt", "build"], { cwd: root, stdout: "pipe", stderr: "pipe" })
+        // Hard timeout so a hung dbt (lock, prompt, runaway query) can't stall the run.
+        let timedOut = false
+        const timer = setTimeout(() => {
+          timedOut = true
+          proc.kill()
+        }, 300_000)
+        const out = (await new Response(proc.stdout).text()) + (await new Response(proc.stderr).text())
+        const code = await proc.exited
+        clearTimeout(timer)
+        if (timedOut) return { ok: false, reason: "dbt build timed out after 300s", checks: [] }
+        return Verifier.fromDbt(out, code)
+      } catch (e) {
+        // dbt binary missing / spawn failure → can't verify; mark unverifiable (fail-open, but honest).
+        return { ok: true, unverifiable: true, reason: `verify skipped: ${String(e)}`, checks: [] }
+      }
+    }
+
+    // Run the tier ladder: cheap → verify → escalate with failing-check context, stop at first pass.
+    // Each tier re-invokes the existing single-run path with that model (and the escalation note
+    // prepended) in the SAME workspace, so a later tier fixes the prior attempt rather than restarting.
+    async function runRouted(sdk: OpencodeClient) {
+      // Only route when the workspace is verifiable. Without a deterministic gate, routing
+      // would accept the cheapest tier with no way to verify or escalate — silently
+      // downgrading quality. In a non-dbt project, run once with the user's model instead.
+      if (!(await Filesystem.exists(path.join(process.cwd(), "dbt_project.yml")))) {
+        await execute(sdk)
+        return
+      }
+      const baseMessage = message
+      const policy = Policy.resolve()
+      const tiers = await policy.tiers({ prompt: baseMessage })
+      const result = await Router.route({
+        tiers,
+        runAgent: async (model, note) => {
+          args.model = model
+          message = note ? `${note}\n\n${baseMessage}` : baseMessage
+          await execute(sdk)
+        },
+        verify: verifyWorkspace,
+      })
+      message = baseMessage
+      const envelope = Verdict.build(result, { now: new Date().toISOString() })
+      if (args.format === "json") {
+        process.stdout.write(JSON.stringify({ type: "verdict", timestamp: Date.now(), ...envelope }) + EOL)
+      } else {
+        const tag = envelope.solved ? `✓ verified by ${envelope.solvedBy}` : "✗ unverified after all tiers"
+        UI.println(UI.Style.TEXT_INFO_BOLD + `~  router: ${tag} (policy: ${policy.source})`)
+      }
+      await Policy.reportOutcome(envelope)
+    }
+    // altimate_change end
+
     if (args.attach) {
       const headers = (() => {
         const password = args.password ?? process.env.OPENCODE_SERVER_PASSWORD
@@ -875,7 +942,9 @@ You are speaking to a non-technical business executive. Follow these rules stric
         return { Authorization: auth }
       })()
       const sdk = createOpencodeClient({ baseUrl: args.attach, directory, headers })
-      return await execute(sdk)
+      // altimate_change start — route when enabled, else single run
+      return Router.enabled() ? await runRouted(sdk) : await execute(sdk)
+      // altimate_change end
     }
 
     await bootstrap(process.cwd(), async () => {
@@ -884,7 +953,10 @@ You are speaking to a non-technical business executive. Follow these rules stric
         return Server.Default().fetch(request)
       }) as typeof globalThis.fetch
       const sdk = createOpencodeClient({ baseUrl: "http://altimate-code.internal", fetch: fetchFn })
-      await execute(sdk)
+      // altimate_change start — route when enabled, else single run
+      if (Router.enabled()) await runRouted(sdk)
+      else await execute(sdk)
+      // altimate_change end
     })
   },
 })
