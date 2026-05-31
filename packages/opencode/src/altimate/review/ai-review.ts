@@ -140,23 +140,34 @@ export async function runAiReview(input: AiReviewInput): Promise<Finding[]> {
 
     const out: Finding[] = []
     for (const item of parsed) {
-      const file = byFile.get(String(item?.file ?? ""))
-      if (!file || !item?.title || !item?.body) continue
-      out.push(
-        makeFinding({
-          severity: item.severity as Severity,
-          category: item.category as ReviewCategory,
-          title: `${file.model}: ${item.title}`,
-          body: String(item.body),
-          file: file.path,
-          model: file.model,
-          startLine: typeof item.line === "number" ? item.line : undefined,
-          endLine: typeof item.line === "number" ? item.line : undefined,
-          confidence: item.confidence === "high" ? "high" : item.confidence === "low" ? "low" : "medium",
-          evidence: { tool: "ai-review", result: { confidence: item.confidence } },
-          ruleKey: `ai:${item.category}:${String(item.title).slice(0, 60)}`,
-        }),
-      )
+      // Per-item guard: a single malformed finding (e.g. an out-of-enum severity that
+      // makes makeFinding's schema throw) must NOT discard the whole batch.
+      try {
+        const file = byFile.get(String(item?.file ?? ""))
+        if (!file || !item?.title || !item?.body) continue
+        // Defense-in-depth clamp in the transport layer too: the advisory lane is
+        // never allowed to emit `critical` (or any non-enum value), independent of
+        // what core returns. Only `warning` survives as `warning`; everything else
+        // degrades to `suggestion`.
+        const severity: Severity = item.severity === "warning" ? "warning" : "suggestion"
+        out.push(
+          makeFinding({
+            severity,
+            category: item.category as ReviewCategory,
+            title: `${file.model}: ${item.title}`,
+            body: String(item.body),
+            file: file.path,
+            model: file.model,
+            startLine: typeof item.line === "number" ? item.line : undefined,
+            endLine: typeof item.line === "number" ? item.line : undefined,
+            confidence: item.confidence === "high" ? "high" : item.confidence === "low" ? "low" : "medium",
+            evidence: { tool: "ai-review", result: { confidence: item.confidence } },
+            ruleKey: `ai:${item.category}:${String(item.title).slice(0, 60)}`,
+          }),
+        )
+      } catch (err) {
+        log.warn("skipping malformed ai finding", { error: err })
+      }
     }
     log.info("ai review complete", { findings: out.length })
     return out

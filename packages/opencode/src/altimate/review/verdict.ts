@@ -44,7 +44,12 @@ export function computeIdealVerdict(findings: Finding[], rubric: Rubric = DEFAUL
   // Count only confidently-warned findings toward the risk pattern. Undecidable
   // ("unknown") warnings — e.g. equivalence that couldn't be proven — must not
   // accumulate into a block; that would let unprovable refactors fail the gate.
-  const warningCount = findings.filter((f) => f.severity === "warning" && f.confidence !== "unknown").length
+  // Advisory LLM findings (layer 3) are EXCLUDED: the lane is advisory-only and must
+  // never influence the verdict, so its warnings cannot accumulate into a block
+  // (otherwise a chatty or prompt-injected AI review could force REQUEST_CHANGES).
+  const warningCount = findings.filter(
+    (f) => f.severity === "warning" && f.confidence !== "unknown" && f.evidence?.tool !== "ai-review",
+  ).length
   if (warningCount >= rubric.warningPatternThreshold) return "REQUEST_CHANGES"
   return "COMMENT"
 }

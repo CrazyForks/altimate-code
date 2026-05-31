@@ -174,6 +174,26 @@ describe("verdict", () => {
     expect(computeIdealVerdict([u(1), u(2), u(3)], DEFAULT_RUBRIC)).toBe("COMMENT")
   })
 
+  test("advisory AI warnings do NOT accumulate into a block (gate-mode safe)", () => {
+    // The LLM lane is advisory-only: even ≥ threshold confident AI warnings must NOT
+    // force REQUEST_CHANGES (otherwise a chatty/prompt-injected review could block).
+    const ai = (i: number) =>
+      makeFinding({
+        severity: "warning",
+        category: "sql_quality",
+        title: "ai" + i,
+        body: "b",
+        file: `m${i}.sql`,
+        confidence: "medium",
+        evidence: { tool: "ai-review", result: {} },
+        ruleKey: `ai:sql_quality:t${i}`,
+      })
+    expect(computeIdealVerdict([ai(1), ai(2), ai(3), ai(4)], DEFAULT_RUBRIC)).toBe("COMMENT")
+    // A mix: 2 deterministic warnings + many AI warnings still must not reach the
+    // threshold of 3 deterministic-confident warnings on the strength of AI alone.
+    expect(computeIdealVerdict([mk("warning"), mk("warning"), ai(1), ai(2)], DEFAULT_RUBRIC)).toBe("COMMENT")
+  })
+
   test("single suggestion → COMMENT", () => {
     expect(computeIdealVerdict([mk("suggestion")], DEFAULT_RUBRIC)).toBe("COMMENT")
   })
