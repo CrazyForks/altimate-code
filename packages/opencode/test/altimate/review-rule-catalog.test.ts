@@ -19,7 +19,10 @@ describe("rule catalog (self-verifying scenario corpus)", () => {
     expect(failures.length).toBe(0)
   })
 
-  test("catalog covers >= 1000 distinct use-cases", () => {
-    expect(CATALOG.length).toBeGreaterThanOrEqual(1000)
+  // The large generated families (dialect functions, reserved words, types,
+  // operators) moved into the compiled core (L033/L035/review_lexical_scan);
+  // this TS catalog now holds only the hand-written structural / dbt rules.
+  test("catalog covers the hand-written structural/dbt rules", () => {
+    expect(CATALOG.length).toBeGreaterThanOrEqual(150)
   })
 })

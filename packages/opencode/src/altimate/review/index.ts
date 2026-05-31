@@ -1,8 +1,9 @@
 /**
- * dbt-pr-review — Cloudflare-style AI code review specialized for analytics
- * engineering. Every blocking verdict is mechanically backed by a deterministic
- * engine call (query equivalence, column-lineage/DAG impact, PII classification,
- * A–F grade) and signed into a replayable verdict envelope.
+ * dbt-pr-review — layered AI code review specialized for analytics engineering.
+ * Every blocking verdict is mechanically backed by a deterministic engine call
+ * (query equivalence, column-lineage/DAG impact, PII classification, A–F grade,
+ * AST anti-pattern lint) and signed into a replayable verdict envelope; an LLM
+ * reviewer adds advisory contextual comments on top.
  *
  * Module map:
  *  - finding.ts     FindingV1 schema, fingerprinting, JSONL, dedup

@@ -34,6 +34,8 @@ export interface FileChangeClass {
   touchesSource: boolean
   materializationChange: boolean
   incrementalLogicChange: boolean
+  /** Structurally complex SQL (window/subquery/large plan) — never `trivial`. */
+  complex: boolean
 }
 
 export interface ClassifyOptions {
@@ -41,6 +43,8 @@ export interface ClassifyOptions {
   blastRadiusOf?: (path: string) => number
   /** Mark a path as touching a PII-classified column. */
   touchesPiiOf?: (file: ChangedFile) => boolean
+  /** Mark a path as a structurally complex change (window/subquery/large plan). */
+  isComplexOf?: (file: ChangedFile) => boolean
 }
 
 const MATERIALIZATION_RE = /[+]?materialized\s*[:=]|config\s*\(\s*[^)]*materialized/i
@@ -60,6 +64,7 @@ export function classifyFile(file: ChangedFile, opts: ClassifyOptions = {}): Fil
     touchesSource: kind === "source_yml" || looksLikeSourceYml(diff),
     materializationChange: kind === "model_sql" && !!diff && MATERIALIZATION_RE.test(diff),
     incrementalLogicChange: kind === "model_sql" && !!diff && INCREMENTAL_RE.test(diff),
+    complex: opts.isComplexOf?.(file) ?? false,
   }
 }
 
@@ -118,7 +123,8 @@ export function classifyPR(files: ChangedFile[], opts: ClassifyOptions = {}): Ti
   const onlyDocs = perFile.every(
     (c) => c.kind === "schema_yml" || c.kind === "seed" || c.kind === "analysis" || c.kind === "other",
   )
-  if (onlyDocs && totalSqlLines <= 10 && maxBlast === 0) {
+  const anyComplex = perFile.some((c) => c.complex)
+  if (onlyDocs && totalSqlLines <= 10 && maxBlast === 0 && !anyComplex) {
     return { tier: "trivial", reasons: ["docs/schema-only, no downstream"], perFile }
   }
 
@@ -133,7 +139,7 @@ export function classifyPR(files: ChangedFile[], opts: ClassifyOptions = {}): Ti
 /** Which reviewer lanes fire at each tier. */
 export const TIER_LANES: Record<RiskTier, string[]> = {
   trivial: ["sql_quality", "dbt_patterns"],
-  lite: ["sql_quality", "lineage_breakage", "semantic_change", "test_coverage", "dbt_patterns"],
+  lite: ["sql_quality", "lineage_breakage", "semantic_change", "test_coverage", "dbt_patterns", "ai_review"],
   full: [
     "sql_quality",
     "lineage_breakage",
@@ -145,5 +151,6 @@ export const TIER_LANES: Record<RiskTier, string[]> = {
     "test_coverage",
     "idempotency",
     "dbt_patterns",
+    "ai_review",
   ],
 }

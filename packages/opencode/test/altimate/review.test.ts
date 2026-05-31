@@ -394,6 +394,587 @@ describe("orchestrate", () => {
     expect(verifyEnvelope(signEnvelope({ ...env, signature: undefined }))).toBe(true)
   })
 
+  test("core AST lint ran → fragile regex twin (comma-join) is suppressed", async () => {
+    const files: ChangedFile[] = [
+      { path: "models/marts/m.sql", status: "modified", diff: "+from {{ ref('a') }} a, {{ ref('b') }} b\n" },
+    ]
+    const sql = "select * from {{ ref('a') }} a, {{ ref('b') }} b"
+    // Runner WITH core lint available (ran:true) emits the AST cartesian finding.
+    const withCore: ReviewRunner = {
+      ...fakeRunner({}),
+      async check() {
+        return { issues: [{ rule: "cartesian-product", message: "implicit cross join", severity: "warning" }], ran: true }
+      },
+    }
+    const envCore = await runReview({
+      changedFiles: files,
+      config: { ...DEFAULT_REVIEW_CONFIG, reviewers: ["sql_quality", "dbt_patterns"] },
+      rubric: DEFAULT_RUBRIC,
+      mode: "comment",
+      runner: withCore,
+      getContent: content(sql),
+      generatedAt: "2026-05-29T00:00:00Z",
+    })
+    // The regex comma-join twin is dropped; the core AST finding remains.
+    const regexJoin = envCore.findings.find(
+      (f) => f.evidence?.tool === "dbt-patterns" && f.category === "join_risk",
+    )
+    expect(regexJoin).toBeUndefined()
+    expect(envCore.findings.some((f) => f.evidence?.tool === "altimate_core.check")).toBe(true)
+
+    // Control: core lint NOT available (ran:false) → regex twin is kept (fallback).
+    const noCore = await runReview({
+      changedFiles: files,
+      config: { ...DEFAULT_REVIEW_CONFIG, reviewers: ["sql_quality", "dbt_patterns"] },
+      rubric: DEFAULT_RUBRIC,
+      mode: "comment",
+      runner: { ...fakeRunner({}), async check() { return { issues: [], ran: false } } },
+      getContent: content(sql),
+      generatedAt: "2026-05-29T00:00:00Z",
+    })
+    expect(noCore.findings.some((f) => f.evidence?.tool === "dbt-patterns" && f.category === "join_risk")).toBe(true)
+  })
+
+  test("structuralChangeLane passes COMPILED SQL (not raw Jinja) to structural_diff and surfaces the finding", async () => {
+    // Regression guard: structural_diff parses with a real SQL parser, so the lane
+    // MUST use engine/compiled SQL — raw Jinja (`{{ ref() }}`) would never parse and
+    // the lane would silently emit nothing.
+    const rawNew = "select distinct id from {{ ref('orders') }}"
+    const rawOld = "select id from {{ ref('orders') }}"
+    const compiledNew = "select distinct id from prod.orders"
+    const compiledOld = "select id from prod.orders"
+    let sawBase = ""
+    let sawHead = ""
+    const runner: ReviewRunner = {
+      ...fakeRunner({}),
+      async structuralDiff(baseSql, headSql) {
+        sawBase = baseSql
+        sawHead = headSql
+        return [{ code: "SC001", rule: "distinct_added", severity: "warning", message: "DISTINCT added" }]
+      },
+    }
+    const env = await runReview({
+      changedFiles: [{ path: "models/marts/m.sql", status: "modified", diff: "+select distinct" }],
+      config: { ...DEFAULT_REVIEW_CONFIG, reviewers: ["dbt_patterns"], ai: false },
+      rubric: DEFAULT_RUBRIC,
+      mode: "comment",
+      runner,
+      getContent: async (_f, side) => (side === "new" ? rawNew : rawOld),
+      getCompiled: async (_f, side) => (side === "new" ? compiledNew : compiledOld),
+      generatedAt: "2026-05-29T00:00:00Z",
+    })
+    // The lane received the COMPILED SQL, never the raw Jinja.
+    expect(sawBase).toBe(compiledOld)
+    expect(sawHead).toBe(compiledNew)
+    expect(sawHead.includes("{{")).toBe(false)
+    // And the structural finding is surfaced.
+    expect(
+      env.findings.some(
+        (f) => f.evidence?.tool === "altimate_core.structural_diff" && (f.evidence?.result as any)?.code === "SC001",
+      ),
+    ).toBe(true)
+  })
+
+  test("structuralChangeLane runs under the semantic_change lane (NOT only dbt_patterns)", async () => {
+    // Wiring guard: structuralChangeLane is a `semantic_change` concern. It must run
+    // when the tier enables semantic_change even if dbt_patterns is absent.
+    let called = false
+    const runner: ReviewRunner = {
+      ...fakeRunner({}),
+      async structuralDiff() {
+        called = true
+        return [{ code: "SC003", rule: "group_by_change", severity: "warning", message: "grain changed" }]
+      },
+    }
+    const env = await runReview({
+      changedFiles: [{ path: "models/marts/m.sql", status: "modified", diff: "+group by" }],
+      config: { ...DEFAULT_REVIEW_CONFIG, reviewers: ["semantic_change"], ai: false },
+      rubric: DEFAULT_RUBRIC,
+      mode: "comment",
+      runner,
+      getContent: async (_f, side) => (side === "new" ? "select g, sum(x) from t group by g, h" : "select g, sum(x) from t group by g"),
+      getCompiled: async (_f, side) => (side === "new" ? "select g, sum(x) from t group by g, h" : "select g, sum(x) from t group by g"),
+      generatedAt: "2026-05-29T00:00:00Z",
+    })
+    expect(called).toBe(true)
+    expect(
+      env.findings.some((f) => f.evidence?.tool === "altimate_core.structural_diff"),
+    ).toBe(true)
+  })
+
+  test("core L033 portability → regex portability twin suppressed, idempotency concern survives", async () => {
+    const sql = "select getdate() as loaded_at from {{ ref('a') }}"
+    const files: ChangedFile[] = [{ path: "models/marts/m.sql", status: "modified", diff: "+    , getdate() as loaded_at\n" }]
+    const runner: ReviewRunner = {
+      ...fakeRunner({}),
+      async check() {
+        return {
+          issues: [{ rule: "non_portable_function", message: "GETDATE() is a non-standard / dialect-specific function.", severity: "info" }],
+          ran: true,
+        }
+      },
+    }
+    const env = await runReview({
+      changedFiles: files,
+      config: { ...DEFAULT_REVIEW_CONFIG, reviewers: ["sql_quality", "dbt_patterns"] },
+      rubric: DEFAULT_RUBRIC,
+      mode: "comment",
+      runner,
+      getContent: content(sql),
+      generatedAt: "2026-05-29T00:00:00Z",
+    })
+    // Core L033 is the single portability source.
+    expect(env.findings.some((f) => f.evidence?.tool === "altimate_core.check")).toBe(true)
+    // The regex portability twin (mentions GETDATE + "non-portable") is dropped.
+    const regexPortability = env.findings.find(
+      (f) => f.evidence?.tool === "rule-catalog" && /portab|non-?standard|dialect/i.test(f.body) && /getdate/i.test(f.body),
+    )
+    expect(regexPortability).toBeUndefined()
+    // But the distinct IDEMPOTENCY concern about GETDATE survives.
+    expect(env.findings.some((f) => f.category === "idempotency" && /getdate/i.test(f.body))).toBe(true)
+  })
+
+  test("PII lane: flags a newly-introduced PII column (classify_pii), diff-scoped", async () => {
+    const runner: ReviewRunner = {
+      ...fakeRunner({}),
+      async columnLineage() {
+        return [
+          { source: '"users"."email"', target: "email" },
+          { source: '"users"."first_name"', target: "first_name" },
+        ]
+      },
+      async classifyPii(cols) {
+        expect(cols).toContain("email")
+        return [
+          { column: "email", classification: "Email", confidence: 0.95, masking: "'***'" },
+          { column: "first_name", classification: "Name", confidence: 0.6 }, // below threshold → ignored
+        ]
+      },
+    }
+    const env = await runReview({
+      changedFiles: [{ path: "models/marts/m.sql", status: "modified", diff: "+    , email" }],
+      config: { ...DEFAULT_REVIEW_CONFIG, reviewers: ["pii_exposure"], ai: false },
+      rubric: DEFAULT_RUBRIC,
+      mode: "comment",
+      runner,
+      getContent: async (_f, side) => (side === "new" ? "select id, email, first_name from users" : undefined),
+      generatedAt: "2026-05-29T00:00:00Z",
+    })
+    const pii = env.findings.find((f) => f.evidence?.tool === "altimate_core.classify_pii")
+    expect(pii).toBeDefined()
+    expect(pii!.title).toMatch(/Email.*email/)
+    // first_name (low confidence) and any pre-existing-but-not-in-diff PII are not flagged
+    expect(env.findings.filter((f) => f.evidence?.tool === "altimate_core.classify_pii").length).toBe(1)
+  })
+
+  test("data-diff lane: surfaces base-vs-head row deltas via the engine (forwards warehouse)", async () => {
+    const sql = "select customer_id, amount from t"
+    let sawWarehouse: string | undefined
+    const runner: ReviewRunner = {
+      ...fakeRunner({}),
+      async columnLineage() {
+        return [{ source: '"t"."customer_id"', target: "customer_id" }, { source: '"t"."amount"', target: "amount" }]
+      },
+      async dataDiff(_b, _h, keys, warehouse) {
+        expect(keys).toEqual(["customer_id"]) // inferred PK
+        sawWarehouse = warehouse
+        return { rowsOnlyInBase: 12, rowsOnlyInHead: 0, rowsChanged: 3, summary: "drops 12 rows" }
+      },
+    }
+    const env = await runReview({
+      changedFiles: [{ path: "models/marts/m.sql", status: "modified", diff: "+where amount > 0" }],
+      config: {
+        ...DEFAULT_REVIEW_CONFIG,
+        reviewers: ["semantic_change"],
+        ai: false,
+        dataDiff: { enabled: true, warehouse: "prod_wh" },
+      },
+      rubric: DEFAULT_RUBRIC,
+      mode: "comment",
+      runner,
+      getContent: async (_f, side) => (side === "new" ? sql : "select customer_id, amount from t /*base*/"),
+      generatedAt: "2026-05-29T00:00:00Z",
+    })
+    const dd = env.findings.find((f) => f.evidence?.tool === "data.diff")
+    expect(dd).toBeDefined()
+    expect(dd!.body).toMatch(/12 only-in-base/)
+    expect(sawWarehouse).toBe("prod_wh") // config.dataDiff.warehouse threaded through
+  })
+
+  test("data-diff lane: OFF by default (opt-in) — never calls the warehouse", async () => {
+    let called = false
+    const env = await runReview({
+      changedFiles: [{ path: "models/marts/m.sql", status: "modified", diff: "+x" }],
+      // No dataDiff config → defaults to disabled.
+      config: { ...DEFAULT_REVIEW_CONFIG, reviewers: ["semantic_change"], ai: false },
+      rubric: DEFAULT_RUBRIC,
+      mode: "comment",
+      runner: {
+        ...fakeRunner({}),
+        async columnLineage() { return [{ source: '"t"."id"', target: "id" }] },
+        async dataDiff() { called = true; return { rowsOnlyInBase: 5 } },
+      },
+      getContent: async (_f, side) => (side === "new" ? "select id from t" : "select id from t /*b*/"),
+      generatedAt: "2026-05-29T00:00:00Z",
+    })
+    expect(called).toBe(false) // disabled → lane short-circuits before the warehouse
+    expect(env.findings.some((f) => f.evidence?.tool === "data.diff")).toBe(false)
+  })
+
+  test("data-diff lane: enabled but skips gracefully when no warehouse/driver (dataDiff → null)", async () => {
+    const env = await runReview({
+      changedFiles: [{ path: "models/marts/m.sql", status: "modified", diff: "+x" }],
+      config: { ...DEFAULT_REVIEW_CONFIG, reviewers: ["semantic_change"], ai: false, dataDiff: { enabled: true, warehouse: "" } },
+      rubric: DEFAULT_RUBRIC,
+      mode: "comment",
+      runner: { ...fakeRunner({}), async columnLineage() { return [{ source: '"t"."id"', target: "id" }] }, async dataDiff() { return null } },
+      getContent: async (_f, side) => (side === "new" ? "select id from t" : "select id from t /*b*/"),
+      generatedAt: "2026-05-29T00:00:00Z",
+    })
+    expect(env.findings.some((f) => f.evidence?.tool === "data.diff")).toBe(false)
+  })
+
+  // --- Topology-aware equivalence (merge refactor: N deleted + 1 added) ---
+
+  const MERGE_FILES: ChangedFile[] = [
+    { path: "models/intermediate/int_column_access_base.sql", status: "deleted", diff: "" },
+    { path: "models/intermediate/int_column_access_direct.sql", status: "deleted", diff: "" },
+    { path: "models/intermediate/int_column_access_modified.sql", status: "deleted", diff: "" },
+    { path: "models/intermediate/int_column_access_daily.sql", status: "added", diff: "+select 1\n" },
+  ]
+  const mergeCompiled = async (file: string, side: "old" | "new") => {
+    if (side === "new") return "select account, day, query_count from src_daily"
+    return `select account, day, query_count from src_${file.split("/").pop()}`
+  }
+
+  test("topology lane: N-models-merged-into-1 that is NOT proven equivalent → advisory warning (never blocks)", async () => {
+    const runner: ReviewRunner = {
+      ...fakeRunner({}),
+      async equivalence() {
+        // High confidence on purpose: the lane must STILL cap at warning because
+        // the UNION ALL composition is inferred.
+        return { decided: true, equivalent: false, differences: ["Different aggregation structure"], confidence: "high" }
+      },
+    }
+    const env = await runReview({
+      changedFiles: MERGE_FILES,
+      config: { ...DEFAULT_REVIEW_CONFIG, reviewers: ["semantic_change"], ai: false },
+      rubric: DEFAULT_RUBRIC,
+      mode: "gate",
+      runner,
+      getContent: async (f, side) => mergeCompiled(f, side),
+      getCompiled: mergeCompiled,
+      generatedAt: "2026-05-29T00:00:00Z",
+    })
+    const topo = env.findings.find((f) => (f.evidence?.result as any)?.topology === "merge")
+    expect(topo).toBeDefined()
+    expect(topo!.category).toBe("semantic_change")
+    expect(topo!.severity).toBe("warning") // hard-capped — inferred composition never blocks
+    expect((topo!.evidence?.result as any).replaced).toEqual([
+      "int_column_access_base",
+      "int_column_access_direct",
+      "int_column_access_modified",
+    ])
+    expect(topo!.title).toMatch(/merges 3 models/)
+    // Advisory: even in gate mode a merge-equivalence warning must not REQUEST_CHANGES.
+    expect(env.verdict).not.toBe("REQUEST_CHANGES")
+  })
+
+  test("topology lane: merge PROVEN equivalent → stays silent", async () => {
+    const runner: ReviewRunner = {
+      ...fakeRunner({}),
+      async equivalence() {
+        return { decided: true, equivalent: true, confidence: "high" }
+      },
+    }
+    const env = await runReview({
+      changedFiles: MERGE_FILES,
+      config: { ...DEFAULT_REVIEW_CONFIG, reviewers: ["semantic_change"], ai: false },
+      rubric: DEFAULT_RUBRIC,
+      mode: "comment",
+      runner,
+      getContent: async (f, side) => mergeCompiled(f, side),
+      getCompiled: mergeCompiled,
+      generatedAt: "2026-05-29T00:00:00Z",
+    })
+    expect(env.findings.some((f) => (f.evidence?.result as any)?.topology === "merge")).toBe(false)
+  })
+
+  test("topology lane: not a merge (single deletion) → no topology finding", async () => {
+    const runner: ReviewRunner = {
+      ...fakeRunner({}),
+      async equivalence() {
+        return { decided: true, equivalent: false, confidence: "high" }
+      },
+    }
+    const env = await runReview({
+      changedFiles: [
+        { path: "models/intermediate/int_column_access_base.sql", status: "deleted", diff: "" },
+        { path: "models/intermediate/int_column_access_daily.sql", status: "added", diff: "+select 1\n" },
+      ],
+      config: { ...DEFAULT_REVIEW_CONFIG, reviewers: ["semantic_change"], ai: false },
+      rubric: DEFAULT_RUBRIC,
+      mode: "comment",
+      runner,
+      getContent: async (f, side) => mergeCompiled(f, side),
+      getCompiled: mergeCompiled,
+      generatedAt: "2026-05-29T00:00:00Z",
+    })
+    expect(env.findings.some((f) => (f.evidence?.result as any)?.topology === "merge")).toBe(false)
+  })
+
+  test("topology lane: undecidable composition → degraded advisory, never blocks", async () => {
+    const runner: ReviewRunner = {
+      ...fakeRunner({}),
+      async equivalence() {
+        return { decided: false }
+      },
+    }
+    const env = await runReview({
+      changedFiles: MERGE_FILES,
+      config: { ...DEFAULT_REVIEW_CONFIG, reviewers: ["semantic_change"], ai: false },
+      rubric: DEFAULT_RUBRIC,
+      mode: "gate",
+      runner,
+      getContent: async (f, side) => mergeCompiled(f, side),
+      getCompiled: mergeCompiled,
+      generatedAt: "2026-05-29T00:00:00Z",
+    })
+    const topo = env.findings.find((f) => (f.evidence?.result as any)?.topology === "merge")
+    expect(topo).toBeDefined()
+    expect(topo!.severity).toBe("warning")
+    expect(topo!.degraded).toBe(true)
+    expect(env.verdict).not.toBe("REQUEST_CHANGES")
+  })
+
+  test("topology lane: no compiled SQL available → skips (no crash)", async () => {
+    const runner: ReviewRunner = {
+      ...fakeRunner({}),
+      async equivalence() {
+        return { decided: true, equivalent: false }
+      },
+    }
+    const env = await runReview({
+      changedFiles: MERGE_FILES,
+      config: { ...DEFAULT_REVIEW_CONFIG, reviewers: ["semantic_change"], ai: false },
+      rubric: DEFAULT_RUBRIC,
+      mode: "comment",
+      runner,
+      getContent: async (f, side) => mergeCompiled(f, side),
+      // getCompiled omitted → engine lanes have no rendered SQL.
+      generatedAt: "2026-05-29T00:00:00Z",
+    })
+    expect(env.findings.some((f) => (f.evidence?.result as any)?.topology === "merge")).toBe(false)
+  })
+
+  // --- Cross-model sibling filter consistency ---
+  test("sibling consistency: one of two siblings missing a filter on a shared upstream → advisory", async () => {
+    const runner: ReviewRunner = {
+      ...fakeRunner({}),
+      async sourceFilters(sql) {
+        // model A filters usage on warehouse_size; model B does not.
+        return /modelA/.test(sql) ? { usage: ["warehouse_size"] } : { usage: [] }
+      },
+    }
+    const env = await runReview({
+      changedFiles: [
+        { path: "models/staging/stg_a.sql", status: "modified", diff: "+x\n" },
+        { path: "models/staging/stg_b.sql", status: "modified", diff: "+y\n" },
+      ],
+      config: { ...DEFAULT_REVIEW_CONFIG, reviewers: ["semantic_change"], ai: false },
+      rubric: DEFAULT_RUBRIC,
+      mode: "comment",
+      runner,
+      getContent: async (f) => (f.includes("stg_a") ? "select 1 -- modelA" : "select 1 -- modelB"),
+      generatedAt: "2026-05-29T00:00:00Z",
+    })
+    const f = env.findings.find((x) => /filters .* differently from sibling/.test(x.title))
+    expect(f).toBeDefined()
+    expect(f!.body).toMatch(/warehouse_size/)
+  })
+
+  test("sibling consistency: identical filters on shared upstream → no finding", async () => {
+    const runner: ReviewRunner = {
+      ...fakeRunner({}),
+      async sourceFilters() { return { usage: ["warehouse_size"] } },
+    }
+    const env = await runReview({
+      changedFiles: [
+        { path: "models/staging/stg_a.sql", status: "modified", diff: "+x\n" },
+        { path: "models/staging/stg_b.sql", status: "modified", diff: "+y\n" },
+      ],
+      config: { ...DEFAULT_REVIEW_CONFIG, reviewers: ["semantic_change"], ai: false },
+      rubric: DEFAULT_RUBRIC, mode: "comment", runner,
+      getContent: content("select 1"), generatedAt: "2026-05-29T00:00:00Z",
+    })
+    expect(env.findings.some((x) => /differently from sibling/.test(x.title))).toBe(false)
+  })
+
+  // --- Grain mismatch (dedup/group key vs declared uniqueness) ---
+  test("grain mismatch: dedup PARTITION BY conflicts with declared PK → flagged", async () => {
+    const runner: ReviewRunner = {
+      ...fakeRunner({}),
+      async grain() { return { group_by: [], dedup_partition: ["account", "role_name"] } },
+      async declaredPrimaryKey() { return ["account", "role_id"] },
+    }
+    const env = await runReview({
+      changedFiles: [{ path: "models/intermediate/int_roles.sql", status: "modified", diff: "+x\n" }],
+      config: { ...DEFAULT_REVIEW_CONFIG, reviewers: ["semantic_change"], ai: false },
+      rubric: DEFAULT_RUBRIC,
+      mode: "gate",
+      runner,
+      getContent: content("select 1"),
+      generatedAt: "2026-05-29T00:00:00Z",
+    })
+    const f = env.findings.find((x) => /grain key conflicts/.test(x.title))
+    expect(f).toBeDefined()
+    expect(f!.severity).toBe("warning")
+  })
+
+  test("grain mismatch: grain matches declared PK → no finding", async () => {
+    const runner: ReviewRunner = {
+      ...fakeRunner({}),
+      async grain() { return { group_by: ["account", "role_id"], dedup_partition: [] } },
+      async declaredPrimaryKey() { return ["account", "role_id"] },
+    }
+    const env = await runReview({
+      changedFiles: [{ path: "models/intermediate/int_roles.sql", status: "modified", diff: "+x\n" }],
+      config: { ...DEFAULT_REVIEW_CONFIG, reviewers: ["semantic_change"], ai: false },
+      rubric: DEFAULT_RUBRIC, mode: "comment", runner,
+      getContent: content("select 1"), generatedAt: "2026-05-29T00:00:00Z",
+    })
+    expect(env.findings.some((x) => /grain key conflicts/.test(x.title))).toBe(false)
+  })
+
+  test("grain mismatch: no declared PK → stays silent (sound)", async () => {
+    const runner: ReviewRunner = {
+      ...fakeRunner({}),
+      async grain() { return { group_by: ["a", "b"], dedup_partition: [] } },
+      async declaredPrimaryKey() { return undefined },
+    }
+    const env = await runReview({
+      changedFiles: [{ path: "models/intermediate/m.sql", status: "modified", diff: "+x\n" }],
+      config: { ...DEFAULT_REVIEW_CONFIG, reviewers: ["semantic_change"], ai: false },
+      rubric: DEFAULT_RUBRIC, mode: "comment", runner,
+      getContent: content("select 1"), generatedAt: "2026-05-29T00:00:00Z",
+    })
+    expect(env.findings.some((x) => /grain key conflicts/.test(x.title))).toBe(false)
+  })
+
+  // --- Missing grain test on a new model ---
+  test("missing grain test: new mart model with no declared PK → suggestion", async () => {
+    const runner: ReviewRunner = {
+      ...fakeRunner({}),
+      async declaredPrimaryKey() { return undefined },
+    }
+    const env = await runReview({
+      changedFiles: [{ path: "models/marts/mrt_new.sql", status: "added", diff: "+select 1\n" }],
+      config: { ...DEFAULT_REVIEW_CONFIG, reviewers: ["test_coverage"], ai: false },
+      rubric: DEFAULT_RUBRIC, mode: "comment", runner,
+      getContent: content("select 1"), generatedAt: "2026-05-29T00:00:00Z",
+    })
+    const f = env.findings.find((x) => /no uniqueness\/grain test/.test(x.title))
+    expect(f).toBeDefined()
+    expect(f!.severity).toBe("suggestion")
+  })
+
+  test("missing grain test: new staging model → not flagged", async () => {
+    const runner: ReviewRunner = { ...fakeRunner({}), async declaredPrimaryKey() { return undefined } }
+    const env = await runReview({
+      changedFiles: [{ path: "models/staging/stg_new.sql", status: "added", diff: "+select 1\n" }],
+      config: { ...DEFAULT_REVIEW_CONFIG, reviewers: ["test_coverage"], ai: false },
+      rubric: DEFAULT_RUBRIC, mode: "comment", runner,
+      getContent: content("select 1"), generatedAt: "2026-05-29T00:00:00Z",
+    })
+    expect(env.findings.some((x) => /no uniqueness\/grain test/.test(x.title))).toBe(false)
+  })
+
+  test("missing grain test: new mart WITH a declared PK → not flagged", async () => {
+    const runner: ReviewRunner = { ...fakeRunner({}), async declaredPrimaryKey() { return ["id"] } }
+    const env = await runReview({
+      changedFiles: [{ path: "models/marts/mrt_ok.sql", status: "added", diff: "+select 1\n" }],
+      config: { ...DEFAULT_REVIEW_CONFIG, reviewers: ["test_coverage"], ai: false },
+      rubric: DEFAULT_RUBRIC, mode: "comment", runner,
+      getContent: content("select 1"), generatedAt: "2026-05-29T00:00:00Z",
+    })
+    expect(env.findings.some((x) => /no uniqueness\/grain test/.test(x.title))).toBe(false)
+  })
+
+  test("diff-scoping: the base SQL is forwarded to core for engine-side scoping", async () => {
+    // Diff-scoping is done IN CORE (it receives base_sql). Here we assert the
+    // orchestrator forwards the base compiled SQL to runner.check so core can
+    // scope. (The structural scoping itself is covered by core's Rust tests.)
+    let sawBase: string | undefined
+    const runner: ReviewRunner = {
+      ...fakeRunner({}),
+      async check(_sql, _dialect, baseSql) {
+        if (baseSql) sawBase = baseSql // qualityLane passes the base; other calls don't
+        return { issues: [], ran: true }
+      },
+    }
+    await runReview({
+      changedFiles: [{ path: "models/marts/m.sql", status: "modified", diff: "+x" }],
+      config: { ...DEFAULT_REVIEW_CONFIG, reviewers: ["sql_quality"], ai: false },
+      rubric: DEFAULT_RUBRIC,
+      mode: "comment",
+      runner,
+      getContent: async (_f, side) => (side === "new" ? "select 2" : "select 1"),
+      generatedAt: "2026-05-29T00:00:00Z",
+    })
+    expect(sawBase).toBe("select 1")
+  })
+
+  test("AI reviewer lane: advisory comments merge in, are grounded, and never block", async () => {
+    const sql = "select customer_id, sum(amount) as revenue from {{ ref('orders') }} group by 1"
+    const files: ChangedFile[] = [{ path: "models/marts/m.sql", status: "modified", diff: "+select ...\n" }]
+    let groundingSeen: number | undefined
+    const env = await runReview({
+      changedFiles: files,
+      config: { ...DEFAULT_REVIEW_CONFIG, reviewers: ["dbt_patterns", "ai_review"], mode: "gate" },
+      rubric: DEFAULT_RUBRIC,
+      mode: "gate",
+      runner: fakeRunner({}),
+      getContent: content(sql),
+      prTitle: "Add revenue mart",
+      // Fake AI reviewer: returns a contextual comment + a (disallowed) critical
+      // that must be downgraded — the AI must never block.
+      aiReview: async (input) => {
+        groundingSeen = input.grounding.length
+        return [
+          makeFinding({
+            severity: "warning",
+            category: "sql_correctness",
+            title: "m: `revenue` may double-count un-deduped orders",
+            body: "If orders has multiple rows per order_id, summing amount inflates revenue.",
+            file: "models/marts/m.sql",
+            model: "m",
+            confidence: "medium",
+            evidence: { tool: "ai-review", result: { confidence: "medium" } },
+            ruleKey: "ai:sql_correctness:revenue-double-count",
+          }),
+          makeFinding({
+            severity: "critical", // disallowed for AI — must be downgraded, must not block
+            category: "sql_correctness",
+            title: "m: bogus critical",
+            body: "AI should never block.",
+            file: "models/marts/m.sql",
+            model: "m",
+            evidence: { tool: "ai-review", result: {} },
+            ruleKey: "ai:sql_correctness:bogus",
+          }),
+        ]
+      },
+      generatedAt: "2026-05-29T00:00:00Z",
+    })
+    // The advisory comment is present.
+    expect(env.findings.some((f) => f.evidence?.tool === "ai-review" && /double-count/.test(f.title))).toBe(true)
+    // The AI was grounded (received the deterministic findings, even if zero).
+    expect(groundingSeen).toBeDefined()
+    // No AI finding survived as critical, and the AI did NOT cause a block.
+    expect(env.findings.some((f) => f.evidence?.tool === "ai-review" && f.severity === "critical")).toBe(false)
+    expect(env.verdict).not.toBe("REQUEST_CHANGES")
+  })
+
   test("FUSION: proven non-equivalent + downstream → critical → blocks (gate)", async () => {
     const files: ChangedFile[] = [{ path: "models/marts/fct_revenue.sql", status: "modified", diff: "+x\n-y\n" }]
     const runner: ReviewRunner = {

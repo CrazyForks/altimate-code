@@ -94,4 +94,29 @@ describe("buildReviewSchemaContext", () => {
   test("returns undefined when no node has columns", () => {
     expect(buildReviewSchemaContext([{ name: "x" }], undefined)).toBeUndefined()
   })
+
+  test("derives primary_key from an explicit node.primary_key (for fan-out / L037)", () => {
+    const ctx = buildReviewSchemaContext([
+      { name: "dim", columns: [{ name: "id" }, { name: "name" }], primary_key: ["id"] },
+    ])
+    expect(ctx!.tables["dim"].primary_key).toEqual(["id"])
+  })
+
+  test("derives primary_key from column-level primary_key contract constraints", () => {
+    const ctx = buildReviewSchemaContext([
+      {
+        name: "events",
+        columns: [
+          { name: "event_id", constraints: [{ type: "primary_key" }] },
+          { name: "user_id" },
+        ],
+      },
+    ])
+    expect(ctx!.tables["events"].primary_key).toEqual(["event_id"])
+  })
+
+  test("omits primary_key when none is declared (L037 then stays silent)", () => {
+    const ctx = buildReviewSchemaContext([{ name: "t", columns: [{ name: "a" }, { name: "b" }] }])
+    expect(ctx!.tables["t"].primary_key).toBeUndefined()
+  })
 })

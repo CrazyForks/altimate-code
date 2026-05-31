@@ -51,6 +51,44 @@ function stripComments(s: string): string {
     .replace(/\{#[\s\S]*?#\}/g, " ")
 }
 
+/**
+ * Blank out single-quoted SQL string-literal CONTENTS (keeping the quotes) so a
+ * regex detector can't be tripped by punctuation inside a literal — e.g. the
+ * `/` in `'n/a'` must not read as division, a `,` in `'a,b'` must not read as a
+ * comma join. Detectors that legitimately inspect literal content (leading
+ * wildcard, hardcoded date) must NOT use this. Handles doubled-quote escapes.
+ */
+function stripLiterals(s: string): string {
+  return s.replace(/'(?:[^']|'')*'/g, "''")
+}
+
+/**
+ * True when a line's FROM clause lists two relations separated by a comma at
+ * paren-depth 0 — i.e. `FROM a, b` (an implicit cross join). Scans only after
+ * the FROM keyword and stops at the next clause boundary, so a comma inside a
+ * function call (`nvl(brand, x)`) or a SELECT-list column never trips it. This
+ * is the (degraded-mode) fallback for core's AST `CartesianProduct` rule.
+ */
+function fromClauseHasTopLevelComma(line: string): boolean {
+  const s = stripLiterals(stripComments(line))
+  const m = /\bfrom\b/i.exec(s)
+  if (!m) return false
+  let depth = 0
+  for (let i = m.index + 4; i < s.length; i++) {
+    const ch = s[i]
+    if (ch === "(") depth++
+    else if (ch === ")") depth = Math.max(0, depth - 1)
+    else if (depth === 0) {
+      if (ch === ",") return true
+      // stop at the next clause keyword (group/having/order/limit/where/join/on/qualify/union)
+      const rest = s.slice(i)
+      if (/^\s+(where|group|having|order|limit|join|inner|left|right|full|cross|on|qualify|union|except|intersect)\b/i.test(rest))
+        return false
+    }
+  }
+  return false
+}
+
 const CLOCK_RE = /\b(current_timestamp|current_date|getdate|sysdate|systimestamp|now)\s*\(/i
 /** Audit/metadata columns where a clock value is expected and fine. */
 const AUDIT_COL_RE = /\b(_?loaded_at|_?dbt_|_etl_|_ingested|_synced|audit_|_meta_|extracted_at)\b/i
@@ -71,10 +109,18 @@ interface Ctx {
 
 type Detector = (c: Ctx) => Finding | null
 
+// A line that is dbt Jinja / config rather than SQL — e.g. the microbatch
+// `begin=(modules.datetime.datetime.now() - ...)` config kwarg, which is NOT a
+// runtime clock in the transform and must not trip the idempotency rule.
+const JINJA_OR_CONFIG_LINE =
+  /\{\{|\{%|modules\.|^\s*(begin|event_time|lookback|batch_size|partition_by|unique_key)\s*=|config\s*\(/i
+
 // 1. Non-idempotent clock function added to a transform (not a snapshot/audit col).
 const detectClock: Detector = (c) => {
   if (c.kind === "snapshot") return null
-  const hits = c.added.filter((l) => CLOCK_RE.test(stripComments(l)) && !AUDIT_COL_RE.test(l))
+  const hits = c.added.filter(
+    (l) => CLOCK_RE.test(stripComments(l)) && !AUDIT_COL_RE.test(l) && !JINJA_OR_CONFIG_LINE.test(l),
+  )
   if (!hits.length) return null
   return makeFinding({
     severity: "warning",
@@ -89,53 +135,6 @@ const detectClock: Detector = (c) => {
     confidence: "high",
     evidence: { tool: "dbt-patterns", result: { rule: "clock_in_transform", lines: hits.slice(0, 3) } },
     ruleKey: "idempotency:clock",
-  })
-}
-
-// 2. Incremental model with no is_incremental() guard.
-const detectIncrementalNoGuard: Detector = (c) => {
-  const isIncremental = /materialized\s*[=:]\s*['"]?incremental/i.test(c.newSql)
-  if (!isIncremental) return null
-  if (/is_incremental\s*\(/i.test(c.newSql)) return null
-  return makeFinding({
-    severity: "warning",
-    category: "materialization",
-    title: `${c.model}: incremental model has no is_incremental() guard`,
-    body:
-      "This model is materialized `incremental` but has no `{% if is_incremental() %}` filter, so every run " +
-      "reprocesses the entire source (a silent cost blowup) and `{{ this }}`-based filters can fail on first build. " +
-      "Wrap the late-arriving predicate in an `is_incremental()` block.",
-    file: c.file.path,
-    model: c.model,
-    confidence: "high",
-    evidence: { tool: "dbt-patterns", result: { rule: "incremental_no_guard" } },
-    ruleKey: "materialization:incremental-no-guard",
-  })
-}
-
-// 3. Materialization changed (added/flipped config), incl. incremental→table full-refresh risk.
-const detectMaterializationChange: Detector = (c) => {
-  const addedMat = c.added.find((l) => /materialized\s*[=:]/i.test(stripComments(l)))
-  if (!addedMat) return null
-  const toTable = /materialized\s*[=:]\s*['"]?table/i.test(addedMat)
-  const removedIncremental = c.removed.some((l) => /materialized\s*[=:]\s*['"]?incremental/i.test(l))
-  const fullRefreshRisk = toTable && removedIncremental
-  return makeFinding({
-    severity: "warning",
-    category: "materialization",
-    title: fullRefreshRisk
-      ? `${c.model}: incremental → table will rebuild full history every run`
-      : `${c.model}: materialization changed`,
-    body: fullRefreshRisk
-      ? "Switching an incremental model to `table` rebuilds the entire history on every run — a large, recurring " +
-        "scan/compute cost. Confirm this is intended and the model is small enough."
-      : "The model's materialization changed. Verify the cost/latency trade-off (view↔table↔incremental) for a model " +
-        "of this size and downstream query frequency.",
-    file: c.file.path,
-    model: c.model,
-    confidence: "high",
-    evidence: { tool: "dbt-patterns", result: { rule: "materialization_change", line: addedMat.trim() } },
-    ruleKey: "materialization:change",
   })
 }
 
@@ -159,45 +158,6 @@ const detectSelectStar: Detector = (c) => {
 }
 
 // 5. LEFT/RIGHT JOIN silently collapsed to INNER by a WHERE/AND on the outer table.
-const detectLeftToInner: Detector = (c) => {
-  // Collect outer-joined aliases from the new SQL.
-  const aliases = new Set<string>()
-  const joinRe = /\b(left|right)\s+(?:outer\s+)?join\b[\s\S]*?\bon\b/gi
-  const sql = stripComments(c.newSql)
-  let m: RegExpExecArray | null
-  while ((m = joinRe.exec(sql))) {
-    // alias is the last identifier before ON, optionally after AS
-    const seg = m[0]
-    const am = seg.match(/(?:as\s+)?([A-Za-z_]\w*)\s+on\b/i)
-    if (am) aliases.add(am[1].toLowerCase())
-  }
-  if (!aliases.size) return null
-  for (const line of c.added) {
-    const l = stripComments(line)
-    if (!/^\s*(where|and)\b/i.test(l)) continue
-    if (/is\s+(not\s+)?null/i.test(l)) continue // anti-join intent is legitimate
-    for (const a of aliases) {
-      if (new RegExp(`\\b${a}\\.`, "i").test(l)) {
-        return makeFinding({
-          severity: "critical",
-          category: "join_risk",
-          title: `${c.model}: WHERE on left-joined \`${a}\` silently turns the LEFT JOIN into an INNER JOIN`,
-          body:
-            `A predicate on the outer-joined relation \`${a}\` was added in a WHERE clause. Unmatched left rows have ` +
-            "NULL for those columns, so the predicate is false and they are dropped — the LEFT JOIN collapses to an " +
-            "INNER JOIN and rows vanish with no error. Move the predicate into the `ON` clause, or use `IS NULL` if an " +
-            "anti-join is intended.",
-          file: c.file.path,
-          model: c.model,
-          confidence: "high",
-          evidence: { tool: "dbt-patterns", result: { rule: "left_to_inner", alias: a, line: line.trim() } },
-          ruleKey: "join_risk:left-to-inner",
-        })
-      }
-    }
-  }
-  return null
-}
 
 // 6. Cross join / cartesian product added.
 const detectCrossJoin: Detector = (c) => {
@@ -267,46 +227,23 @@ const detectNotIn: Detector = (c) => {
 const detectDedupTie: Detector = (c) => {
   const hit = c.added.find((l) => /row_number\s*\(\s*\)\s*over\s*\(/i.test(stripComments(l)))
   if (!hit) return null
-  const orderBy = hit.match(/order\s+by\s+([^)]+)\)/i)
-  // A single order-by term (no comma) is unlikely to be unique → ties are arbitrary.
-  if (orderBy && orderBy[1].includes(",")) return null
+  // Only flag dedup with NO ORDER BY — that is unambiguously non-deterministic.
+  // A present ORDER BY (even single-column) is the developer's deterministic
+  // choice and the dbt-recommended pattern; warning "it might not be unique"
+  // on every dedup is noise (false positives on the common, correct case).
+  if (/order\s+by/i.test(stripComments(hit))) return null
   return makeFinding({
     severity: "warning",
     category: "dedup",
-    title: `${c.model}: ROW_NUMBER() dedup has no unique tiebreaker`,
+    title: `${c.model}: ROW_NUMBER() dedup has no ORDER BY`,
     body:
-      "Deduplicating with `row_number() over (partition by … order by …)` where the ORDER BY isn't provably unique " +
-      "makes which row survives non-deterministic — values flap between rebuilds. Add a unique tiebreaker (e.g. a PK) " +
-      "to the ORDER BY.",
+      "Deduplicating with `row_number() over (partition by …)` and NO `ORDER BY` makes which row survives " +
+      "non-deterministic — it flaps between rebuilds. Add an `ORDER BY` (ideally with a unique tiebreaker) to pick the row deterministically.",
     file: c.file.path,
     model: c.model,
     confidence: "high",
     evidence: { tool: "dbt-patterns", result: { rule: "dedup_no_tiebreaker", line: hit.trim() } },
     ruleKey: "dedup:no-tiebreaker",
-  })
-}
-
-// 10. Surrogate-key macro argument list changed → breaks downstream joins / collisions.
-const detectSurrogateKeyChange: Detector = (c) => {
-  const skRe = /generate_surrogate_key\s*\(\s*\[([^\]]*)\]/i
-  const addedSk = c.added.map((l) => stripComments(l).match(skRe)?.[1]).find(Boolean)
-  const removedSk = c.removed.map((l) => stripComments(l).match(skRe)?.[1]).find(Boolean)
-  if (!addedSk || !removedSk || addedSk.trim() === removedSk.trim()) return null
-  return makeFinding({
-    severity: "warning",
-    category: "dedup",
-    title: `${c.model}: surrogate key column set changed`,
-    body:
-      "The columns feeding `generate_surrogate_key` changed, so the hash changes — every downstream model that joins " +
-      "on the old key breaks, and the grain may collide. Confirm downstream consumers and the key's uniqueness.",
-    file: c.file.path,
-    model: c.model,
-    confidence: "high",
-    evidence: {
-      tool: "dbt-patterns",
-      result: { rule: "surrogate_key_change", from: removedSk.trim(), to: addedSk.trim() },
-    },
-    ruleKey: "dedup:surrogate-key-change",
   })
 }
 
@@ -375,7 +312,11 @@ const detectPiiIntoMart: Detector = (c) => {
     )
   })
   if (!hit) return null
-  const sev: Severity = /\b(ssn|social_security|credit_card|passport)\b/i.test(hit) ? "critical" : "warning"
+  // Highly-sensitive identifiers (SSN/financial/passport/DOB) into a broadly-read
+  // marts layer are critical; softer PII (email/phone/name) is a warning.
+  const sev: Severity = /\b(ssn|social_security|credit_card|passport|date_of_birth|dob)\b/i.test(hit)
+    ? "critical"
+    : "warning"
   return makeFinding({
     severity: sev,
     category: "pii_exposure",
@@ -397,7 +338,6 @@ const detectPiiIntoMart: Detector = (c) => {
 // ---------------------------------------------------------------------------
 
 const addedHit = (c: Ctx, re: RegExp) => c.added.find((l) => re.test(stripComments(l)))
-const removedHit = (c: Ctx, re: RegExp) => c.removed.find((l) => re.test(stripComments(l)))
 function pattern(
   c: Ctx,
   category: ReviewCategory,
@@ -418,94 +358,6 @@ function pattern(
     evidence: { tool: "dbt-patterns", result: { rule, ...(line ? { line: line.trim() } : {}) } },
     ruleKey: `${category}:${rule}`,
   })
-}
-
-// 14. COALESCE/NVL/IFNULL removed → NULL propagation into metrics/keys.
-const detectCoalesceRemoved: Detector = (c) => {
-  const re = /\b(coalesce|ifnull|nvl|isnull)\s*\(/i
-  const rm = removedHit(c, re)
-  if (!rm || addedHit(c, re)) return null
-  return pattern(
-    c,
-    "semantic_change",
-    "warning",
-    "coalesce-removed",
-    "COALESCE/NVL removed — NULLs may propagate",
-    "A null-guard (`coalesce`/`nvl`/`ifnull`) was removed. NULLs can now propagate into arithmetic (→ NULL), aggregates (rows ignored), or concatenated keys. Confirm the column is non-nullable.",
-    rm,
-  )
-}
-
-// 15. SELECT DISTINCT added or removed → grain/meaning change (often masks a fan-out).
-const detectDistinctChange: Detector = (c) => {
-  const re = /\bselect\s+distinct\b/i
-  const a = addedHit(c, re)
-  const r = removedHit(c, re)
-  if (a && !r)
-    return pattern(
-      c,
-      "semantic_change",
-      "warning",
-      "distinct-added",
-      "SELECT DISTINCT added — may mask a fan-out",
-      "`SELECT DISTINCT` was added. It changes grain and often papers over a join fan-out instead of fixing the root cause; it can also hide real duplicates. Confirm the dedup is intentional.",
-      a,
-    )
-  if (r && !a)
-    return pattern(
-      c,
-      "semantic_change",
-      "warning",
-      "distinct-removed",
-      "SELECT DISTINCT removed — duplicates may appear",
-      "`SELECT DISTINCT` was removed; rows that were previously deduplicated may now duplicate downstream.",
-      r,
-    )
-  return null
-}
-
-// 16. UNION ↔ UNION ALL flips (dedup cost vs duplicate rows).
-const detectUnionChange: Detector = (c) => {
-  const allRe = /\bunion\s+all\b/i
-  const unionRe = /\bunion\b(?!\s+all)/i
-  if (removedHit(c, allRe) && addedHit(c, unionRe) && !addedHit(c, allRe))
-    return pattern(
-      c,
-      "warehouse_cost",
-      "warning",
-      "union-all-to-union",
-      "UNION ALL → UNION adds a costly de-dup",
-      "`UNION ALL` was changed to `UNION`, forcing an expensive distinct over the whole result. If duplicates aren't possible, keep `UNION ALL`.",
-      addedHit(c, unionRe),
-    )
-  if (removedHit(c, unionRe) && addedHit(c, allRe))
-    return pattern(
-      c,
-      "sql_correctness",
-      "warning",
-      "union-to-union-all",
-      "UNION → UNION ALL may introduce duplicates",
-      "`UNION` was changed to `UNION ALL`; duplicate rows are no longer removed. Confirm the inputs are disjoint.",
-      addedHit(c, allRe),
-    )
-  return null
-}
-
-// 17. GROUP BY key set changed → grain shift, totals change.
-const detectGroupByChange: Detector = (c) => {
-  const re = /^\s*group\s+by\b/i
-  const a = c.added.find((l) => re.test(stripComments(l)))
-  const r = c.removed.find((l) => re.test(stripComments(l)))
-  if (!a || !r || a.trim() === r.trim()) return null
-  return pattern(
-    c,
-    "semantic_change",
-    "warning",
-    "group-by-change",
-    "GROUP BY grain changed — aggregates shift",
-    "The GROUP BY key set changed, so the model's grain and every downstream SUM/AVG/COUNT change meaning, and joins on the old grain may now fan out. Confirm the intended grain.",
-    a,
-  )
 }
 
 // 18. DML / DDL inside a model (models must be SELECT-only).
@@ -571,25 +423,6 @@ const detectEqualsNull: Detector = (c) => {
   )
 }
 
-// 22. Numeric/string type narrowing (precision loss / truncation / contract break).
-const detectTypeNarrowing: Detector = (c) => {
-  const wide = /(numeric\b|number\s*\(\s*38|decimal\s*\(\s*3[0-9]|float64|bignumeric|\bstring\b|text\b)/i
-  const narrow =
-    /(\bint(64)?\b|\bsmallint\b|number\s*\(\s*\d\b|number\s*\(\s*1\d\b|varchar\s*\(\s*\d+|char\s*\(\s*\d+)/i
-  const rm = c.removed.find((l) => /\bcast\s*\(/i.test(l) && wide.test(l))
-  const ad = c.added.find((l) => /\bcast\s*\(/i.test(l) && narrow.test(l))
-  if (!rm || !ad) return null
-  return pattern(
-    c,
-    "contract_violation",
-    "warning",
-    "type-narrowing",
-    "column type narrowed — precision loss / truncation",
-    "An output column's type was narrowed (e.g. numeric→int, string→varchar(n)). This truncates strings, drops decimal precision or overflows large values, and breaks an enforced contract.",
-    ad,
-  )
-}
-
 // 23. full_refresh=true hardcoded in config → rebuilds full history every run.
 const detectFullRefresh: Detector = (c) => {
   const hit = addedHit(c, /full_refresh\s*[=:]\s*true/i)
@@ -602,21 +435,6 @@ const detectFullRefresh: Detector = (c) => {
     "full_refresh=true forces a full rebuild every run",
     "`full_refresh=true` in config makes every run rebuild the entire table, defeating incremental processing — a recurring cost spike. Drop it unless you truly intend that.",
     hit,
-  )
-}
-
-// 24. Incremental model with no unique_key → append-only duplicates on re-run.
-const detectIncrementalNoUniqueKey: Detector = (c) => {
-  if (!/materialized\s*[=:]\s*['"]?incremental/i.test(c.newSql)) return null
-  if (!/is_incremental\s*\(/i.test(c.newSql)) return null // separate detector handles the no-guard case
-  if (/unique_key/i.test(c.newSql)) return null
-  return pattern(
-    c,
-    "dedup",
-    "warning",
-    "incremental-no-unique-key",
-    "incremental model has no unique_key — appends duplicates",
-    "An incremental model without a `unique_key` only appends; re-runs over an overlapping window duplicate rows. Set a `unique_key` (or use insert_overwrite with partitions).",
   )
 }
 
@@ -677,39 +495,6 @@ const detectConstantJoin: Detector = (c) => {
     "constant-join",
     "join ON a constant is a cartesian product",
     "`JOIN … ON 1=1` (or `ON true`) joins every left row to every right row. Use a real join key unless an intentional cross join is needed.",
-    hit,
-  )
-}
-
-// 29. Hardcoded fully-qualified relation instead of ref()/source().
-const detectHardcodedRelation: Detector = (c) => {
-  const hit = c.added.find((l) => {
-    const s = stripComments(l)
-    return /\b(from|join)\s+`?[A-Za-z_]\w*`?\.`?[A-Za-z_]\w*`?(\.`?[A-Za-z_]\w*`?)?/i.test(s) && !/\{\{/.test(s)
-  })
-  if (!hit) return null
-  return pattern(
-    c,
-    "sql_quality",
-    "warning",
-    "hardcoded-relation",
-    "hardcoded table instead of ref()/source()",
-    "A fully-qualified table is referenced directly instead of `{{ ref() }}`/`{{ source() }}`. dbt loses the lineage edge and the model won't follow environment/schema changes. Replace with ref/source.",
-    hit,
-  )
-}
-
-// 30. var() without a default → compiles to nothing / errors when unset.
-const detectVarNoDefault: Detector = (c) => {
-  const hit = addedHit(c, /\{\{\s*var\s*\(\s*['"][^'"]+['"]\s*\)\s*\}\}/i)
-  if (!hit) return null
-  return pattern(
-    c,
-    "sql_quality",
-    "suggestion",
-    "var-no-default",
-    "var() has no default — breaks when unset",
-    "`{{ var('x') }}` with no default raises a compilation error (or renders empty) when the var isn't provided. Pass a default: `{{ var('x', <default>) }}`.",
     hit,
   )
 }
@@ -781,29 +566,9 @@ const detectCaseNoElse: Detector = (c) => {
   )
 }
 
-// 35. Removed WHERE/AND predicate → data set broadened (more rows than before).
-const detectRemovedPredicate: Detector = (c) => {
-  const re = /^\s*(where|and)\b/i
-  const removedPreds = c.removed.filter((l) => re.test(stripComments(l)) && !/is\s+(not\s+)?null/i.test(l))
-  const addedPreds = new Set(c.added.map((l) => l.trim()))
-  const gone = removedPreds.filter((l) => !addedPreds.has(l.trim()))
-  if (!gone.length) return null
-  return pattern(
-    c,
-    "semantic_change",
-    "warning",
-    "removed-predicate",
-    "a WHERE/AND filter was removed — output broadens",
-    "A filter predicate was removed, so the model now emits more rows than before (often unintended). Confirm the broadened result is correct.",
-    gone[0],
-  )
-}
-
 // 36. Implicit comma cross join: `from a, b`.
 const detectCommaJoin: Detector = (c) => {
-  const hit = c.added.find(
-    (l) => /^\s*(from|,)\s+[\w.`'{}() ]+,\s*[\w.`'{}]+/i.test(stripComments(l)) && !/\bselect\b/i.test(l),
-  )
+  const hit = c.added.find((l) => fromClauseHasTopLevelComma(l))
   if (!hit) return null
   return pattern(
     c,
@@ -899,7 +664,7 @@ const detectFloatEquality: Detector = (c) => {
 // 42. Division without a zero-guard (potential divide-by-zero).
 const detectDivisionNoGuard: Detector = (c) => {
   const hit = c.added.find((l) => {
-    const s = stripComments(l)
+    const s = stripLiterals(stripComments(l))
     return /\/\s*[a-z_][\w.]*/i.test(s) && !/nullif|safe_divide|\/\s*\d/i.test(s)
   })
   if (!hit) return null
@@ -963,41 +728,28 @@ const detectMultiCountDistinct: Detector = (c) => {
 
 const MODEL_DETECTORS: Detector[] = [
   detectClock,
-  detectIncrementalNoGuard,
-  detectMaterializationChange,
   detectSelectStar,
-  detectLeftToInner,
   detectCrossJoin,
   detectFanout,
   detectNotIn,
   detectDedupTie,
-  detectSurrogateKeyChange,
   detectPartitionFunction,
   detectCountDistinct,
   detectPiiIntoMart,
   // extended battery
-  detectCoalesceRemoved,
-  detectDistinctChange,
-  detectUnionChange,
-  detectGroupByChange,
   detectDml,
   detectLimit,
   detectRandom,
   detectEqualsNull,
-  detectTypeNarrowing,
   detectFullRefresh,
-  detectIncrementalNoUniqueKey,
   detectSubqueryPruning,
   detectOrderByNoLimit,
   detectLeadingWildcard,
   detectConstantJoin,
-  detectHardcodedRelation,
-  detectVarNoDefault,
   detectHardcodedDate,
   detectTimestampToDate,
   detectHavingNoGroupBy,
   detectCaseNoElse,
-  detectRemovedPredicate,
   detectCommaJoin,
   detectNaturalJoin,
   detectSelfJoin,

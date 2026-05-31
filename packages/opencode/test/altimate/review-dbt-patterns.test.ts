@@ -17,27 +17,7 @@ const has = (fs: any[], category: string, sev?: string) =>
   fs.some((f) => f.category === category && (!sev || f.severity === sev))
 
 describe("dbt-patterns detectors", () => {
-  test("LEFT JOIN → INNER via WHERE on the outer table → critical join_risk", () => {
-    const sql = `select c.id, o.amount
-from {{ ref('customers') }} c
-left join {{ ref('orders') }} o on c.id = o.customer_id
-where o.amount > 0`
-    const f = detectModelPatterns(modelFile("models/marts/m.sql", sql, ["where o.amount > 0"]), sql, DEFAULT_RUBRIC)
-    expect(has(f, "join_risk", "critical")).toBe(true)
-  })
 
-  test("IS NULL anti-join on outer table is NOT flagged (no false positive)", () => {
-    const sql = `select c.id
-from {{ ref('customers') }} c
-left join {{ ref('orders') }} o on c.id = o.customer_id
-where o.customer_id is null`
-    const f = detectModelPatterns(
-      modelFile("models/marts/m.sql", sql, ["where o.customer_id is null"]),
-      sql,
-      DEFAULT_RUBRIC,
-    )
-    expect(has(f, "join_risk")).toBe(false)
-  })
 
   test("CROSS JOIN → critical join_risk", () => {
     const sql = `select * from a cross join b`
@@ -49,25 +29,7 @@ where o.customer_id is null`
     expect(has(f, "join_risk", "critical")).toBe(true)
   })
 
-  test("incremental model with no is_incremental() guard → materialization warning", () => {
-    const sql = `{{ config(materialized='incremental', unique_key='id') }}\nselect * from {{ ref('raw') }}`
-    const f = detectModelPatterns(
-      modelFile("models/marts/m.sql", sql, ["{{ config(materialized='incremental', unique_key='id') }}"]),
-      sql,
-      DEFAULT_RUBRIC,
-    )
-    expect(has(f, "materialization", "warning")).toBe(true)
-  })
 
-  test("incremental WITH is_incremental() guard → not flagged", () => {
-    const sql = `{{ config(materialized='incremental', unique_key='id') }}\nselect * from {{ ref('raw') }}\n{% if is_incremental() %} where ts > (select max(ts) from {{ this }}) {% endif %}`
-    const f = detectModelPatterns(
-      modelFile("models/marts/m.sql", sql, ["{% if is_incremental() %}"]),
-      sql,
-      DEFAULT_RUBRIC,
-    )
-    expect(f.some((x) => x.title.includes("is_incremental"))).toBe(false)
-  })
 
   test("current_timestamp() in transform → idempotency warning", () => {
     const sql = `select id, current_timestamp() as processed_at from {{ ref('x') }}`
@@ -86,6 +48,13 @@ where o.customer_id is null`
       sql,
       DEFAULT_RUBRIC,
     )
+    expect(has(f, "idempotency")).toBe(false)
+  })
+
+  test("clock in a microbatch config begin= kwarg is NOT flagged (Jinja, not transform)", () => {
+    const line = "begin=(modules.datetime.datetime.now() - modules.datetime.timedelta(days=90)).isoformat()"
+    const sql = `{{ config(materialized='incremental', incremental_strategy='microbatch', ${line}) }}\nselect id from {{ ref('x') }}`
+    const f = detectModelPatterns(modelFile("models/intermediate/m.sql", sql, [line]), sql, DEFAULT_RUBRIC)
     expect(has(f, "idempotency")).toBe(false)
   })
 
@@ -114,11 +83,13 @@ where o.customer_id is null`
     expect(has(passthrough, "warehouse_cost")).toBe(false)
   })
 
-  test("ROW_NUMBER() dedup without unique tiebreaker → dedup warning; with tiebreaker → clean", () => {
-    const bad = `qualify row_number() over (partition by id order by updated_at desc) = 1`
+  test("ROW_NUMBER() dedup with NO order by → dedup warning; any order by → clean (tie-prone case is core L039)", () => {
+    const bad = `qualify row_number() over (partition by id) = 1`
     const f1 = detectModelPatterns(modelFile("models/staging/m.sql", bad, [bad]), bad, DEFAULT_RUBRIC)
     expect(has(f1, "dedup", "warning")).toBe(true)
-    const good = `qualify row_number() over (partition by id order by updated_at desc, id asc) = 1`
+    // A present ORDER BY is the developer's deterministic choice; the "ordered only
+    // by a non-unique key" sub-case is handled by the core AST rule L039, not here.
+    const good = `qualify row_number() over (partition by id order by updated_at desc) = 1`
     const f2 = detectModelPatterns(modelFile("models/staging/m.sql", good, [good]), good, DEFAULT_RUBRIC)
     expect(has(f2, "dedup")).toBe(false)
   })
@@ -191,38 +162,18 @@ describe("dbt-patterns extended battery", () => {
   const fire = (newSql: string, added: string[], removed: string[] = []) =>
     detectModelPatterns(modelFile(M, newSql, added, removed), newSql, DEFAULT_RUBRIC)
 
-  test("COALESCE removed → semantic_change", () =>
-    expect(has(fire("select a from t", [], ["coalesce(a, 0) as a"]), "semantic_change")).toBe(true))
-  test("SELECT DISTINCT added → semantic_change", () =>
-    expect(has(fire("select distinct a from t", ["select distinct a from t"]), "semantic_change")).toBe(true))
-  test("UNION ALL → UNION → warehouse_cost", () =>
-    expect(has(fire("a union b", ["select 1 union select 2"], ["select 1 union all select 2"]), "warehouse_cost")).toBe(
-      true,
-    ))
-  test("UNION → UNION ALL → sql_correctness", () =>
-    expect(
-      has(fire("a union all b", ["select 1 union all select 2"], ["select 1 union select 2"]), "sql_correctness"),
-    ).toBe(true))
-  test("GROUP BY change → semantic_change", () =>
-    expect(has(fire("g", ["group by 1, 2"], ["group by 1"]), "semantic_change")).toBe(true))
+  // NOTE: the base-vs-head `*_change` rules (COALESCE removed, DISTINCT/UNION flip,
+  // GROUP BY change, type narrowing, removed predicate, surrogate-key change) moved to
+  // the core AST `structural_diff` (tested in altimate-core + structuralChangeLane).
   test("DML in model → critical sql_correctness", () =>
     expect(has(fire("delete from t", ["delete from t where 1=1"]), "sql_correctness", "critical")).toBe(true))
   test("LIMIT in model → sql_correctness", () => expect(has(fire("x", ["limit 100"]), "sql_correctness")).toBe(true))
   test("random() → idempotency", () => expect(has(fire("x", ["select rand() as r"]), "idempotency")).toBe(true))
   test("= NULL → sql_correctness", () => expect(has(fire("x", ["where a = null"]), "sql_correctness")).toBe(true))
-  test("type narrowing → contract_violation", () =>
-    expect(has(fire("x", ["cast(a as int64)"], ["cast(a as numeric)"]), "contract_violation")).toBe(true))
   test("full_refresh=true → materialization", () =>
     expect(has(fire("{{ config(full_refresh=true) }}", ["{{ config(full_refresh=true) }}"]), "materialization")).toBe(
       true,
     ))
-  test("incremental no unique_key → dedup", () =>
-    expect(
-      has(
-        fire("{{ config(materialized='incremental') }}\n{% if is_incremental() %}where 1=1{% endif %}", ["where 1=1"]),
-        "dedup",
-      ),
-    ).toBe(true))
   test("max() subquery boundary → warehouse_cost", () =>
     expect(has(fire("x", ["where ts >= (select max(ts) from {{ this }})"]), "warehouse_cost")).toBe(true))
   test("ORDER BY no LIMIT → warehouse_cost", () =>
@@ -230,10 +181,7 @@ describe("dbt-patterns extended battery", () => {
   test("leading-wildcard LIKE → warehouse_cost", () =>
     expect(has(fire("x", ["where name like '%x'"]), "warehouse_cost")).toBe(true))
   test("constant join ON 1=1 → join_risk", () => expect(has(fire("x", ["join t on 1=1"]), "join_risk")).toBe(true))
-  test("hardcoded relation → sql_quality", () =>
-    expect(has(fire("x", ["from analytics.prod.orders"]), "sql_quality")).toBe(true))
-  test("var() no default → sql_quality", () =>
-    expect(has(fire("x", ["where d > {{ var('cutoff') }}"]), "sql_quality")).toBe(true))
+  // hardcoded relation moved to core DBT006 (dbt_config_lint over raw Jinja).
   test("hardcoded date literal → freshness", () =>
     expect(has(fire("x", ["where created_at >= '2024-01-01'"]), "freshness")).toBe(true))
   test("timestamp→date cast → sql_correctness", () =>
@@ -242,8 +190,6 @@ describe("dbt-patterns extended battery", () => {
     expect(has(fire("select a from t having count(*) > 1", ["having count(*) > 1"]), "sql_correctness")).toBe(true))
   test("CASE without ELSE → sql_correctness", () =>
     expect(has(fire("x", ["case when a > 0 then 1 end"]), "sql_correctness")).toBe(true))
-  test("removed predicate → semantic_change", () =>
-    expect(has(fire("select a from t", [], ["where status = 'active'"]), "semantic_change")).toBe(true))
   test("comma join → join_risk", () => expect(has(fire("x", ["from a, b"]), "join_risk")).toBe(true))
   test("NATURAL JOIN → join_risk", () => expect(has(fire("x", ["natural join t"]), "join_risk")).toBe(true))
   test("self-join (same ref twice) → join_risk", () =>

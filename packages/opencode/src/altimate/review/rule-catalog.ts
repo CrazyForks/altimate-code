@@ -1,7 +1,6 @@
 import { type Finding, type Severity, type ReviewCategory, makeFinding } from "./finding"
 import { type ChangedFile, classifyDbtFile } from "./diff-filter"
 import { type Rubric, clampSeverity, exclusionReason } from "./rubric"
-import { GENERATED } from "./rule-generators"
 import path from "node:path"
 
 /**
@@ -112,7 +111,7 @@ export function evaluateCatalog(
 ): Finding[] {
   const input: RuleInput = { file, newSql, added, removed }
   const model = modelName(file.path)
-  const out: Finding[] = []
+  const matched: { rule: Rule; finding: Finding }[] = []
   for (const rule of CATALOG) {
     if (!ruleMatches(rule, input)) continue
     const f = makeFinding({
@@ -126,9 +125,25 @@ export function evaluateCatalog(
       evidence: { tool: "rule-catalog", result: { rule: rule.id } },
       ruleKey: `${rule.category}:${rule.id}`,
     })
-    if (!exclusionReason(f, rubric)) out.push(f)
+    if (!exclusionReason(f, rubric)) matched.push({ rule, finding: f })
   }
-  return out
+
+  // The generated `fn-<name>` rules (rule-generators.ts) are a long-tail
+  // portability net. When a dedicated hand-written rule already flags the same
+  // function on this file, drop the generic one so the reviewer doesn't repeat
+  // the same advice. We treat a function as "already covered" if a non-generated
+  // finding mentions it in call form `NAME(` or backticked `NAME`.
+  const covered = new Set<string>()
+  for (const { rule, finding } of matched) {
+    if (rule.id.startsWith("fn-")) continue
+    const text = `${finding.title} ${finding.body}`
+    for (const m of text.matchAll(/`([A-Za-z_][A-Za-z0-9_.]*)`|\b([A-Za-z_][A-Za-z0-9_]+)\s*\(/g)) {
+      covered.add((m[1] ?? m[2]).toLowerCase())
+    }
+  }
+  return matched
+    .filter(({ rule }) => !(rule.id.startsWith("fn-") && covered.has(rule.id.slice(3))))
+    .map(({ finding }) => finding)
 }
 
 /** Build a RuleInput from an example (for the catalog self-test). */
@@ -290,16 +305,8 @@ const CORRECTNESS: Rule[] = [
     { add: "create temp table tmp as select 1" },
     { add: "with tmp as (select 1)" },
   ),
-  r(
-    "reserved-word-alias",
-    "sql_quality",
-    "suggestion",
-    "alias uses a reserved word",
-    "Aliasing a column `as order`/`as table`/`as select` needs quoting and breaks across warehouses.",
-    { added: /\bas\s+(order|table|select|from|group|user|case|date)\b/i },
-    { add: "select x as order" },
-    { add: "select x as order_amount" },
-  ),
+  // reserved-word-alias removed: the compiled core's `review_lexical_scan` owns
+  // reserved-word detection (308-word curated list in the binary).
 ]
 
 const NULLS: Rule[] = [
@@ -313,26 +320,13 @@ const NULLS: Rule[] = [
     { add: "coalesce(0, 'none')" },
     { add: "coalesce(amount, 0)" },
   ),
-  r(
-    "nullif-zero-missing",
-    "sql_correctness",
-    "suggestion",
-    "division should guard zero with NULLIF",
-    "Wrap denominators in `nullif(x,0)` (or safe_divide) to avoid divide-by-zero.",
-    { added: /\/\s*(sum|count|[a-z_][\w.]*)\b/i, unless: /nullif|safe_divide|\/\s*\d/i },
-    { add: "select a / count(id)" },
-    { add: "select a / nullif(b,0)" },
-  ),
-  r(
-    "isnull-nonportable",
-    "sql_quality",
-    "suggestion",
-    "ISNULL/NVL is dialect-specific — prefer COALESCE",
-    "`ISNULL`/`NVL` aren't portable across warehouses; `COALESCE` is standard.",
-    { added: /\b(isnull|nvl)\s*\(/i },
-    { add: "select isnull(a, 0)" },
-    { add: "select coalesce(a, 0)" },
-  ),
+  // NOTE: division-without-guard is handled by the literal-safe
+  // `detectDivisionNoGuard` detector and (once shipped) core's AST rule L032 —
+  // a regex catalog twin here would double-report and trip on `/` inside string
+  // literals, so it is intentionally omitted.
+  // isnull/nvl portability is owned by core L033 (dialect-aware: silent on
+  // Snowflake/Redshift/etc. that support NVL). A non-dialect-aware TS regex twin
+  // here false-flagged NVL on its native warehouses (measured FP).
   r(
     "null-concat",
     "sql_correctness",
@@ -1295,16 +1289,10 @@ const BIGQUERY: Rule[] = [
     { add: "cross join unnest(items) as item" },
     { add: "left join unnest(items) as item" },
   ),
-  r(
-    "bq-safe-cast-missing",
-    "sql_correctness",
-    "suggestion",
-    "BigQuery: CAST may error — consider SAFE_CAST",
-    "On dirty data `CAST` throws and fails the whole run; `SAFE_CAST` returns NULL on bad values.",
-    { added: /\bcast\s*\(\s*\w+\s+as\s+(int64|numeric|float64|date|timestamp)\b/i, unless: /safe_cast/i },
-    { add: "cast(amount as int64)" },
-    { add: "safe_cast(amount as int64)" },
-  ),
+  // bq-safe-cast-missing removed: it flagged EVERY numeric/date CAST as "consider
+  // SAFE_CAST", which is a false-positive on the overwhelmingly common case of a
+  // clean cast. The genuine dirty-data concern is too context-dependent for a
+  // blanket regex; flagging all casts erodes trust (measured FP in value eval).
   r(
     "bq-float64-money",
     "sql_correctness",
@@ -1418,26 +1406,11 @@ const SNOWFLAKE: Rule[] = [
     { add: "from table(result_scan(last_query_id()))" },
     { add: "from {{ ref('x') }}" },
   ),
-  r(
-    "sf-zeroifnull-nonportable",
-    "sql_quality",
-    "suggestion",
-    "Snowflake-specific ZEROIFNULL/IFF",
-    "`ZEROIFNULL`/`IFF`/`DECODE` are Snowflake-only; use COALESCE/CASE for portability.",
-    { added: /\b(zeroifnull|iff|decode|nvl2)\s*\(/i },
-    { add: "zeroifnull(x)" },
-    { add: "coalesce(x, 0)" },
-  ),
-  r(
-    "sf-array-agg-no-order",
-    "sql_correctness",
-    "suggestion",
-    "Snowflake: ARRAY_AGG without WITHIN GROUP order",
-    "`ARRAY_AGG` without `WITHIN GROUP (ORDER BY …)` builds the array in non-deterministic order.",
-    { added: /array_agg\s*\(/i, unless: /within\s+group/i },
-    { add: "array_agg(id)" },
-    { add: "array_agg(id) within group (order by id)" },
-  ),
+  // zeroifnull/iff/decode/nvl2 portability owned by core L033 (dialect-aware).
+  // sf-array-agg-no-order removed: redundant with `string-agg-no-order` (which
+  // covers array_agg AND guards on `order by`), and buggy here — its `unless`
+  // only matched `within group`, so it false-fired on the standard
+  // `array_agg(x order by x)` form (measured FP in the value eval).
   r(
     "sf-transient-loss",
     "materialization",
@@ -1468,16 +1441,9 @@ const SNOWFLAKE: Rule[] = [
     { add: "where name ilike '%shirt%'" },
     { add: "where lower(name) = 'shirt'" },
   ),
-  r(
-    "sf-getdate-nonportable",
-    "sql_quality",
-    "suggestion",
-    "Snowflake/SQL Server GETDATE() is non-portable",
-    "`GETDATE()`/`SYSDATE` aren't standard; use `current_timestamp` (and avoid clocks in transforms).",
-    { added: /\b(getdate|sysdate)\s*\(/i },
-    { add: "select getdate()" },
-    { add: "select current_timestamp() as _loaded_at" },
-  ),
+  // getdate/sysdate portability owned by core L033 (dialect-aware: silent on
+  // Redshift/SQL Server). The idempotency concern (clock in a transform) is a
+  // SEPARATE rule (rs-getdate) and is kept.
   r(
     "sf-sample-clause",
     "sql_correctness",
@@ -2337,16 +2303,9 @@ const MISC2: Rule[] = [
     { add: "cast(x as text)" },
     { add: "cast(x as string)" },
   ),
-  r(
-    "order-desc-no-nulls",
-    "sql_correctness",
-    "suggestion",
-    "ORDER BY DESC without NULLS ordering",
-    "NULL position in `ORDER BY … DESC` differs across warehouses; specify `NULLS LAST/FIRST` for determinism.",
-    { added: /order\s+by\s+[\w.]+\s+desc\b/i, unless: /nulls\s+(first|last)/i },
-    { add: "order by updated_at desc" },
-    { add: "order by updated_at desc nulls last" },
-  ),
+  // order-desc-no-nulls removed: flagged EVERY `order by x desc` for a missing
+  // NULLS LAST/FIRST — noise on the overwhelmingly common case (warehouses have
+  // sane default NULL ordering). Measured FP in the real-world corpus.
   r(
     "power-caret",
     "sql_correctness",
@@ -2393,5 +2352,10 @@ CATALOG.push(
   ...STYLE,
   ...MISC,
   ...MISC2,
-  ...GENERATED,
 )
+// NOTE: the large generated families (dialect-specific functions, reserved
+// words, non-portable types, operators) used to live in `rule-generators.ts`.
+// That curated knowledge now ships in the compiled core (L033 functions, L035
+// types, `review_lexical_scan` for reserved-words/operators) — see
+// orchestrate.ts. This catalog keeps only the hand-written structural / dbt
+// rules; the engine owns the bulk and runs over parsed ASTs.

@@ -15,6 +15,7 @@ interface ManifestModel {
   unique_id: string
   name: string
   depends_on: string[]
+  path?: string
 }
 
 interface CachedManifest {
@@ -30,6 +31,26 @@ function asArray<T = any>(v: unknown): T[] {
   return Array.isArray(v) ? (v as T[]) : []
 }
 
+/**
+ * Copy `primary_key` from `source` (manifest, which has dbt contract PKs) onto
+ * matching tables in `target` (catalog, which has complete columns but no PK).
+ * Non-destructive: only fills a PK where `target` lacks one. Enables fan-out
+ * detection (L037) on the catalog-preferred path.
+ */
+function mergePrimaryKeys(
+  target: Record<string, any> | undefined,
+  source: Record<string, any> | undefined,
+): Record<string, any> | undefined {
+  if (!target?.tables || !source?.tables) return target
+  const out = { ...target, tables: { ...target.tables } }
+  for (const [key, t] of Object.entries<any>(out.tables)) {
+    if (t?.primary_key?.length) continue
+    const pk = source.tables[key]?.primary_key
+    if (Array.isArray(pk) && pk.length) out.tables[key] = { ...t, primary_key: pk }
+  }
+  return out
+}
+
 /** Extract a column name from a PII-flavored check issue, best-effort. */
 function piiColumnOf(issue: any): string | undefined {
   return issue?.column ?? issue?.target ?? issue?.name ?? undefined
@@ -43,6 +64,42 @@ function bandConfidence(c: unknown): "high" | "medium" | "low" {
   }
   const n = typeof c === "number" ? c : 0.5
   return n >= 0.8 ? "high" : n >= 0.5 ? "medium" : "low"
+}
+
+/**
+ * Map a core lint finding (by rule name / L0xx code) to a review category.
+ * Core's `LintFinding` carries no category, so without this every AST finding
+ * collapses to `sql_quality` — undersells correctness/join/contract risks.
+ */
+function lintCategory(rule: string, code: string): string | undefined {
+  const r = `${rule} ${code}`.toLowerCase().replace(/_/g, "-")
+  if (/pii|sensitive/.test(r)) return "pii_exposure"
+  if (/cartesian|cross-join|comma-join|non-equi-join|or-in-join|fan.?out|l037/.test(r)) return "join_risk"
+  if (/non-portable-type|l035/.test(r)) return "contract_violation"
+  if (/division|divide|l032/.test(r)) return "sql_correctness"
+  if (/overflow|l036/.test(r)) return "sql_correctness"
+  if (/timezone-in-hash|hash-key|l038/.test(r)) return "sql_correctness"
+  if (/non-deterministic|dedup|l039/.test(r)) return "sql_correctness"
+  if (/monetary|float-cast|l040/.test(r)) return "sql_correctness"
+  if (/coalesce|typed-coalesce|l041/.test(r)) return "sql_correctness"
+  if (/case-sensitive|l042/.test(r)) return "sql_quality"
+  if (/outer-join-filter|outer_join|left-to-inner|l043/.test(r)) return "join_risk"
+  if (/null-propagating|null.?concat|l044/.test(r)) return "sql_correctness"
+  if (/greatest|least|l045/.test(r)) return "sql_correctness"
+  if (/distinct.?with.?window|l046/.test(r)) return "sql_correctness"
+  if (/cast.?division|cast.?float|l048/.test(r)) return "sql_correctness"
+  if (/clock.?in.?filter|now.?in.?filter|l049/.test(r)) return "idempotency"
+  if (/cast.?in.?join|join-on-cast|l050/.test(r)) return "join_risk"
+  if (/full.?outer|join.?without.?cond|l051|l052/.test(r)) return "join_risk"
+  if (/null.?in.?in.?list|sum.?of.?ratio|l053|l054/.test(r)) return "sql_correctness"
+  if (/not-null-comparison|null-comparison|not-in|nullable|l009/.test(r)) return "sql_correctness"
+  if (/window.*partition|partition.*window/.test(r)) return "sql_correctness"
+  if (/count-star|distinct/.test(r)) return "sql_correctness"
+  if (/missing-where|update|delete/.test(r)) return "sql_correctness"
+  if (/non-portable-function|l033/.test(r)) return "sql_quality"
+  if (/select-star|l001|leading-wildcard|missing-partition-filter|large-in-list|non-sargable/.test(r))
+    return "warehouse_cost"
+  return undefined // → sql_quality default downstream
 }
 
 export interface DispatcherRunnerOptions {
@@ -108,25 +165,56 @@ export function createDispatcherRunner(opts: DispatcherRunnerOptions): ReviewRun
 
   // Explicit override wins; otherwise derive schema from the manifest. This is
   // what makes equivalence decidable in CI instead of always-undecidable.
+  let mergedSchema: Record<string, any> | undefined
+  let mergedSchemaDone = false
   async function resolveSchema(): Promise<Record<string, any> | undefined> {
-    if (opts.schemaContext) return opts.schemaContext
-    return (await loadManifest()).schemaContext
+    if (!opts.schemaContext) return (await loadManifest()).schemaContext
+    // The catalog schema has complete warehouse columns but no PRIMARY KEY concept;
+    // enrich it with PKs from the manifest (dbt contract constraints) so fan-out
+    // detection (L037) can fire. Memoized so the merge happens at most once.
+    if (!mergedSchemaDone) {
+      mergedSchema = mergePrimaryKeys(opts.schemaContext, (await loadManifest()).schemaContext)
+      mergedSchemaDone = true
+    }
+    return mergedSchema
   }
 
-  async function runCheck(sql: string): Promise<CheckResult> {
-    const cached = checkCache.get(sql)
+  async function runCheck(sql: string, dialect?: string, baseSql?: string): Promise<CheckResult> {
+    const cacheKey = `${dialect ?? ""}|${baseSql ? "B" : ""}|${sql}`
+    const cached = checkCache.get(cacheKey)
     if (cached) return cached
     let out: CheckResult = { issues: [], piiColumns: [] }
     try {
-      const res = await Dispatcher.call("altimate_core.check", { sql, schema_context: await resolveSchema() })
+      // Thread the project dialect into the schema so core lint runs in the
+      // right dialect (e.g. L033 portability suppresses the warehouse's OWN
+      // native functions) — in BOTH full and lint-only modes. core's schema
+      // validation requires ≥1 table, so when there's no manifest we attach a
+      // throwaway table purely to carry the dialect; AST lint walks the query,
+      // not the schema, so it's inert (and validation errors aren't surfaced).
+      const schema = (await resolveSchema()) as { tables?: Record<string, unknown> } | undefined
+      const hasTables = !!schema && Object.keys(schema.tables ?? {}).length > 0
+      const schemaContext = !dialect
+        ? schema
+        : hasTables
+          ? { ...schema, dialect }
+          : { tables: { _altimate_lint_: { columns: [{ name: "_", type: "string" }] } }, version: "1", dialect }
+      const res = await Dispatcher.call("altimate_core.check", { sql, schema_context: schemaContext, base_sql: baseSql })
       const data = (res.data ?? {}) as Record<string, any>
-      const rawIssues = asArray(data.issues).concat(asArray(data.violations)).concat(asArray(data.findings))
+      // `altimate_core.check` is a composite: { validation, lint, safety }.
+      // The AST anti-pattern findings live at data.lint.findings (each a
+      // LintFinding: { code, rule, severity, message, line }). Validation
+      // failures surface as data.validation.errors. We also keep the legacy
+      // top-level keys as a fallback for older core builds.
+      const rawIssues = asArray(data.lint?.findings)
+        .concat(asArray(data.issues))
+        .concat(asArray(data.violations))
+        .concat(asArray(data.findings))
       const issues = rawIssues.map((i: any) => ({
         rule: i.rule ?? i.code ?? i.name ?? "issue",
         message: i.message ?? i.description ?? String(i),
         line: typeof i.line === "number" ? i.line : i.location?.line,
         severity: i.severity ?? i.level,
-        category: i.category ?? (/(pii|sensitive)/i.test(String(i.rule ?? i.code ?? "")) ? "pii" : i.kind),
+        category: i.category ?? lintCategory(String(i.rule ?? ""), String(i.code ?? "")) ?? i.kind,
       }))
       // PII columns: explicit data.pii, or PII-categorized issues. Extract from
       // RAW issues (which still carry column/target/name) — the normalized
@@ -137,11 +225,13 @@ export function createDispatcherRunner(opts: DispatcherRunnerOptions): ReviewRun
           .filter((i: any) => /pii|sensitive/i.test(String(i.category ?? i.rule ?? i.code ?? i.kind ?? "")))
           .map(piiColumnOf),
       ].filter((c): c is string => !!c)
-      out = { issues, piiColumns: [...new Set(piiColumns)] }
+      // ran=true: the core parsed and analyzed the SQL (even if zero issues).
+      // This lets the orchestrator defer structural checks to the AST lint.
+      out = { issues, piiColumns: [...new Set(piiColumns)], ran: true }
     } catch {
-      out = { issues: [], piiColumns: [] }
+      out = { issues: [], piiColumns: [], ran: false }
     }
-    checkCache.set(sql, out)
+    checkCache.set(cacheKey, out)
     return out
   }
 
@@ -196,8 +286,177 @@ export function createDispatcherRunner(opts: DispatcherRunnerOptions): ReviewRun
       }
     },
 
-    check(sql: string): Promise<CheckResult> {
-      return runCheck(sql)
+    check(sql: string, dialect?: string, baseSql?: string): Promise<CheckResult> {
+      return runCheck(sql, dialect, baseSql)
+    },
+
+    async grain(sql: string): Promise<{ group_by: string[]; dedup_partition: string[] }> {
+      try {
+        const res = await Dispatcher.call("altimate_core.grain", { sql })
+        const d = (res.data ?? {}) as Record<string, any>
+        return { group_by: asArray<string>(d.group_by), dedup_partition: asArray<string>(d.dedup_partition) }
+      } catch {
+        return { group_by: [], dedup_partition: [] }
+      }
+    },
+
+    async dbtConfigLint(
+      rawSql: string,
+      oldRawSql?: string,
+    ): Promise<Array<{ code: string; rule: string; severity?: string; message: string; suggestion?: string }>> {
+      const out: any[] = []
+      try {
+        const res = await Dispatcher.call("altimate_core.dbt_config_lint", { sql: rawSql })
+        out.push(...asArray((res.data as any)?.findings))
+      } catch {
+        /* skip */
+      }
+      if (oldRawSql) {
+        try {
+          const res = await Dispatcher.call("altimate_core.dbt_config_diff", { base_sql: oldRawSql, head_sql: rawSql })
+          out.push(...asArray((res.data as any)?.findings))
+        } catch {
+          /* skip */
+        }
+      }
+      return out
+    },
+
+    async structuralDiff(
+      baseSql: string,
+      headSql: string,
+    ): Promise<Array<{ code: string; rule: string; severity?: string; message: string; suggestion?: string }>> {
+      try {
+        const res = await Dispatcher.call("altimate_core.structural_diff", { base_sql: baseSql, head_sql: headSql })
+        return asArray((res.data as any)?.findings)
+      } catch {
+        return []
+      }
+    },
+
+    async sourceFilters(sql: string): Promise<Record<string, string[]>> {
+      try {
+        const res = await Dispatcher.call("altimate_core.source_filters", { sql })
+        const d = (res.data ?? {}) as Record<string, any>
+        return (d.filters ?? {}) as Record<string, string[]>
+      } catch {
+        return {}
+      }
+    },
+
+    async declaredPrimaryKey(model: string): Promise<string[] | undefined> {
+      const schema = (await resolveSchema()) as { tables?: Record<string, any> } | undefined
+      const t = schema?.tables?.[model] ?? schema?.tables?.[model.toLowerCase()]
+      const pk = t?.primary_key
+      return Array.isArray(pk) && pk.length ? pk.map((c: string) => String(c)) : undefined
+    },
+
+    async downstreamModels(model: string): Promise<Array<{ name: string; path: string }>> {
+      const m = await loadManifest()
+      const node = m.byName.get(model)
+      if (!node) return []
+      const out: Array<{ name: string; path: string }> = []
+      for (const childId of m.children.get(node.unique_id) ?? []) {
+        const child = m.models.get(childId)
+        if (child?.path && childId.startsWith("model.")) out.push({ name: child.name, path: child.path })
+      }
+      return out
+    },
+
+    async isComplex(sql: string): Promise<boolean> {
+      try {
+        const res = await Dispatcher.call("altimate_core.metadata", { sql })
+        const d = (res.data ?? {}) as Record<string, any>
+        return !!(d.has_window_functions || d.has_subqueries || (typeof d.node_count === "number" && d.node_count >= 12))
+      } catch {
+        return false
+      }
+    },
+
+    async classifyPii(columns: string[]) {
+      if (!columns.length) return []
+      try {
+        // classify_pii classifies a SCHEMA's columns by name/type — feed it the
+        // model's output columns as a one-table schema.
+        const res = await Dispatcher.call("altimate_core.classify_pii", {
+          schema_context: {
+            tables: { model: { columns: columns.map((name) => ({ name, type: "string" })) } },
+            version: "1",
+          },
+        })
+        const data = (res.data ?? {}) as Record<string, any>
+        return asArray<any>(data.columns)
+          .filter((c) => c?.classification && c.classification !== "None")
+          .map((c) => ({
+            column: String(c.column ?? ""),
+            classification: String(c.classification ?? ""),
+            confidence: typeof c.confidence === "number" ? c.confidence : 0,
+            masking: c.suggested_masking ?? undefined,
+          }))
+      } catch {
+        return []
+      }
+    },
+
+    async dataDiff(baseSql: string, headSql: string, keyColumns: string[], warehouse?: string) {
+      if (!keyColumns.length) return null
+      try {
+        // Both sides run against the SAME warehouse connection (base-compiled vs
+        // head-compiled SQL). `warehouse` selects a named connection; when empty,
+        // `data.diff` falls back to the default/first registered warehouse.
+        const res = await Dispatcher.call("data.diff", {
+          source: baseSql,
+          target: headSql,
+          key_columns: keyColumns,
+          source_warehouse: warehouse || undefined,
+          target_warehouse: warehouse || undefined,
+        })
+        const r = res as any
+        if (!r || r.success === false) return null
+        const o = (r.outcome ?? {}) as Record<string, any>
+        return {
+          rowsOnlyInBase: o.rows_only_in_source ?? o.removed ?? o.exclusive_source,
+          rowsOnlyInHead: o.rows_only_in_target ?? o.added ?? o.exclusive_target,
+          rowsChanged: o.rows_changed ?? o.different ?? o.changed,
+          summary: o.summary ?? r.summary,
+        }
+      } catch {
+        return null
+      }
+    },
+
+    async columnLineage(sql: string, dialect?: string): Promise<Array<{ source: string; target: string }>> {
+      try {
+        const res = await Dispatcher.call("altimate_core.column_lineage", {
+          sql,
+          schema_path: "",
+          schema_context: await resolveSchema(),
+          dialect,
+        })
+        const data = (res.data ?? {}) as Record<string, any>
+        return asArray<any>(data.column_lineage).map((e) => ({
+          source: String(e.source ?? ""),
+          target: String(e.target ?? ""),
+        }))
+      } catch {
+        return []
+      }
+    },
+
+    async lexicalScan(addedLines: string[]) {
+      if (!addedLines.length) return []
+      try {
+        const res = await Dispatcher.call("altimate_core.review_lexical_scan", { added_lines: addedLines })
+        const data = (res.data ?? {}) as Record<string, any>
+        return asArray<any>(data.findings).map((f) => ({
+          rule: String(f.rule ?? "lexical"),
+          severity: f.severity,
+          message: String(f.message ?? ""),
+          line: f.line,
+        }))
+      } catch {
+        return []
+      }
     },
 
     async equivalence(oldSql: string, newSql: string): Promise<EquivalenceResult> {

@@ -11,7 +11,7 @@
  */
 
 export interface SchemaContext {
-  tables: Record<string, { columns: Array<{ name: string; type: string }> }>
+  tables: Record<string, { columns: Array<{ name: string; type: string }>; primary_key?: string[] }>
   version: string
 }
 
@@ -21,7 +21,29 @@ export interface SchemaNode {
   alias?: string
   schema_name?: string
   database?: string
-  columns?: Array<{ name: string; data_type?: string; type?: string }>
+  columns?: Array<{
+    name: string
+    data_type?: string
+    type?: string
+    /** dbt contract constraints, e.g. `[{ type: "primary_key" }]`. */
+    constraints?: Array<{ type?: string }>
+  }>
+  /** Explicit primary key columns (model-level contract constraint). */
+  primary_key?: string[]
+}
+
+/**
+ * Derive a node's primary key for fan-out analysis (L037). Prefers an explicit
+ * `primary_key`; otherwise collects columns carrying a `primary_key` contract
+ * constraint. Returns undefined when none is declared (the lint then stays silent
+ * — no false positives).
+ */
+function nodePrimaryKey(node: SchemaNode): string[] | undefined {
+  if (node.primary_key?.length) return node.primary_key
+  const pk = (node.columns ?? [])
+    .filter((c) => c.name && (c.constraints ?? []).some((k) => /primary[_ ]?key/i.test(String(k?.type ?? ""))))
+    .map((c) => c.name)
+  return pk.length ? pk : undefined
 }
 
 /**
@@ -37,6 +59,34 @@ export interface SchemaNode {
  * node carries column metadata — the caller then treats equivalence as
  * undecidable rather than guessing.
  */
+/**
+ * Build a schema context from dbt's `catalog.json` (`dbt docs generate`). The
+ * catalog carries the ACTUAL warehouse columns for every relation — unlike the
+ * manifest, which only has columns documented in `schema.yml`. This completeness
+ * is what makes column-lineage breakage and proven equivalence actually fire on
+ * real projects (vs. silently returning nothing / degrading to undecidable).
+ */
+export async function buildCatalogSchemaContext(catalogPath: string): Promise<SchemaContext | undefined> {
+  let parsed: any
+  try {
+    parsed = JSON.parse(await (await import("node:fs/promises")).readFile(catalogPath, "utf8"))
+  } catch {
+    return undefined
+  }
+  const nodes: SchemaNode[] = []
+  for (const group of [parsed?.nodes, parsed?.sources]) {
+    for (const node of Object.values<any>(group ?? {})) {
+      const meta = node?.metadata ?? {}
+      const columns = Object.values<any>(node?.columns ?? {})
+        .filter((c) => c?.name)
+        .map((c) => ({ name: String(c.name), data_type: String(c.type ?? "") }))
+      if (!columns.length || !meta.name) continue
+      nodes.push({ name: meta.name, schema_name: meta.schema, database: meta.database, columns })
+    }
+  }
+  return buildReviewSchemaContext(nodes)
+}
+
 export function buildReviewSchemaContext(...nodeGroups: Array<SchemaNode[] | undefined>): SchemaContext | undefined {
   const tables: SchemaContext["tables"] = {}
   for (const group of nodeGroups) {
@@ -46,6 +96,7 @@ export function buildReviewSchemaContext(...nodeGroups: Array<SchemaNode[] | und
         .filter((c) => c.name)
         .map((c) => ({ name: c.name, type: c.data_type ?? c.type ?? "" }))
       if (!columns.length) continue
+      const primary_key = nodePrimaryKey(node)
       const ids = new Set<string>()
       for (const base of [node.alias, node.name]) {
         if (!base) continue
@@ -55,7 +106,7 @@ export function buildReviewSchemaContext(...nodeGroups: Array<SchemaNode[] | und
           if (node.database) ids.add(`${node.database}.${node.schema_name}.${base}`)
         }
       }
-      for (const id of ids) tables[id] = { columns }
+      for (const id of ids) tables[id] = primary_key ? { columns, primary_key } : { columns }
     }
   }
   return Object.keys(tables).length ? { tables, version: "1" } : undefined

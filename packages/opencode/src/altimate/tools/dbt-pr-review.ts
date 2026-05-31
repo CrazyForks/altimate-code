@@ -12,11 +12,12 @@ import { ReviewMode } from "../review/verdict"
  */
 export const DbtPrReviewTool = Tool.define("dbt_pr_review", {
   description: [
-    "Run a Cloudflare-style dbt PR review over the changed models in this repo.",
+    "Run a layered dbt PR review over the changed models in this repo.",
     "Produces a SIGNED verdict (APPROVE | COMMENT | REQUEST_CHANGES) where every",
     "blocking finding is backed by a deterministic engine call — column-lineage",
     "blast radius, query equivalence, PII classification, and A–F grade — not",
-    "model opinion. Reads .altimate/review.yml for per-repo rubric + mode.",
+    "model opinion, plus advisory LLM comments for contextual judgment. Reads",
+    ".altimate/review.yml for per-repo rubric + mode.",
     "",
     "Examples:",
     "- dbt_pr_review({})                                  // review working tree vs origin/main",

@@ -21,8 +21,27 @@ export const ReviewConfig = z.object({
   severityThreshold: Severity.default("suggestion"),
   /** Path to the compiled dbt manifest. */
   manifestPath: z.string().default("target/manifest.json"),
-  /** SQL dialect for static analysis. */
-  dialect: z.string().default("snowflake"),
+  /** SQL dialect for static analysis. Empty = auto-detect from the dbt
+   *  manifest's `adapter_type` (set explicitly here to override). */
+  dialect: z.string().default(""),
+  /** Enable the advisory LLM reviewer lane (needs a configured model). */
+  ai: z.boolean().default(true),
+  /**
+   * Data-diff: actually run base-vs-head against the warehouse (core DataParity)
+   * and report row/value deltas. OPT-IN — it costs warehouse compute and needs a
+   * configured warehouse connection, so it is OFF by default. Configure
+   * credentials via a connection (env `ALTIMATE_CODE_CONN_<NAME>` for CI,
+   * `~/.altimate-code/connections.json`, or a dbt `profiles.yml`); see the
+   * "Data-diff in CI" section of the docs.
+   */
+  dataDiff: z
+    .object({
+      /** Run the data-diff lane (requires a configured warehouse). */
+      enabled: z.boolean().default(false),
+      /** Connection name to diff against. Empty = the default/first connection. */
+      warehouse: z.string().default(""),
+    })
+    .default({ enabled: false, warehouse: "" }),
   /** Rubric overrides, deep-merged onto DEFAULT_RUBRIC. */
   rubric: Rubric.partial().default({}),
   /** Extra path suffixes to exclude from review. */

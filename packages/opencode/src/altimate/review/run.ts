@@ -1,10 +1,13 @@
 import path from "node:path"
+import { readFile } from "node:fs/promises"
 import { loadReviewConfig, resolveRubric } from "./config"
 import type { Severity } from "./finding"
 import { collectChangedFiles, makeContentResolver, defaultBaseRef, manifestHash } from "./git"
 import { makeCompiledResolver, dbtProjectName } from "./compiled"
+import { buildCatalogSchemaContext } from "./schema-context"
 import { createDispatcherRunner } from "./runner"
 import { runReview } from "./orchestrate"
+import { runAiReview } from "./ai-review"
 import type { ReviewMode, VerdictEnvelope } from "./verdict"
 import type { ChangedFile } from "./diff-filter"
 
@@ -34,6 +37,40 @@ export interface ReviewPullRequestOptions {
   /** Model identifier recorded in the envelope. */
   modelVersion?: string
   coreVersion?: string
+  /** Disable the LLM reviewer lane (default: enabled; self-degrades if no model). */
+  noAi?: boolean
+  /** PR metadata for the AI reviewer's intent check. */
+  prTitle?: string
+  prBody?: string
+}
+
+/** dbt adapter_type → core SQL dialect. Mostly identity; a few aliases. */
+const ADAPTER_DIALECT: Record<string, string> = {
+  bigquery: "bigquery",
+  snowflake: "snowflake",
+  redshift: "redshift",
+  postgres: "postgres",
+  databricks: "databricks",
+  spark: "databricks",
+  duckdb: "duckdb",
+  trino: "trino",
+  athena: "athena",
+  mysql: "mysql",
+  oracle: "oracle",
+  sqlserver: "tsql",
+  synapse: "tsql",
+  fabric: "fabric",
+}
+
+/** Read the dbt manifest's `metadata.adapter_type` and map it to a dialect. */
+async function detectDialect(manifestAbs: string): Promise<string | undefined> {
+  try {
+    const raw = await readFile(manifestAbs, "utf8")
+    const adapter = String(JSON.parse(raw)?.metadata?.adapter_type ?? "").toLowerCase()
+    return ADAPTER_DIALECT[adapter] ?? (adapter || undefined)
+  } catch {
+    return undefined
+  }
 }
 
 export async function reviewPullRequest(opts: ReviewPullRequestOptions): Promise<VerdictEnvelope> {
@@ -54,7 +91,18 @@ export async function reviewPullRequest(opts: ReviewPullRequestOptions): Promise
     ? config.manifestPath
     : path.join(opts.cwd, config.manifestPath)
 
-  const runner = createDispatcherRunner({ manifestPath: manifestAbs })
+  // Resolve the SQL dialect: explicit config wins; otherwise auto-detect from
+  // the dbt manifest's `adapter_type` (so a BigQuery/Redshift project isn't
+  // analyzed as the snowflake default — wrong-dialect portability suppression).
+  if (!config.dialect) config.dialect = (await detectDialect(manifestAbs)) ?? "snowflake"
+
+  // Prefer dbt's catalog.json (real warehouse columns from `dbt docs generate`)
+  // for the schema context — complete columns are what make column-lineage
+  // breakage and proven equivalence actually fire (the manifest only has
+  // documented columns). Falls back to manifest-derived schema when absent.
+  const catalogAbs = path.join(path.dirname(manifestAbs), "catalog.json")
+  const catalogSchema = await buildCatalogSchemaContext(catalogAbs)
+  const runner = createDispatcherRunner({ manifestPath: manifestAbs, schemaContext: catalogSchema })
   const mhash = await manifestHash(manifestAbs, opts.cwd)
 
   // Prefer dbt's COMPILED SQL (target/compiled) for the engine lanes — the clean
@@ -74,5 +122,8 @@ export async function reviewPullRequest(opts: ReviewPullRequestOptions): Promise
     manifestHash: mhash,
     modelVersion: opts.modelVersion,
     coreVersion: opts.coreVersion,
+    aiReview: opts.noAi || config.ai === false ? undefined : runAiReview,
+    prTitle: opts.prTitle,
+    prBody: opts.prBody,
   })
 }
