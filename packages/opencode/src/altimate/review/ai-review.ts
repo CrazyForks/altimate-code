@@ -48,7 +48,7 @@ function truncate(s: string | undefined, n: number): string {
 /** Assemble the user message (mechanical formatting — not IP). */
 function buildUserMessage(input: AiReviewInput): string {
   const parts: string[] = []
-  if (input.prTitle) parts.push(`PR title: ${input.prTitle}`)
+  if (input.prTitle) parts.push(`PR title: ${truncate(input.prTitle, 200)}`)
   if (input.prBody) parts.push(`PR description:\n${truncate(input.prBody, 1500)}`)
 
   if (input.grounding.length) {
