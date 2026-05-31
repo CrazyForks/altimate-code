@@ -1,5 +1,5 @@
 name: "altimate dbt PR review"
-description: "Cloudflare-style AI code review for dbt/SQL pull requests — a signed verdict backed by lineage, query equivalence, PII, and grade."
+description: "Layered AI code review for dbt/SQL pull requests — a signed verdict backed by lineage, query equivalence, PII, and grade, plus advisory LLM comments."
 branding:
   icon: "git-pull-request"
   color: "orange"
