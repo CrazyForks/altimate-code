@@ -88,6 +88,7 @@ Options:
 | `--mode comment\|gate` | `comment` never blocks; `gate` exits non-zero on `REQUEST_CHANGES`. |
 | `--severity <level>` | Minimum severity to surface: `critical`, `warning`, `suggestion`. |
 | `--post` | Post the verdict to the GitHub PR (uses `GITHUB_TOKEN` + the Actions event). |
+| `--no-ai` | Disable the advisory LLM reviewer lane (no model calls / cost) — deterministic-only. |
 | `--json` / `--output <file>` | Emit the verdict envelope as JSON. |
 
 > **Full vs lint-only.** With a compiled `manifest.json` present, the reviewer
