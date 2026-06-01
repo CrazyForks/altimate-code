@@ -5,10 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [0.8.0] - 2026-06-01
+
+Headlined by **dbt PR Review** — a Cloudflare-style, dbt/SQL-specialized code reviewer that emits a single **signed** verdict (`APPROVE` / `COMMENT` / `REQUEST_CHANGES`) where every *blocking* finding is backed by a deterministic `altimate-core` engine call over parsed SQL ASTs, not a model's opinion. An optional LLM lane adds advisory context but can never block. This release also adds a **native Trino driver**, the opt-in **completion-gate validators**, and reliability/cost fixes. A five-persona pre-release review drove a security hardening pass on the new `reviewer` agent (see Security).
 
 ### Added
 
+- **dbt PR Review — signed, deterministic verdicts on dbt pull requests.** New `altimate review` CLI command and a composite GitHub Action (`github/review`). The deterministic engine (column-lineage / DAG blast radius, query equivalence on before/after model SQL, PII classification, A–F grade + anti-pattern lint) is the **only** layer that can block; an optional LLM reviewer is clamped to ≤ warning and excluded from the gate, so a `REQUEST_CHANGES` is always provable and replayable. Runs in CI with **zero warehouse access** (consumes `dbt compile` artifacts), and the verdict is HMAC-signable and tamper-evident. `comment` mode never blocks; `gate` mode fails the check on `REQUEST_CHANGES`. The advisory model/credentials are configured on the Action (hosted `altimate_api_key`, or bring-your-own `model` + `model_api_key`); omit them to run deterministic-only. See [dbt PR Review docs](https://docs.altimate.sh/usage/dbt-pr-review/) and the copy-paste workflow in `github/review/examples/`. Depends on `@altimateai/altimate-core` ≥ 0.4.0. (#856)
+- **Native Trino driver.** First-class Trino support over HTTP(S) with catalog/schema introspection and None / Basic / Bearer-token auth. **Migration note:** the dbt `trino` adapter previously mapped to the PostgreSQL driver; it now uses the native driver. Existing profiles are auto-aliased (`database` → `catalog`, `token` → `access_token`) and otherwise compatible. `trino-client` is an optional dependency — install it (`npm install trino-client`) to use Trino. (#795)
 - **Completion-gate validator framework.** A new opt-in harness-side check
   that runs after the LLM declares `finish === "stop"`. Two built-in
   validators for dbt projects: `dbt-tests-pass` (runs `altimate-dbt test`
@@ -24,6 +28,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   See [Validators docs](https://docs.altimate.sh/data-engineering/validators/)
   for the full reference, performance characteristics, and the phased
   rollout plan. (#849)
+
+### Fixed
+
+- **`cancel()` race / idle-on-clean-exit.** A cancel arriving during normal loop teardown could leave a session without a `session.status:idle` event, leaving callers waiting on idle stuck. Idle is now emitted correctly on both the abort and clean-exit paths. (#845)
+- **Prompt caching on the `altimate-backend` provider.** Enabled the `cache_control` trigger for the hosted provider so the litellm Anthropic fallback caches repeated prompt prefixes — cheaper and faster repeat turns (no-op on providers that ignore the marker). (#850)
+
+### Security
+
+- **`reviewer` agent hardened to deny bash.** The v0.8.0 pre-release review found that the new `reviewer` agent — advertised as "read-only" — had a bash allowlist (`git log *`, `cat *`, `ls *`) that was bypassable: shell redirects rode *inside* a matched command (`git log -p > ~/.ssh/authorized_keys` was allowed) and `cat *` could read arbitrary files (e.g. `~/.altimate/altimate.json`) and exfiltrate them through the PR comment the agent posts. Bash is now **denied** for the reviewer (it uses the structured `read`/`grep`/`glob` tools + the verdict engine, which does its own diffing); the agent description was corrected; and the reviewer prompt now treats PR content as untrusted input. The CI Action path was never affected — its LLM lane runs with no tools. (#856)
 
 ## [0.7.3] - 2026-05-24
 
