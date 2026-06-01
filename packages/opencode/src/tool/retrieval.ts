@@ -1,0 +1,77 @@
+/**
+ * Tool retrieval — pick a relevant subset of tools per turn.
+ *
+ * With ~78 tools, sending the full set every turn floods context and adds
+ * distractors that hurt tool SELECTION. This picks a relevant subset per turn:
+ * a fixed always-on CORE + lexically-ranked top-k of the rest, and NEVER drops a
+ * tool that's mid-trajectory (referenced by an in-flight tool call) — dropping
+ * those would corrupt the conversation.
+ *
+ * v1 is lexical (dependency-free, deterministic, testable). An embedding +
+ * cross-encoder rerank pass is a later enhancement; the `select` signature is
+ * stable so wiring doesn't change.
+ */
+
+export namespace Retrieval {
+  /** Always-available agent essentials — never retrieved out. */
+  export const CORE = [
+    "bash", "read", "write", "edit", "glob", "grep", "ls",
+    "task", "todowrite", "skill",
+  ]
+
+  export interface Tool {
+    name: string
+    description?: string
+  }
+
+  export interface Options {
+    /** target number of tools to expose (incl. core). */
+    topk?: number
+    /** names that MUST stay (e.g. tools referenced by in-flight tool calls). */
+    keep?: Iterable<string>
+    /** only retrieve when the tool count exceeds this (no-op for small sets). */
+    minToolsToRetrieve?: number
+  }
+
+  export function enabled(): boolean {
+    return process.env["ALTIMATE_TOOL_RETRIEVAL"] === "1"
+  }
+
+  function score(query: string, t: Tool): number {
+    const words = new Set(query.toLowerCase().match(/[a-z_]+/g) ?? [])
+    const hay = (t.name + " " + (t.description ?? "")).toLowerCase()
+    let s = 0
+    for (const w of words) if (w.length > 3 && hay.includes(w)) s += 1
+    // small boost for a direct name mention
+    if (words.has(t.name.toLowerCase())) s += 3
+    return s
+  }
+
+  /**
+   * Return the SUBSET of tool names to expose this turn. Caller deletes the rest.
+   * Deterministic: core + forced-keep first, then highest-scoring others up to topk
+   * (ties broken by original order for stability).
+   */
+  export function select(query: string, tools: Tool[], opts: Options = {}): Set<string> {
+    const topk = opts.topk ?? 12
+    const minToRetrieve = opts.minToolsToRetrieve ?? topk
+    const all = new Set(tools.map((t) => t.name))
+    // No-op for small tool sets — nothing to gain.
+    if (tools.length <= minToRetrieve) return all
+
+    const keep = new Set<string>()
+    for (const n of opts.keep ?? []) if (all.has(n)) keep.add(n)
+    for (const n of CORE) if (all.has(n)) keep.add(n)
+
+    const rest = tools.filter((t) => !keep.has(t.name))
+    const ranked = rest
+      .map((t, i) => ({ name: t.name, s: score(query, t), i }))
+      .sort((a, b) => b.s - a.s || a.i - b.i)
+
+    for (const r of ranked) {
+      if (keep.size >= topk) break
+      keep.add(r.name)
+    }
+    return keep
+  }
+}
