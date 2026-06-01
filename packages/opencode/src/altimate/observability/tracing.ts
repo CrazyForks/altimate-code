@@ -187,9 +187,15 @@ export class FileExporter implements TraceExporter {
   private crashedSessions = new Set<string>()
   /** Mark a session's exports as superseded by a synchronous crash write.
    *  Subsequent or in-flight export() calls for that session bail at the
-   *  next checkpoint (entry, pre-writeFile, or pre-rename). Idempotent. */
+   *  next checkpoint (entry, pre-writeFile, or pre-rename). Idempotent.
+   *  The sessionId is normalized through the same sanitization that
+   *  buildTraceFile / export use for the on-disk file name, so callers
+   *  can pass the raw `this.sessionId` without worrying about whether
+   *  it contains path-unsafe characters. */
   markCrashed(sessionId: string) {
-    if (sessionId) this.crashedSessions.add(sessionId)
+    if (!sessionId) return
+    const safeId = sessionId.replace(/[/\\.:]/g, "_") || "unknown"
+    this.crashedSessions.add(safeId)
   }
   // altimate_change end
 

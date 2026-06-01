@@ -437,6 +437,56 @@ describe("trace corruption — flushSync vs in-flight rename race", () => {
     expect(traceFileB.summary.status).toBe("completed")
   })
 
+  // Regression for cubic-dev-ai's P1 review finding on PR #867:
+  // markCrashed() was being called with the raw sessionId, but the export()
+  // suppression check uses trace.sessionId (which comes from buildTraceFile
+  // and is sanitized through the `[/\\.:]` → `_` regex). A sessionId
+  // containing any of those characters would store under one key in the
+  // crashedSessions Set and be looked up under a different key in export(),
+  // silently bypassing the crash guard. Fix: sanitize at the store side too.
+  test("crash guard handles unsafe sessionId chars (sanitization parity)", async () => {
+    const exporter = new FileExporter(tmpDir)
+    const tracer = Trace.withExporters([exporter])
+    // Pick a sessionId that needs sanitization through the file-name regex
+    const unsafeId = "weird:session/with.unsafe:chars"
+    tracer.startTrace(unsafeId, { prompt: "test" })
+    await new Promise((r) => setTimeout(r, 50))
+    tracer.flushSync("crash with unsafe id")
+
+    // Manually invoke export() with the canonical (sanitized) trace data —
+    // this is what endTrace would do internally. If sanitization parity is
+    // broken, the markCrashed Set entry won't match and the export will
+    // overwrite flushSync's content.
+    const trace: TraceFile = {
+      version: 2,
+      traceId: "t",
+      sessionId: unsafeId.replace(/[/\\.:]/g, "_"),
+      startedAt: new Date().toISOString(),
+      metadata: {},
+      spans: [],
+      summary: {
+        totalTokens: 0,
+        totalCost: 0,
+        totalToolCalls: 0,
+        totalGenerations: 0,
+        duration: 0,
+        status: "completed",
+        tokens: { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 },
+      },
+    }
+    const result = await exporter.export(trace)
+    // export() must bail because the session was marked crashed; the
+    // sanitized lookup must find the (sanitized) entry from markCrashed.
+    expect(result).toBeUndefined()
+
+    // And the on-disk file must still be flushSync's crashed content
+    const safeId = unsafeId.replace(/[/\\.:]/g, "_")
+    const traceFile: TraceFile = JSON.parse(
+      await fs.readFile(path.join(tmpDir, `${safeId}.json`), "utf-8"),
+    )
+    expect(traceFile.summary.status).toBe("crashed")
+  })
+
   test("baseline — flushSync alone writes crashed content correctly (no race)", async () => {
     // Sanity check: without the rename delay, flushSync's content lands and survives.
     // If this fails we have a different bug than the race we're investigating.
