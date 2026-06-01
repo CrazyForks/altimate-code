@@ -6,7 +6,7 @@ import { Auth, OAUTH_DUMMY_KEY } from "@/auth"
  * Derived from `provider.models[*].capabilities.toolcall` so the picker's
  * advertised capability and the request-transform's behavior cannot drift —
  * adding a tool-capable model to the provider definition (or registering one
- * via `opencode.json`) is the single source of truth.
+ * via `altimate-code.json`) is the single source of truth.
  *
  * Snowflake's documented constraint: only Claude and OpenAI models accept
  * tools on Cortex; everything else rejects with "tool calling is not supported."
@@ -41,7 +41,7 @@ export function parseSnowflakePAT(code: string): { account: string; token: strin
  *
  * @param toolCapable Model IDs that should retain `tools` / `tool_choice` / tool messages.
  *                    Build via `buildToolCapableSet(provider.models)` at loader time so
- *                    user-added models with `tool_call: true` in `opencode.json` are honored.
+ *                    user-added models with `tool_call: true` in `altimate-code.json` are honored.
  */
 export function transformSnowflakeBody(
   bodyText: string,
@@ -115,10 +115,10 @@ export async function SnowflakeCortexAuthPlugin(_input: PluginInput): Promise<Ho
 
         // Build the tool-capable allowlist from the live provider definition.
         // This includes both hardcoded entries in provider.ts AND any models the
-        // user registered via `opencode.json` with `"tool_call": true`. Without
-        // this, the documented escape hatch is silently broken — picker shows
-        // the model as tool-capable, but the transform strips tools at request
-        // time because a static hardcoded set never sees user additions.
+        // user registered via `altimate-code.json` with `"tool_call": true`.
+        // Without this, the documented escape hatch is silently broken — picker
+        // shows the model as tool-capable, but the transform strips tools at
+        // request time because a static hardcoded set never sees user additions.
         const toolCapable = buildToolCapableSet(provider.models)
 
         return {
