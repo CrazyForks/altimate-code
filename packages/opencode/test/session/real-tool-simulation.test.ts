@@ -298,8 +298,10 @@ describe("REAL EXEC: sql_analyze tool", () => {
 
     const result = await execSqlAnalyze("SELCT * FORM users")
     expect(result.output).toContain("Parse error")
-    // Still gets suggestion on first call since it didn't throw
-    expect(result.output).toContain("schema_inspect")
+    // A `result.error` value flips `isRealFailure` to true in sql-analyze.ts,
+    // which suppresses the progressive-disclosure suggestion. So no
+    // `schema_inspect` follow-up should appear — matching the test name.
+    expect(result.output).not.toContain("schema_inspect")
   })
 
   test("S28: sql_analyze throws — returns error, no suggestion", async () => {

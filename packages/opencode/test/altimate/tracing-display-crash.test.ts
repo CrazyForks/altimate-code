@@ -497,18 +497,23 @@ describe("flushSync — multiple calls", () => {
     expect(traceFile.summary.status).toBe("crashed")
   })
 
-  test("flushSync then endTrace — endTrace overwrites crashed status", async () => {
+  test("flushSync then endTrace — flushSync's crashed status is preserved (M3 fix)", async () => {
     const tracer = Recap.withExporters([new FileExporter(tmpDir)])
     tracer.startTrace("s-flush-then-end", { prompt: "test" })
     await new Promise((r) => setTimeout(r, 50))
 
     tracer.flushSync("early crash")
+    const flushedPath = tracer.getTracePath()!
 
-    // But actually the process survived — endTrace completes normally
-    const filePath = await tracer.endTrace()
-    const traceFile: TraceFile = JSON.parse(await fs.readFile(filePath!, "utf-8"))
-    // endTrace should overwrite with "completed"
-    expect(traceFile.summary.status).toBe("completed")
+    // After flushSync, endTrace short-circuits and returns the canonical
+    // crashed file path. The crashed write is authoritative — endTrace
+    // does not call any exporter once Trace.crashed is set.
+    const endPath = await tracer.endTrace()
+    expect(endPath).toBe(flushedPath)
+
+    const traceFile: TraceFile = JSON.parse(await fs.readFile(flushedPath, "utf-8"))
+    expect(traceFile.summary.status).toBe("crashed")
+    expect(traceFile.summary.error).toContain("early crash")
   })
 })
 
