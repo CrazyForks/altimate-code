@@ -165,6 +165,17 @@ export class FileExporter implements TraceExporter {
   readonly name = "file"
   private dir: string
   private maxFiles: number
+  // altimate_change start — M3 fix: crash-guard for in-flight export() so
+  // flushSync's synchronous canonical-file write isn't clobbered by a
+  // late rename. Mirrors the existing `crashed` guard inside Trace.snapshot().
+  private _crashed = false
+  /** Mark this exporter as superseded by a synchronous crash write.
+   *  Subsequent or in-flight export() calls bail before they can overwrite
+   *  the canonical file. Idempotent. */
+  markCrashed() {
+    this._crashed = true
+  }
+  // altimate_change end
 
   constructor(dir?: string, maxFiles?: number) {
     this.dir = dir ?? DEFAULT_TRACES_DIR
@@ -172,6 +183,9 @@ export class FileExporter implements TraceExporter {
   }
 
   async export(trace: TraceFile): Promise<string | undefined> {
+    // altimate_change start — M3 fix: bail at entry if already superseded
+    if (this._crashed) return undefined
+    // altimate_change end
     let tmpPath: string | undefined
     try {
       await fs.mkdir(this.dir, { recursive: true })
@@ -181,7 +195,20 @@ export class FileExporter implements TraceExporter {
       // Atomic write: write to temp file, then rename — prevents partial reads
       // when concurrent snapshots or exports target the same file
       tmpPath = filePath + `.tmp.${Date.now()}.${Math.random().toString(36).slice(2, 8)}`
+      // altimate_change start — M3 fix: re-check before the long writeFile.
+      // For large traces the writeFile takes 100+ms — a wide window for
+      // flushSync to interleave.
+      if (this._crashed) return undefined
+      // altimate_change end
       await fs.writeFile(tmpPath, JSON.stringify(trace, null, 2))
+      // altimate_change start — M3 fix: re-check before the rename. If
+      // flushSync ran during the writeFile, drop the tmp instead of
+      // overwriting flushSync's crashed canonical file.
+      if (this._crashed) {
+        await fs.unlink(tmpPath).catch(() => {})
+        return undefined
+      }
+      // altimate_change end
       await fs.rename(tmpPath, filePath)
 
       if (this.maxFiles > 0) {
@@ -337,6 +364,17 @@ export class Trace {
   private metadata: TraceFile["metadata"] = {}
   private snapshotDir: string | undefined
   private snapshotPending = false
+  // altimate_change start — M2 fix: if a snapshot was requested while another
+  // was in flight (and thus dropped by the snapshotPending debounce), we
+  // schedule exactly one follow-up snapshot when the in-flight one finishes.
+  // Without this, the on-disk file lags memory until a fresh event arrives
+  // — and if the process exits in that gap, the burst's tail is lost.
+  private snapshotRequestedDuringPending = false
+  // Once endTrace begins its canonical write, no more snapshots may run —
+  // they would race endTrace's mutation of the root span (endTime, status)
+  // and could clobber endTrace's content with stale pre-end state.
+  private endTraceStarted = false
+  // altimate_change end
   private snapshotPromise: Promise<void> | undefined
   // Set true when flushSync runs. Prevents in-flight async snapshot()
   // calls from racing with the synchronous crash write — without this,
@@ -750,9 +788,25 @@ export class Trace {
    */
   private snapshot() {
     if (!this.snapshotDir || !this.sessionId) return
-    if (this.snapshotPending) return // Debounce — only one in flight at a time
+    // altimate_change start — M2 fix: when debounce drops this call, record
+    // that another snapshot is needed once the in-flight one settles.
+    // Without this, the disk file lags memory whenever events arrive faster
+    // than snapshots can complete (typical for bursty LLM turns).
+    if (this.snapshotPending) {
+      this.snapshotRequestedDuringPending = true
+      return
+    }
+    // No new snapshots once endTrace has begun: the canonical write is now
+    // endTrace's job, and a concurrent snapshot would capture state from
+    // BEFORE endTrace's root-span mutation and could lose to-end-only fields.
+    if (this.endTraceStarted) return
+    // altimate_change end
     if (this.crashed) return // flushSync wrote the canonical crashed file; do NOT race it
     this.snapshotPending = true
+    // altimate_change start — M2 fix: reset before kicking off, so any
+    // snapshot() calls during this write set the dirty flag for our .finally.
+    this.snapshotRequestedDuringPending = false
+    // altimate_change end
 
     const trace = this.buildTraceFile()
     const safeId = (this.sessionId || "unknown").replace(/[/\\.:]/g, "_") || "unknown"
@@ -779,6 +833,17 @@ export class Trace {
       .finally(() => {
         this.snapshotPending = false
         this.snapshotPromise = undefined
+        // altimate_change start — M2 fix: if any span was added (or any
+        // snapshot was requested) while we were writing, schedule exactly
+        // one follow-up to flush those changes. Bounded: at most one extra
+        // write per "burst → quiet" cycle, regardless of burst size.
+        // Skip the follow-up if endTrace has taken over the canonical write,
+        // or if flushSync has marked the trace crashed.
+        if (this.snapshotRequestedDuringPending && !this.crashed && !this.endTraceStarted) {
+          this.snapshotRequestedDuringPending = false
+          queueMicrotask(() => this.snapshot())
+        }
+        // altimate_change end
       })
   }
 
@@ -871,6 +936,14 @@ export class Trace {
    * Returns the result from the first exporter that succeeds (typically the file path).
    */
   async endTrace(error?: string): Promise<string | undefined> {
+    // altimate_change start — M2 fix companion: claim the canonical write
+    // BEFORE awaiting the in-flight snapshot so any follow-up snapshot the
+    // in-flight one might schedule in its `.finally` is suppressed.
+    // Without this, the follow-up's queued microtask runs after the await
+    // but before endTrace's root-span mutation, capturing stale spans.
+    this.endTraceStarted = true
+    // altimate_change end
+
     // Wait for any in-flight snapshot to complete before final write
     if (this.snapshotPromise) await this.snapshotPromise.catch(() => {})
 
@@ -980,6 +1053,16 @@ export class Trace {
       // Set crashed BEFORE writing so any in-flight async snapshot() will
       // bail out at its rename step instead of clobbering our crashed file.
       this.crashed = true
+      // altimate_change start — M3 fix: also notify every FileExporter so any
+      // in-flight or future endTrace export() bails before its writeFile or
+      // rename can overwrite the canonical file we're about to write below.
+      // Without this, an in-flight `await endTrace()` whose export() is
+      // mid-writeFile (a 100+ms window on multi-MB traces) lands its rename
+      // after this synchronous write and clobbers the crashed content.
+      for (const exp of this.exporters) {
+        if (exp instanceof FileExporter) exp.markCrashed()
+      }
+      // altimate_change end
       this.currentGenerationSpanId = undefined
       const rootSpan = this.spans.find((s) => s.spanId === this.rootSpanId)
       if (rootSpan) {
