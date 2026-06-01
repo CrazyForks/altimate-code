@@ -50,10 +50,21 @@ export interface ClassifyOptions {
 const MATERIALIZATION_RE = /[+]?materialized\s*[:=]|config\s*\(\s*[^)]*materialized/i
 const INCREMENTAL_RE = /is_incremental\s*\(|unique_key|incremental_strategy|merge_update_columns|partition_by/i
 
+/** The ADDED/REMOVED lines of a unified diff (excludes context + hunk headers),
+ *  so signal detection fires on what actually changed, not surrounding context. */
+function changedLines(diff: string | undefined): string {
+  if (!diff) return ""
+  return diff
+    .split("\n")
+    .filter((l) => (l.startsWith("+") || l.startsWith("-")) && !l.startsWith("+++") && !l.startsWith("---"))
+    .join("\n")
+}
+
 /** Classify a single changed file from its diff + optional manifest signals. */
 export function classifyFile(file: ChangedFile, opts: ClassifyOptions = {}): FileChangeClass {
   const kind = classifyDbtFile(file.path)
   const diff = file.diff
+  const changed = changedLines(diff)
   return {
     path: file.path,
     kind,
@@ -62,8 +73,8 @@ export function classifyFile(file: ChangedFile, opts: ClassifyOptions = {}): Fil
     touchesPii: opts.touchesPiiOf?.(file) ?? false,
     touchesContract: touchesContract(diff),
     touchesSource: kind === "source_yml" || looksLikeSourceYml(diff),
-    materializationChange: kind === "model_sql" && !!diff && MATERIALIZATION_RE.test(diff),
-    incrementalLogicChange: kind === "model_sql" && !!diff && INCREMENTAL_RE.test(diff),
+    materializationChange: kind === "model_sql" && !!changed && MATERIALIZATION_RE.test(changed),
+    incrementalLogicChange: kind === "model_sql" && !!changed && INCREMENTAL_RE.test(changed),
     complex: opts.isComplexOf?.(file) ?? false,
   }
 }
@@ -76,6 +87,7 @@ export function fullTierReasons(c: FileChangeClass): string[] {
   if (c.touchesSource) reasons.push("source definition touched")
   if (c.kind === "snapshot") reasons.push("snapshot changed")
   if (c.kind === "macro") reasons.push("macro changed (broad blast radius)")
+  if (c.kind === "project_config") reasons.push("project config changed (global blast radius)")
   if (c.materializationChange) reasons.push("materialization changed")
   if (c.incrementalLogicChange) reasons.push("incremental logic changed")
   if (c.blastRadius > 5) reasons.push(`${c.blastRadius} downstream models`)

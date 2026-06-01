@@ -59,6 +59,7 @@ runs:
       shell: bash
       run: |
         VERSION=$(curl -sf https://api.github.com/repos/AltimateAI/altimate-code/releases/latest | grep -o '"tag_name": *"[^"]*"' | cut -d'"' -f4)
+        VERSION="${VERSION#v}" # the installer's --version expects no leading 'v'
         echo "version=${VERSION:-latest}" >> $GITHUB_OUTPUT
 
     - name: Cache altimate-code
@@ -71,7 +72,16 @@ runs:
     - name: Install altimate-code
       if: steps.cache.outputs.cache-hit != 'true'
       shell: bash
-      run: curl -fsSL https://www.altimate.sh/install | bash
+      env:
+        ALT_VERSION: ${{ steps.version.outputs.version }}
+      run: |
+        # Pin the install to the SAME version the cache key resolved — otherwise
+        # the installer pulls a floating "latest" that can drift from the cache.
+        if [[ -n "$ALT_VERSION" && "$ALT_VERSION" != "latest" ]]; then
+          curl -fsSL https://www.altimate.sh/install | bash -s -- --version "$ALT_VERSION"
+        else
+          curl -fsSL https://www.altimate.sh/install | bash
+        fi
 
     - name: Add altimate-code to PATH
       shell: bash
@@ -122,16 +132,23 @@ runs:
 
     - name: Run dbt PR review
       shell: bash
-      run: |
-        altimate review \
-          --mode "${{ inputs.mode }}" \
-          --manifest "${{ inputs.manifest_path }}" \
-          --severity "${{ inputs.severity_threshold }}" \
-          ${{ inputs.base && format('--base {0}', inputs.base) || '' }} \
-          ${{ inputs.head && format('--head {0}', inputs.head) || '' }} \
-          ${{ inputs.post == 'true' && '--post' || '' }}
+      # Inputs are passed as ENV (data), never interpolated into the command —
+      # `base`/`head` are PR-controllable refs, so building the command string
+      # from `${{ }}` would be a shell-injection vector. Build an arg array instead.
       env:
+        IN_MODE: ${{ inputs.mode }}
+        IN_MANIFEST: ${{ inputs.manifest_path }}
+        IN_SEVERITY: ${{ inputs.severity_threshold }}
+        IN_BASE: ${{ inputs.base }}
+        IN_HEAD: ${{ inputs.head }}
+        IN_POST: ${{ inputs.post }}
         GITHUB_TOKEN: ${{ github.token }}
         GITHUB_REPOSITORY: ${{ github.repository }}
         GITHUB_EVENT_PATH: ${{ github.event_path }}
         ALTIMATE_REVIEW_SIGNING_KEY: ${{ inputs.signing_key }}
+      run: |
+        args=(--mode "$IN_MODE" --manifest "$IN_MANIFEST" --severity "$IN_SEVERITY")
+        [[ -n "$IN_BASE" ]] && args+=(--base "$IN_BASE")
+        [[ -n "$IN_HEAD" ]] && args+=(--head "$IN_HEAD")
+        [[ "$IN_POST" == "true" ]] && args+=(--post)
+        altimate review "${args[@]}"

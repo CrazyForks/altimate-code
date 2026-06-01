@@ -153,12 +153,24 @@ export function parseJsonl(text: string): { findings: Finding[]; skipped: number
   return { findings, skipped }
 }
 
-/** Deduplicate findings by fingerprint, keeping the highest-severity instance. */
+/** Stable ordering key so dedupe ties resolve identically regardless of the
+ *  order findings arrive in (lanes run concurrently). */
+function tieKey(f: Finding): string {
+  return `${f.startLine ?? Number.MAX_SAFE_INTEGER} ${f.title} ${f.body}`
+}
+
+/** Deduplicate findings by fingerprint, keeping the highest-severity instance.
+ *  On equal severity a deterministic tie-break keeps output stable across runs. */
 export function dedupe(findings: Finding[]): Finding[] {
   const byId = new Map<string, Finding>()
   for (const f of findings) {
     const existing = byId.get(f.id)
-    if (!existing || SEVERITY_ORDER[f.severity] > SEVERITY_ORDER[existing.severity]) {
+    if (!existing) {
+      byId.set(f.id, f)
+      continue
+    }
+    const bySev = SEVERITY_ORDER[f.severity] - SEVERITY_ORDER[existing.severity]
+    if (bySev > 0 || (bySev === 0 && tieKey(f) < tieKey(existing))) {
       byId.set(f.id, f)
     }
   }

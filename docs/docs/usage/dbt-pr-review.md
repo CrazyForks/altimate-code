@@ -22,7 +22,7 @@ The reviewer is three cooperating layers, ordered by trust. Each blocking
 decision comes from the most authoritative layer that can decide it; the layers
 below it fill gaps and add context without ever overriding a proof.
 
-```
+```text
 ┌──────────────────────────────────────────────────────────────────────┐
 │ 3. LLM reviewer (advisory)                                             │
 │    Reasons over the diff + compiled SQL + the PR description, GROUNDED  │
@@ -149,8 +149,10 @@ complete, copy-paste workflow lives at
 [`github/review/examples/altimate-ingestion.yml`](https://github.com/AltimateAI/altimate-code/blob/main/github/review/examples/altimate-ingestion.yml).
 
 Re-pushing commits updates the same summary comment in place; fixed findings are
-dropped on the next run. GitLab CI is supported via `altimate review --post` in a
-pipeline job.
+dropped on the next run. `--post` targets **GitHub** PRs (it reads `GITHUB_TOKEN` /
+`GITHUB_REPOSITORY` and posts via the GitHub API). On other platforms (e.g. GitLab),
+run with `--json`/`--output` and post the verdict using that platform's own API —
+native GitLab posting is not yet built in.
 
 ## Configuration — `.altimate/review.yml`
 

@@ -80,14 +80,38 @@ export interface ChangedFile {
   oldPath?: string
 }
 
+/** Compile a glob (`**`, `*`, `?`) to an anchored RegExp with path semantics:
+ *  `*`/`?` do not cross `/`; `**` (and `**​/`) matches across directories. */
+function globToRegExp(glob: string): RegExp {
+  let re = ""
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i]
+    if (c === "*") {
+      if (glob[i + 1] === "*") {
+        re += ".*" // ** — match across path segments
+        i++
+        if (glob[i + 1] === "/") i++ // collapse `**/` so it also matches zero dirs
+      } else {
+        re += "[^/]*" // * — within a single path segment
+      }
+    } else if (c === "?") {
+      re += "[^/]"
+    } else {
+      re += c.replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    }
+  }
+  return new RegExp(`^${re}$`)
+}
+
 /** Filter changed files down to the reviewable set, with their dbt kind. */
 export function filterChangedFiles(
   files: ChangedFile[],
   extraExcludeGlobs: string[] = [],
 ): Array<ChangedFile & { kind: DbtFileKind }> {
+  const excluders = extraExcludeGlobs.map(globToRegExp)
   return files
     .filter((f) => shouldReview(f.path))
-    .filter((f) => !extraExcludeGlobs.some((g) => f.path.endsWith(g.replace(/^\*+/, ""))))
+    .filter((f) => !excluders.some((re) => re.test(f.path)))
     .map((f) => ({ ...f, kind: classifyDbtFile(f.path) }))
 }
 

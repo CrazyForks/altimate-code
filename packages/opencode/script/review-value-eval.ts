@@ -133,7 +133,7 @@ const BAD: Scenario[] = [
 
 const BENIGN: Scenario[] = [
   {
-    id: "guarded-division-sf",
+    id: "nvl-on-snowflake-native",
     dialect: "snowflake",
     path: "models/marts/m.sql",
     newSql: wrap("nvl(brand, 'n/a') as b"),
@@ -186,14 +186,6 @@ const BENIGN: Scenario[] = [
     path: "models/marts/m.sql",
     newSql: wrap("sum(amt) over (partition by id order by ts) as run"),
     added: ["    , sum(amt) over (partition by id order by ts) as run"],
-    expect: [],
-  },
-  {
-    id: "nvl-on-snowflake-native",
-    dialect: "snowflake",
-    path: "models/marts/m.sql",
-    newSql: wrap("nvl(brand, 'n/a') as b"),
-    added: ["    , nvl(brand, 'n/a') as b"],
     expect: [],
   },
   {

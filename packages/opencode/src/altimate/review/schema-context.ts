@@ -89,6 +89,13 @@ export async function buildCatalogSchemaContext(catalogPath: string): Promise<Sc
 
 export function buildReviewSchemaContext(...nodeGroups: Array<SchemaNode[] | undefined>): SchemaContext | undefined {
   const tables: SchemaContext["tables"] = {}
+  // Track which (schema, database) owns each UNQUALIFIED key. The same table
+  // seen across sources (manifest + catalog) shares an owner and merges fine;
+  // two DIFFERENT tables that share a bare name are ambiguous — drop the bare
+  // key so a lookup misses (safe degrade) rather than silently winning the
+  // wrong table's metadata. Qualified keys (with `.`) are never ambiguous.
+  const bareOwner = new Map<string, string>()
+  const ambiguousBare = new Set<string>()
   for (const group of nodeGroups) {
     for (const node of group ?? []) {
       if (!node.columns?.length) continue
@@ -97,16 +104,31 @@ export function buildReviewSchemaContext(...nodeGroups: Array<SchemaNode[] | und
         .map((c) => ({ name: c.name, type: c.data_type ?? c.type ?? "" }))
       if (!columns.length) continue
       const primary_key = nodePrimaryKey(node)
-      const ids = new Set<string>()
+      const record = primary_key ? { columns, primary_key } : { columns }
+      const owner = `${node.database ?? ""}.${node.schema_name ?? ""}`
+
+      const qualified = new Set<string>()
+      const bare = new Set<string>()
       for (const base of [node.alias, node.name]) {
         if (!base) continue
-        ids.add(base)
+        bare.add(base)
         if (node.schema_name) {
-          ids.add(`${node.schema_name}.${base}`)
-          if (node.database) ids.add(`${node.database}.${node.schema_name}.${base}`)
+          qualified.add(`${node.schema_name}.${base}`)
+          if (node.database) qualified.add(`${node.database}.${node.schema_name}.${base}`)
         }
       }
-      for (const id of ids) tables[id] = primary_key ? { columns, primary_key } : { columns }
+      for (const id of qualified) tables[id] = record
+      for (const id of bare) {
+        if (ambiguousBare.has(id)) continue
+        const prev = bareOwner.get(id)
+        if (prev !== undefined && prev !== owner) {
+          ambiguousBare.add(id)
+          delete tables[id]
+          continue
+        }
+        bareOwner.set(id, owner)
+        tables[id] = record
+      }
     }
   }
   return Object.keys(tables).length ? { tables, version: "1" } : undefined

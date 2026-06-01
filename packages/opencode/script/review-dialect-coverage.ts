@@ -65,7 +65,7 @@ const CASES: Case[] = [
   // structural — flag on every dialect
   { id: "div_by_col", sql: "select a / b as r from t", family: "struct" },
   { id: "select_star", sql: "select * from t", family: "struct" },
-  { id: "not_in", sql: "select x from t where x not in (select y from u)", family: "struct" },
+  { id: "not_in", sql: "select x from t where x not in (select y from t)", family: "struct" },
   { id: "cross_join", sql: "select a.x from t a, t b", family: "struct" },
 ]
 
@@ -85,12 +85,10 @@ async function flagged(sql: string, dialect: string): Promise<boolean> {
       dialect,
     },
   }
-  try {
-    const r: any = await Dispatcher.call("altimate_core.check", params)
-    return (r?.data?.lint?.findings ?? []).some((f: any) => f.code !== "L030")
-  } catch {
-    return false
-  }
+  // Fail fast: a dispatcher error must NOT be silently counted as "not flagged"
+  // — that would corrupt the coverage metric. Let it throw and abort the eval.
+  const r: any = await Dispatcher.call("altimate_core.check", params)
+  return (r?.data?.lint?.findings ?? []).some((f: any) => f.code !== "L030")
 }
 
 async function main() {

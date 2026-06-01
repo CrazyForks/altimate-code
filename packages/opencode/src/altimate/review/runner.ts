@@ -180,7 +180,10 @@ export function createDispatcherRunner(opts: DispatcherRunnerOptions): ReviewRun
   }
 
   async function runCheck(sql: string, dialect?: string, baseSql?: string): Promise<CheckResult> {
-    const cacheKey = `${dialect ?? ""}|${baseSql ? "B" : ""}|${sql}`
+    // Key on the base SQL VALUE, not just its presence: diff-scoped checks
+    // compare new-vs-base, so two calls with the same new SQL but a different
+    // base must not collide (otherwise findings bleed between comparisons).
+    const cacheKey = `${dialect ?? ""}|${baseSql ?? ""}|${sql}`
     const cached = checkCache.get(cacheKey)
     if (cached) return cached
     let out: CheckResult = { issues: [], piiColumns: [] }

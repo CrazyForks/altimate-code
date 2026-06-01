@@ -94,5 +94,8 @@ export async function loadReviewConfig(dir: string): Promise<ReviewConfig> {
       throw new Error(`Failed to load ${rel}: ${e?.message ?? e}`)
     }
   }
-  return DEFAULT_REVIEW_CONFIG
+  // Fresh copy — callers (e.g. the CLI overriding manifestPath) mutate the
+  // returned config, and the module-level DEFAULT_REVIEW_CONFIG must not leak
+  // those mutations into the next review in the same process.
+  return structuredClone(DEFAULT_REVIEW_CONFIG)
 }

@@ -236,8 +236,15 @@ function lineageBreakageLane(file: ChangedFile & { kind: string }, impact: Impac
   const total = impact.directCount + impact.transitiveCount
   const degraded = !impact.hasManifest
 
+  // dbt resolves `ref()` by MODEL NAME, not file path — so a rename that keeps
+  // the same model name (a pure directory move) does NOT break lineage. Only a
+  // rename that changes the model name is a break, alongside a deletion.
+  const modelNameChanged =
+    file.status === "renamed" && !!file.oldPath && modelNameFromPath(file.oldPath) !== model
+  const isBreakingRemoval = file.status === "deleted" || modelNameChanged
+
   // Deleted/renamed model with downstream consumers is the canonical break.
-  if ((file.status === "deleted" || file.status === "renamed") && total >= rubric.thresholds.lineageWarnConsumers) {
+  if (isBreakingRemoval && total >= rubric.thresholds.lineageWarnConsumers) {
     const sev = clampSeverity(
       "lineage_breakage",
       total >= rubric.thresholds.lineageCriticalConsumers ? "critical" : "warning",

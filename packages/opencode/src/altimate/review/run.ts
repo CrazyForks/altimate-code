@@ -80,7 +80,12 @@ export async function reviewPullRequest(opts: ReviewPullRequestOptions): Promise
   if (opts.severityThreshold) config.severityThreshold = opts.severityThreshold
   const rubric = resolveRubric(config)
 
-  const base = opts.base ?? (await defaultBaseRef(opts.cwd))
+  // Only resolve a base ref if we actually need git (to collect changed files
+  // or to read old/new content). A caller that supplies BOTH `changedFiles` and
+  // `getContent` (e.g. a non-git CI integration) must not be forced through a
+  // git lookup that can fail when there's no usable history.
+  const needGit = !opts.changedFiles || !opts.getContent
+  const base = opts.base ?? (needGit ? await defaultBaseRef(opts.cwd) : "")
   const changedFiles = opts.changedFiles ?? (await collectChangedFiles({ base, head: opts.head, cwd: opts.cwd }))
   const getContent = opts.getContent ?? makeContentResolver({ base, head: opts.head, cwd: opts.cwd })
 
