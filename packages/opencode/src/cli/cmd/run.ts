@@ -822,46 +822,53 @@ You are speaking to a non-technical business executive. Follow these rules stric
         process.exit(1)
       })
 
-      if (args.command) {
-        await sdk.session.command({
-          sessionID,
-          agent,
-          model: args.model,
-          command: args.command,
-          arguments: message,
-          variant: args.variant,
-        })
-      } else {
-        const model = args.model ? Provider.parseModel(args.model) : undefined
-        await sdk.session.prompt({
-          sessionID,
-          agent,
-          model,
-          variant: args.variant,
-          parts: [...files, { type: "text", text: message }],
-          ...(audienceSystem ? { system: audienceSystem } : {}),
-        })
-      }
+      // altimate_change start — per-run finally cleanup. The verifier-gated router catches a
+      // thrown tier (router.ts) and escalates to the next tier within the SAME process; without
+      // this finally, a tier whose prompt throws would leak its SIGINT/SIGTERM/beforeExit handlers
+      // and leave its tracer active, accumulating across tiers. Cleanup now always runs.
+      try {
+        if (args.command) {
+          await sdk.session.command({
+            sessionID,
+            agent,
+            model: args.model,
+            command: args.command,
+            arguments: message,
+            variant: args.variant,
+          })
+        } else {
+          const model = args.model ? Provider.parseModel(args.model) : undefined
+          await sdk.session.prompt({
+            sessionID,
+            agent,
+            model,
+            variant: args.variant,
+            parts: [...files, { type: "text", text: message }],
+            ...(audienceSystem ? { system: audienceSystem } : {}),
+          })
+        }
 
-      // Wait for the event loop to drain (breaks when session reaches idle)
-      await loopPromise
+        // Wait for the event loop to drain (breaks when session reaches idle)
+        await loopPromise
+      } finally {
+        // Remove crash handlers — trace will be finalized cleanly
+        process.removeListener("SIGINT", onSigint)
+        process.removeListener("SIGTERM", onSigterm)
+        process.removeListener("beforeExit", onBeforeExit)
 
-      // Remove crash handlers — trace will be finalized cleanly
-      process.removeListener("SIGINT", onSigint)
-      process.removeListener("SIGTERM", onSigterm)
-      process.removeListener("beforeExit", onBeforeExit)
-
-      // Finalize trace and save to disk
-      if (tracer) {
-        Tracer.setActive(null)
-        const tracePath = await tracer.endTrace(error)
-        if (tracePath) {
-          emit("trace_saved", { path: tracePath })
-          if (args.format !== "json" && process.stdout.isTTY) {
-            UI.println(UI.Style.TEXT_DIM + `Trace saved: ${tracePath}` + UI.Style.TEXT_NORMAL)
+        // Finalize trace and save to disk (with `error` if the run failed)
+        if (tracer) {
+          Tracer.setActive(null)
+          const tracePath = await tracer.endTrace(error)
+          if (tracePath) {
+            emit("trace_saved", { path: tracePath })
+            if (args.format !== "json" && process.stdout.isTTY) {
+              UI.println(UI.Style.TEXT_DIM + `Trace saved: ${tracePath}` + UI.Style.TEXT_NORMAL)
+            }
           }
         }
       }
+      // altimate_change end
 
       // Write accumulated text output to file if --output was specified
       if (args.output) {
