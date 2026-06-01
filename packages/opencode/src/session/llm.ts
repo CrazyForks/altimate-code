@@ -13,9 +13,6 @@ import {
 } from "ai"
 import { mergeDeep, pipe } from "remeda"
 import { ProviderTransform } from "@/provider/transform"
-// altimate_change start — constrained tool-call decoding
-import { Constrained } from "@/provider/constrained"
-// altimate_change end
 // altimate_change start — tool retrieval
 import { Retrieval } from "@/tool/retrieval"
 // altimate_change end
@@ -201,35 +198,6 @@ export namespace LLM {
       const keep = Retrieval.select(query, list, { keep: referencedTools })
       for (const name of Object.keys(tools)) {
         if (name !== "invalid" && !keep.has(name)) delete tools[name]
-      }
-    }
-    // altimate_change end
-
-    // altimate_change start — constrained tool-call decoding for local providers
-    // Force a tool-call grammar ONLY when a call is mandatory (toolChoice "required").
-    // A blanket guided constraint would forbid normal text turns; for "auto" mode,
-    // valid tool calls come from the vLLM serving config (--enable-auto-tool-choice
-    // --tool-call-parser), NOT a client constraint. Hosted models are excluded.
-    //
-    if (
-      Constrained.enabled() &&
-      Constrained.isLocalProvider(input.model.api.npm, input.model.providerID) &&
-      input.toolChoice === "required"
-    ) {
-      const toolSchemas = Object.entries(tools)
-        .filter(([name]) => name !== "invalid")
-        .map(([name, t]) => ({
-          name,
-          parameters:
-            ((t as any)?.inputSchema?.jsonSchema as Record<string, any>) ?? {
-              type: "object",
-              properties: {},
-            },
-        }))
-      if (toolSchemas.length) {
-        // Routed under the provider SDK key by providerOptions(), then spread into
-        // the request body by @ai-sdk/openai-compatible -> vLLM reads guided_json.
-        params.options = { ...params.options, ...Constrained.guidedOptions(toolSchemas, "guided_json") }
       }
     }
     // altimate_change end
