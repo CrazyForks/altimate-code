@@ -44,6 +44,61 @@ describe("Router.shouldEscalate", () => {
   })
 })
 
+describe("Router.shouldEscalate — decision-aware (soundness)", () => {
+  const tiers = Router.DEFAULT_LADDER
+  const D = Verifier.Decision
+  const v = (decision: Verifier.Decision, ok = false): Verifier.Verdict => ({ ok, decision, checks: [] })
+
+  test("escalates on a build/test FAILED verdict", () => {
+    expect(Router.shouldEscalate(v(D.FAILED), 0, tiers)).toBe(true)
+  })
+  test("escalates on a PROVEN_DIFFERENT equivalence verdict", () => {
+    expect(Router.shouldEscalate(v(D.PROVEN_DIFFERENT), 0, tiers)).toBe(true)
+  })
+  test("NEVER escalates on UNDECIDABLE — a stronger model can't make it decidable", () => {
+    expect(Router.shouldEscalate(v(D.UNDECIDABLE), 0, tiers)).toBe(false)
+    // even though ok is false, the decision gate wins over the legacy !ok rule
+    expect(Router.shouldEscalate(v(D.UNDECIDABLE, false), 0, tiers)).toBe(false)
+  })
+  test("does not escalate on an OK decision", () => {
+    expect(Router.shouldEscalate(v(D.OK, true), 0, tiers)).toBe(false)
+  })
+  test("falls back to the !ok rule when no decision is present (back-compat)", () => {
+    expect(Router.shouldEscalate({ ok: false, checks: [] }, 0, tiers)).toBe(true)
+    expect(Router.shouldEscalate({ ok: true, checks: [] }, 0, tiers)).toBe(false)
+  })
+  test("never escalates past the top tier regardless of decision", () => {
+    expect(Router.shouldEscalate(v(D.PROVEN_DIFFERENT), tiers.length - 1, tiers)).toBe(false)
+  })
+})
+
+describe("Router.route — decision-aware", () => {
+  const D = Verifier.Decision
+  test("UNDECIDABLE verdict stops routing (no escalation, marked unsolved)", async () => {
+    const calls: string[] = []
+    const r = await Router.route({
+      tiers: Router.DEFAULT_LADDER,
+      runAgent: async (m) => void calls.push(m),
+      verify: async () => ({ ok: false, decision: D.UNDECIDABLE, reason: "engine abstained", checks: [] }),
+    })
+    expect(r.solved).toBe(false)
+    expect(calls).toHaveLength(1) // only tier 0 ran — did NOT escalate on undecidable
+    expect(r.attempts).toHaveLength(1)
+  })
+  test("PROVEN_DIFFERENT escalates to the next tier until one passes", async () => {
+    const calls: string[] = []
+    let n = 0
+    const r = await Router.route({
+      tiers: Router.DEFAULT_LADDER,
+      runAgent: async (m) => void calls.push(m),
+      verify: async () =>
+        ++n === 1 ? { ok: false, decision: D.PROVEN_DIFFERENT, checks: [] } : { ok: true, decision: D.OK, checks: [] },
+    })
+    expect(r.solved).toBe(true)
+    expect(calls.length).toBe(2)
+  })
+})
+
 describe("Router.escalationContext", () => {
   test("names the failing checks + reason for the next tier", () => {
     const ctx = Router.escalationContext({ model: "m", label: "deepseek-v4-flash" }, FAIL)
