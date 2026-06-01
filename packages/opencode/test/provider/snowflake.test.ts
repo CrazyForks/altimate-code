@@ -605,11 +605,7 @@ describe("snowflake-cortex provider", () => {
     // consensus-review follow-up after an initial drift was caught).
     await setupOAuth()
     try {
-      await using tmp = await tmpdir({
-        init: async (dir) => {
-          await Bun.write(path.join(dir, "opencode.json"), JSON.stringify({ $schema: "https://altimate.ai/config.json" }))
-        },
-      })
+      await using tmp = await tmpdir({ config: {} })
       await Instance.provide({
         directory: tmp.path,
         fn: async () => {
@@ -648,15 +644,11 @@ describe("snowflake-cortex provider", () => {
     // Source-of-truth test for the escape-hatch fix: the request transform
     // gets its allowlist from `provider.models.capabilities.toolcall` rather
     // than a separate hardcoded set in snowflake.ts. Models added via
-    // opencode.json with `tool_call: true` therefore retain tools at request
-    // time, and the picker capability cannot drift from the transform behavior.
+    // altimate-code.json with `tool_call: true` therefore retain tools at
+    // request time, and the picker capability cannot drift from the transform.
     await setupOAuth()
     try {
-      await using tmp = await tmpdir({
-        init: async (dir) => {
-          await Bun.write(path.join(dir, "opencode.json"), JSON.stringify({ $schema: "https://altimate.ai/config.json" }))
-        },
-      })
+      await using tmp = await tmpdir({ config: {} })
       await Instance.provide({
         directory: tmp.path,
         fn: async () => {
@@ -674,32 +666,26 @@ describe("snowflake-cortex provider", () => {
   })
 
   test("escape-hatch model with tool_call: true retains tools through transformSnowflakeBody", async () => {
-    // The documented opencode.json escape hatch must work end-to-end: picker
-    // shows the model as tool-capable AND the request transform passes tools
-    // through. Without the loader-derived allowlist this test would fail
+    // The documented altimate-code.json escape hatch must work end-to-end:
+    // picker shows the model as tool-capable AND the request transform passes
+    // tools through. Without the loader-derived allowlist this test would fail
     // because the static set never sees user-added entries.
     await setupOAuth()
     try {
       await using tmp = await tmpdir({
-        init: async (dir) => {
-          await Bun.write(
-            path.join(dir, "opencode.json"),
-            JSON.stringify({
-              $schema: "https://altimate.ai/config.json",
-              provider: {
-                "snowflake-cortex": {
-                  models: {
-                    "user-tool-model": {
-                      name: "User Tool Model",
-                      limit: { context: 100000, output: 8192 },
-                      tool_call: true,
-                    },
-                  },
+        config: {
+          provider: {
+            "snowflake-cortex": {
+              models: {
+                "user-tool-model": {
+                  name: "User Tool Model",
+                  limit: { context: 100000, output: 8192 },
+                  tool_call: true,
                 },
               },
-            }),
-          )
-        },
+            },
+          },
+        } as any,
       })
       await Instance.provide({
         directory: tmp.path,
@@ -730,25 +716,19 @@ describe("snowflake-cortex provider", () => {
     await setupOAuth()
     try {
       await using tmp = await tmpdir({
-        init: async (dir) => {
-          await Bun.write(
-            path.join(dir, "opencode.json"),
-            JSON.stringify({
-              $schema: "https://altimate.ai/config.json",
-              provider: {
-                "snowflake-cortex": {
-                  models: {
-                    "user-notool-model": {
-                      name: "User No-Tool Model",
-                      limit: { context: 32000, output: 4096 },
-                      tool_call: false,
-                    },
-                  },
+        config: {
+          provider: {
+            "snowflake-cortex": {
+              models: {
+                "user-notool-model": {
+                  name: "User No-Tool Model",
+                  limit: { context: 32000, output: 4096 },
+                  tool_call: false,
                 },
               },
-            }),
-          )
-        },
+            },
+          },
+        } as any,
       })
       await Instance.provide({
         directory: tmp.path,
@@ -777,32 +757,26 @@ describe("snowflake-cortex provider", () => {
     }
   })
 
-  test("user can register a model not in the hardcoded list via opencode.json", async () => {
+  test("user can register a model not in the hardcoded list via altimate-code.json", async () => {
     // Documents the option (2) escape hatch: when Snowflake adds a model
     // before the CLI's hardcoded list catches up, users add it under
     // provider['snowflake-cortex'].models and it merges into the picker.
     await setupOAuth()
     try {
       await using tmp = await tmpdir({
-        init: async (dir) => {
-          await Bun.write(
-            path.join(dir, "opencode.json"),
-            JSON.stringify({
-              $schema: "https://altimate.ai/config.json",
-              provider: {
-                "snowflake-cortex": {
-                  models: {
-                    "future-model-x": {
-                      name: "Future Model X",
-                      limit: { context: 200000, output: 32000 },
-                      tool_call: true,
-                    },
-                  },
+        config: {
+          provider: {
+            "snowflake-cortex": {
+              models: {
+                "future-model-x": {
+                  name: "Future Model X",
+                  limit: { context: 200000, output: 32000 },
+                  tool_call: true,
                 },
               },
-            }),
-          )
-        },
+            },
+          },
+        } as any,
       })
       await Instance.provide({
         directory: tmp.path,
