@@ -311,6 +311,8 @@ Snowflake Cortex adds models faster than this list can be updated. If a model is
 
 The entry merges with the built-in list, so the model appears in the picker and can be selected as `snowflake-cortex/your-new-model-id`. Set `"tool_call": false` for models that don't support tools on Cortex (Llama, Mistral, DeepSeek, Gemini today) — otherwise requests with tools will fail.
 
+The `tool_call` field uses snake_case (matching the rest of the `opencode.json` schema) and maps to the picker's `capabilities.toolcall`. The request transform reads the same value, so a user-added model marked `tool_call: true` keeps `tools` and `tool_choice` in outgoing requests — and one marked `tool_call: false` has them stripped, the same as the built-in non-tool entries.
+
 ## Databricks AI Gateway
 
 Connect to Databricks serving endpoints (Foundation Model APIs) via your workspace PAT. Use Databricks-hosted Llama, Claude, GPT, Gemini, DBRX, or Mixtral for agent reasoning — billing flows through your Databricks account.

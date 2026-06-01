@@ -1023,7 +1023,7 @@ export namespace Provider {
       options: {},
       models: {
         // Claude models — tool calling supported
-        "claude-opus-4-7": makeSnowflakeModel("claude-opus-4-7", "Claude Opus 4.7", { context: 200000, output: 32000 }),
+        "claude-opus-4-7": makeSnowflakeModel("claude-opus-4-7", "Claude Opus 4.7", { context: 1000000, output: 128000 }),
         "claude-sonnet-4-6": makeSnowflakeModel("claude-sonnet-4-6", "Claude Sonnet 4.6", {
           context: 200000,
           output: 64000,
@@ -1050,13 +1050,15 @@ export namespace Provider {
         }),
         // OpenAI models — tool calling supported
         "openai-gpt-4.1": makeSnowflakeModel("openai-gpt-4.1", "OpenAI GPT-4.1", { context: 1047576, output: 32768 }),
+        // openai-gpt-5.2: not in Snowflake's per-model restrictions table; using
+        // gpt-5 family defaults as best-effort until docs publish exact limits.
         "openai-gpt-5.2": makeSnowflakeModel("openai-gpt-5.2", "OpenAI GPT-5.2", {
-          context: 1047576,
-          output: 32768,
+          context: 272000,
+          output: 8192,
         }),
         "openai-gpt-5.1": makeSnowflakeModel("openai-gpt-5.1", "OpenAI GPT-5.1", {
-          context: 1047576,
-          output: 32768,
+          context: 272000,
+          output: 8192,
         }),
         "openai-gpt-5": makeSnowflakeModel("openai-gpt-5", "OpenAI GPT-5", { context: 1047576, output: 32768 }),
         "openai-gpt-5-mini": makeSnowflakeModel("openai-gpt-5-mini", "OpenAI GPT-5 Mini", {
@@ -1082,25 +1084,30 @@ export namespace Provider {
         "llama4-scout": makeSnowflakeModel(
           "llama4-scout",
           "Llama 4 Scout",
-          { context: 1048576, output: 4096 },
+          { context: 128000, output: 8192 },
           { toolcall: false },
         ),
+        // llama3.3-70b: upstream Meta-hosted variant.
         "llama3.3-70b": makeSnowflakeModel(
           "llama3.3-70b",
           "Llama 3.3 70B",
-          { context: 128000, output: 4096 },
+          { context: 128000, output: 8192 },
           { toolcall: false },
         ),
+        // snowflake-llama-3.3-70b: Snowflake-hosted variant (different routing /
+        // region pinning vs the upstream `llama3.3-70b` above).
         "snowflake-llama-3.3-70b": makeSnowflakeModel(
           "snowflake-llama-3.3-70b",
           "Snowflake Llama 3.3 70B",
-          { context: 128000, output: 4096 },
+          { context: 128000, output: 8192 },
           { toolcall: false },
         ),
+        // snowflake-llama-3.1-405b: 8k context per Snowflake docs (much smaller
+        // than the upstream Meta model's window).
         "snowflake-llama-3.1-405b": makeSnowflakeModel(
           "snowflake-llama-3.1-405b",
           "Snowflake Llama 3.1 405B",
-          { context: 128000, output: 4096 },
+          { context: 8000, output: 8192 },
           { toolcall: false },
         ),
         "llama3.1-70b": makeSnowflakeModel(
@@ -1143,7 +1150,7 @@ export namespace Provider {
         "mixtral-8x7b": makeSnowflakeModel(
           "mixtral-8x7b",
           "Mixtral 8x7B",
-          { context: 32000, output: 4096 },
+          { context: 32000, output: 8192 },
           { toolcall: false },
         ),
         // DeepSeek — no tool calling
@@ -1157,7 +1164,7 @@ export namespace Provider {
         "gemini-3.1-pro": makeSnowflakeModel(
           "gemini-3.1-pro",
           "Gemini 3.1 Pro",
-          { context: 1048576, output: 8192 },
+          { context: 1000000, output: 64000 },
           { toolcall: false },
         ),
       },

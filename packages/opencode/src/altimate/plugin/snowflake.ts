@@ -1,16 +1,25 @@
 import type { Hooks, PluginInput } from "@opencode-ai/plugin"
 import { Auth, OAUTH_DUMMY_KEY } from "@/auth"
 
-// Only OpenAI and Claude models support tool calling on Snowflake Cortex.
-// All other models reject tools with "tool calling is not supported".
-const TOOLCALL_MODELS = new Set([
-  // Claude
-  "claude-opus-4-7", "claude-sonnet-4-6", "claude-opus-4-6", "claude-sonnet-4-5", "claude-opus-4-5",
-  "claude-haiku-4-5", "claude-4-sonnet", "claude-4-opus", "claude-3-7-sonnet", "claude-3-5-sonnet",
-  // OpenAI
-  "openai-gpt-4.1", "openai-gpt-5", "openai-gpt-5.1", "openai-gpt-5.2", "openai-gpt-5-mini", "openai-gpt-5-nano",
-  "openai-gpt-5-chat", "openai-gpt-oss-120b", "openai-o4-mini",
-])
+/**
+ * Build the set of Snowflake Cortex model IDs that support tool calling.
+ * Derived from `provider.models[*].capabilities.toolcall` so the picker's
+ * advertised capability and the request-transform's behavior cannot drift —
+ * adding a tool-capable model to the provider definition (or registering one
+ * via `opencode.json`) is the single source of truth.
+ *
+ * Snowflake's documented constraint: only Claude and OpenAI models accept
+ * tools on Cortex; everything else rejects with "tool calling is not supported."
+ */
+export function buildToolCapableSet(
+  models: Record<string, { capabilities: { toolcall: boolean } }>,
+): ReadonlySet<string> {
+  const set = new Set<string>()
+  for (const [id, m] of Object.entries(models)) {
+    if (m.capabilities.toolcall) set.add(id)
+  }
+  return set
+}
 
 /** Snowflake account identifiers contain only alphanumeric, hyphen, underscore, and dot characters. */
 export const VALID_ACCOUNT_RE = /^[a-zA-Z0-9._-]+$/
@@ -29,8 +38,15 @@ export function parseSnowflakePAT(code: string): { account: string; token: strin
 /**
  * Transform a Snowflake Cortex request body string.
  * Returns a Response to short-circuit the fetch (synthetic stop), or undefined to continue normally.
+ *
+ * @param toolCapable Model IDs that should retain `tools` / `tool_choice` / tool messages.
+ *                    Build via `buildToolCapableSet(provider.models)` at loader time so
+ *                    user-added models with `tool_call: true` in `opencode.json` are honored.
  */
-export function transformSnowflakeBody(bodyText: string): { body: string; syntheticStop?: Response } {
+export function transformSnowflakeBody(
+  bodyText: string,
+  toolCapable: ReadonlySet<string>,
+): { body: string; syntheticStop?: Response } {
   const parsed = JSON.parse(bodyText)
 
   // Snowflake uses max_completion_tokens instead of max_tokens
@@ -41,7 +57,7 @@ export function transformSnowflakeBody(bodyText: string): { body: string; synthe
 
   // Strip tools for models that don't support tool calling on Snowflake Cortex.
   // Also remove orphaned tool_calls from messages to avoid Snowflake API errors.
-  if (!TOOLCALL_MODELS.has(parsed.model)) {
+  if (!toolCapable.has(parsed.model)) {
     delete parsed.tools
     delete parsed.tool_choice
     if (Array.isArray(parsed.messages)) {
@@ -97,6 +113,14 @@ export async function SnowflakeCortexAuthPlugin(_input: PluginInput): Promise<Ho
           model.cost = { input: 0, output: 0, cache: { read: 0, write: 0 } }
         }
 
+        // Build the tool-capable allowlist from the live provider definition.
+        // This includes both hardcoded entries in provider.ts AND any models the
+        // user registered via `opencode.json` with `"tool_call": true`. Without
+        // this, the documented escape hatch is silently broken — picker shows
+        // the model as tool-capable, but the transform strips tools at request
+        // time because a static hardcoded set never sees user additions.
+        const toolCapable = buildToolCapableSet(provider.models)
+
         return {
           apiKey: OAUTH_DUMMY_KEY,
           async fetch(requestInput: RequestInfo | URL, init?: RequestInit) {
@@ -134,7 +158,7 @@ export async function SnowflakeCortexAuthPlugin(_input: PluginInput): Promise<Ho
                   text = ""
                 }
                 if (text) {
-                  const result = transformSnowflakeBody(text)
+                  const result = transformSnowflakeBody(text, toolCapable)
                   if (result.syntheticStop) return result.syntheticStop
                   body = result.body
                   headers.delete("content-length")
