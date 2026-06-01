@@ -8,15 +8,31 @@ import { Auth, OAUTH_DUMMY_KEY } from "@/auth"
  * adding a tool-capable model to the provider definition (or registering one
  * via `altimate-code.json`) is the single source of truth.
  *
+ * Indexes both the picker key and the model's `api.id` (and `id`) so that
+ * aliased models — where a user registers e.g. `"my-alias": { "id":
+ * "claude-opus-4-7" }` in their config — match correctly. The transform
+ * compares against `parsed.model` which is the API id sent in the request
+ * body, not the picker map key.
+ *
  * Snowflake's documented constraint: only Claude and OpenAI models accept
  * tools on Cortex; everything else rejects with "tool calling is not supported."
  */
 export function buildToolCapableSet(
-  models: Record<string, { capabilities: { toolcall: boolean } }>,
+  models: Record<
+    string,
+    {
+      id?: string
+      api?: { id?: string }
+      capabilities: { toolcall: boolean }
+    }
+  >,
 ): ReadonlySet<string> {
   const set = new Set<string>()
-  for (const [id, m] of Object.entries(models)) {
-    if (m.capabilities.toolcall) set.add(id)
+  for (const [key, m] of Object.entries(models)) {
+    if (!m.capabilities.toolcall) continue
+    set.add(key)
+    if (m.id) set.add(m.id)
+    if (m.api?.id) set.add(m.api.id)
   }
   return set
 }

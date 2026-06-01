@@ -1015,6 +1015,14 @@ export namespace Provider {
       return m
     }
 
+    // Snowflake Cortex models are hardcoded rather than auto-discovered.
+    // Cortex's models endpoint (`GET /api/v2/cortex/v1/models`) has
+    // non-standard semantics — it requires a JSON body on GET, which breaks
+    // standard OpenAI-compatible clients. Until that gets a probe-able shim,
+    // the source of truth for "what's selectable" is this map. New models
+    // surfaced on Snowflake's regional availability docs should be added here
+    // (or registered via `altimate-code.json` per the
+    // `docs/docs/configure/providers.md` escape-hatch section).
     database["snowflake-cortex"] = {
       id: ProviderID.snowflakeCortex,
       source: "custom",
@@ -1103,11 +1111,13 @@ export namespace Provider {
           { toolcall: false },
         ),
         // snowflake-llama-3.1-405b: 8k context per Snowflake docs (much smaller
-        // than the upstream Meta model's window).
+        // than the upstream Meta model's window). Snowflake's table lists
+        // output=8192, but output cannot exceed the total token budget — cap
+        // at 4096 (the original sibling default) so prompt+output always fit.
         "snowflake-llama-3.1-405b": makeSnowflakeModel(
           "snowflake-llama-3.1-405b",
           "Snowflake Llama 3.1 405B",
-          { context: 8000, output: 8192 },
+          { context: 8000, output: 4096 },
           { toolcall: false },
         ),
         "llama3.1-70b": makeSnowflakeModel(

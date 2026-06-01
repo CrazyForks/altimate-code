@@ -622,7 +622,10 @@ describe("snowflake-cortex provider", () => {
             ["openai-gpt-5.2", true, 272000, 8192],
             ["llama4-scout", false, 128000, 8192],
             ["llama3.3-70b", false, 128000, 8192],
-            ["snowflake-llama-3.1-405b", false, 8000, 8192],
+            // Snowflake docs list output=8192 for this model, but its context
+            // is only 8000 — capped at 4096 (sibling default) so prompt+output
+            // always fit. See provider.ts comment for the rationale.
+            ["snowflake-llama-3.1-405b", false, 8000, 4096],
             ["mixtral-8x7b", false, 32000, 8192],
             ["gemini-3.1-pro", false, 1000000, 64000],
           ]
@@ -750,6 +753,57 @@ describe("snowflake-cortex provider", () => {
           expect(parsed.tool_choice).toBeUndefined()
           // Orphaned tool messages dropped too.
           expect(parsed.messages.find((m: { role: string }) => m.role === "tool")).toBeUndefined()
+        },
+      })
+    } finally {
+      await restoreAuth()
+    }
+  })
+
+  test("aliased model (picker key != api.id) is matched by buildToolCapableSet on both ids", async () => {
+    // Regression: when a user registers an alias like
+    //   `"my-claude-alias": { "id": "claude-opus-4-7", "tool_call": true }`,
+    // the picker map is keyed by "my-claude-alias" but the request body sends
+    // `model: "claude-opus-4-7"`. The allowlist must include BOTH so tools
+    // aren't silently stripped on the way out.
+    await setupOAuth()
+    try {
+      await using tmp = await tmpdir({
+        config: {
+          provider: {
+            "snowflake-cortex": {
+              models: {
+                "my-claude-alias": {
+                  id: "claude-opus-4-7",
+                  name: "My Claude Alias",
+                  limit: { context: 1000000, output: 128000 },
+                  tool_call: true,
+                },
+              },
+            },
+          },
+        } as any,
+      })
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const providers = await Provider.list()
+          const toolCapable = buildToolCapableSet(providers["snowflake-cortex"].models)
+          // Both forms must be in the set.
+          expect(toolCapable.has("my-claude-alias")).toBe(true)
+          expect(toolCapable.has("claude-opus-4-7")).toBe(true)
+
+          // And the transform must keep tools when the request uses the api.id form.
+          const input = JSON.stringify({
+            model: "claude-opus-4-7",
+            messages: [{ role: "user", content: "hi" }],
+            tools: [{ type: "function", function: { name: "read_file" } }],
+            tool_choice: "auto",
+          })
+          const { body } = transformSnowflakeBody(input, toolCapable)
+          const parsed = JSON.parse(body)
+          expect(parsed.tools).toBeDefined()
+          expect(parsed.tool_choice).toBe("auto")
         },
       })
     } finally {
