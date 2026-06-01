@@ -880,6 +880,11 @@ You are speaking to a non-technical business executive. Follow these rules stric
         await Bun.write(outputPath, content)
         process.stderr.write(`\n✓ Output saved to: ${outputPath}\n`)
       }
+
+      // altimate_change start — expose the session id so the router can reuse one session
+      // across tiers (escalation continues the same session instead of starting fresh).
+      return sessionID
+      // altimate_change end
     }
 
     // altimate_change start — verifier-gated router orchestration
@@ -1020,6 +1025,11 @@ You are speaking to a non-technical business executive. Follow these rules stric
       }
       const baseMessage = message
       const originalModel = args.model
+      const originalSession = args.session
+      // Reuse ONE session across tiers: tier-1 creates it; escalation tiers continue the
+      // same session so the stronger model sees the prior attempt + the failing-check note,
+      // rather than starting cold. Captured from execute()'s returned session id.
+      let sharedSessionID: string | undefined
       const policy = Policy.resolve()
       const tiers = await policy.tiers({ prompt: baseMessage })
       let result
@@ -1029,16 +1039,19 @@ You are speaking to a non-technical business executive. Follow these rules stric
           runAgent: async (model, note) => {
             args.model = model
             message = note ? `${note}\n\n${baseMessage}` : baseMessage
-            await execute(sdk)
+            if (sharedSessionID) args.session = sharedSessionID // continue tier-1's session
+            const sid = await execute(sdk)
+            if (sid && !sharedSessionID) sharedSessionID = sid // capture tier-1's session
           },
           verify: verifyWorkspace,
         })
       } finally {
         // Always restore the mutated request state, even if a tier throws — otherwise
-        // `message`/`args.model` leak the last tier's escalation prompt + model to any
+        // `message`/`args.model`/`args.session` leak the last tier's state to any
         // downstream logging/telemetry/retry.
         message = baseMessage
         args.model = originalModel
+        args.session = originalSession
       }
       const envelope = Verdict.build(result, { now: new Date().toISOString() })
       if (args.format === "json") {
@@ -1061,7 +1074,9 @@ You are speaking to a non-technical business executive. Follow these rules stric
       })()
       const sdk = createOpencodeClient({ baseUrl: args.attach, directory, headers })
       // altimate_change start — route when enabled, else single run
-      return Router.enabled() ? await runRouted(sdk) : await execute(sdk)
+      if (Router.enabled()) await runRouted(sdk)
+      else await execute(sdk) // discard execute()'s returned session id (handler returns void)
+      return
       // altimate_change end
     }
 
