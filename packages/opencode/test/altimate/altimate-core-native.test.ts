@@ -668,8 +668,11 @@ describe("Real-world equivalence regressions", () => {
     expect(codes).not.toContain("L040")
   })
 
-  test("lint L041: coalesce(bool, 'false') → flagged", async () => {
-    const codes = await lintCodes("select coalesce(is_active, 'false') as flag from t")
+  test("lint L041: coalesce(real bool literal, string) clash → flagged", async () => {
+    // A real boolean literal (TRUE) mixed with a string default is a genuine type
+    // clash. NB `coalesce(col, 'false')` does NOT fire — quoted 'false' is a string,
+    // not a boolean (core tightened L041 to drop that false positive).
+    const codes = await lintCodes("select coalesce(x, true, 'false') as flag from t")
     expect(codes).toContain("L041")
   })
   test("lint L041: homogeneous coalesce → not flagged", async () => {
