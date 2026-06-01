@@ -126,6 +126,11 @@ runs:
           fi
           echo "OPENCODE_CONFIG_CONTENT=$CONTENT" >> "$GITHUB_ENV"
           echo "Advisory lane: bring-your-own model ($IN_MODEL)."
+        elif [[ -n "${IN_MODEL_API_KEY:-}" ]]; then
+          # Guard a likely misconfiguration: a key with no model would be silently
+          # ignored and the lane would disable without explanation.
+          echo "::error::model_api_key is set but model is empty — set \`model\` (e.g. anthropic/claude-sonnet-4-6) or use altimate_api_key."
+          exit 1
         else
           echo "Advisory lane: no model/credentials provided — running deterministic-only."
         fi

@@ -80,17 +80,23 @@ export interface ChangedFile {
   oldPath?: string
 }
 
-/** Compile a glob (`**`, `*`, `?`) to an anchored RegExp with path semantics:
- *  `*`/`?` do not cross `/`; `**` (and `**​/`) matches across directories. */
+// Compile a glob (`**`, `*`, `?`) to an anchored RegExp with path semantics:
+// `*`/`?` never cross `/`; a double-star directory prefix matches zero or more
+// whole directory segments (preserving the slash boundary); a trailing or
+// standalone double-star matches the rest of the path.
 function globToRegExp(glob: string): RegExp {
   let re = ""
   for (let i = 0; i < glob.length; i++) {
     const c = glob[i]
     if (c === "*") {
       if (glob[i + 1] === "*") {
-        re += ".*" // ** — match across path segments
         i++
-        if (glob[i + 1] === "/") i++ // collapse `**/` so it also matches zero dirs
+        if (glob[i + 1] === "/") {
+          i++
+          re += "(?:[^/]*/)*" // **/ — zero or more whole directory segments
+        } else {
+          re += ".*" // ** — the rest of the path, across segments
+        }
       } else {
         re += "[^/]*" // * — within a single path segment
       }
@@ -109,9 +115,11 @@ export function filterChangedFiles(
   extraExcludeGlobs: string[] = [],
 ): Array<ChangedFile & { kind: DbtFileKind }> {
   const excluders = extraExcludeGlobs.map(globToRegExp)
+  // Normalize to forward slashes so `/`-based glob semantics hold on Windows paths.
+  const norm = (p: string) => p.replace(/\\/g, "/")
   return files
     .filter((f) => shouldReview(f.path))
-    .filter((f) => !excluders.some((re) => re.test(f.path)))
+    .filter((f) => !excluders.some((re) => re.test(norm(f.path))))
     .map((f) => ({ ...f, kind: classifyDbtFile(f.path) }))
 }
 

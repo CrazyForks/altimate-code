@@ -89,13 +89,15 @@ export async function buildCatalogSchemaContext(catalogPath: string): Promise<Sc
 
 export function buildReviewSchemaContext(...nodeGroups: Array<SchemaNode[] | undefined>): SchemaContext | undefined {
   const tables: SchemaContext["tables"] = {}
-  // Track which (schema, database) owns each UNQUALIFIED key. The same table
-  // seen across sources (manifest + catalog) shares an owner and merges fine;
-  // two DIFFERENT tables that share a bare name are ambiguous — drop the bare
-  // key so a lookup misses (safe degrade) rather than silently winning the
-  // wrong table's metadata. Qualified keys (with `.`) are never ambiguous.
-  const bareOwner = new Map<string, string>()
-  const ambiguousBare = new Set<string>()
+  // Track which table identity (`db.schema.name`) owns each lookup key — bare
+  // AND qualified. The same table seen across sources (manifest + catalog)
+  // shares an identity and merges fine; if two DIFFERENT tables claim the same
+  // key (a bare name shared across schemas, or a `schema.table` shared across
+  // databases) it's ambiguous — drop that key so a lookup misses (safe degrade)
+  // rather than silently winning the wrong table's metadata. A fully-qualified
+  // `db.schema.name` key is unique to its identity, so it never goes ambiguous.
+  const ownerById = new Map<string, string>()
+  const ambiguous = new Set<string>()
   for (const group of nodeGroups) {
     for (const node of group ?? []) {
       if (!node.columns?.length) continue
@@ -105,28 +107,26 @@ export function buildReviewSchemaContext(...nodeGroups: Array<SchemaNode[] | und
       if (!columns.length) continue
       const primary_key = nodePrimaryKey(node)
       const record = primary_key ? { columns, primary_key } : { columns }
-      const owner = `${node.database ?? ""}.${node.schema_name ?? ""}`
+      const identity = `${node.database ?? ""}.${node.schema_name ?? ""}.${node.name ?? node.alias ?? ""}`
 
-      const qualified = new Set<string>()
-      const bare = new Set<string>()
+      const ids = new Set<string>()
       for (const base of [node.alias, node.name]) {
         if (!base) continue
-        bare.add(base)
+        ids.add(base)
         if (node.schema_name) {
-          qualified.add(`${node.schema_name}.${base}`)
-          if (node.database) qualified.add(`${node.database}.${node.schema_name}.${base}`)
+          ids.add(`${node.schema_name}.${base}`)
+          if (node.database) ids.add(`${node.database}.${node.schema_name}.${base}`)
         }
       }
-      for (const id of qualified) tables[id] = record
-      for (const id of bare) {
-        if (ambiguousBare.has(id)) continue
-        const prev = bareOwner.get(id)
-        if (prev !== undefined && prev !== owner) {
-          ambiguousBare.add(id)
+      for (const id of ids) {
+        if (ambiguous.has(id)) continue
+        const prev = ownerById.get(id)
+        if (prev !== undefined && prev !== identity) {
+          ambiguous.add(id)
           delete tables[id]
           continue
         }
-        bareOwner.set(id, owner)
+        ownerById.set(id, identity)
         tables[id] = record
       }
     }

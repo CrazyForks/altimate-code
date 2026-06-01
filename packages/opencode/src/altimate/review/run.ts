@@ -87,7 +87,12 @@ export async function reviewPullRequest(opts: ReviewPullRequestOptions): Promise
   const needGit = !opts.changedFiles || !opts.getContent
   const base = opts.base ?? (needGit ? await defaultBaseRef(opts.cwd) : "")
   const changedFiles = opts.changedFiles ?? (await collectChangedFiles({ base, head: opts.head, cwd: opts.cwd }))
-  const getContent = opts.getContent ?? makeContentResolver({ base, head: opts.head, cwd: opts.cwd })
+  // Map renamed files → their old path so getContent resolves the "old" side
+  // from where the file lived at `base`.
+  const renames = new Map(
+    changedFiles.filter((f) => f.status === "renamed" && f.oldPath).map((f) => [f.path, f.oldPath as string]),
+  )
+  const getContent = opts.getContent ?? makeContentResolver({ base, head: opts.head, cwd: opts.cwd, renames })
 
   // Resolve the manifest against the PROJECT being reviewed (cwd), not the
   // binary's process.cwd() — otherwise a relative path silently misses when the

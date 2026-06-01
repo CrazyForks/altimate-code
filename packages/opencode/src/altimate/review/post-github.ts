@@ -59,10 +59,17 @@ export async function postGitHubReview(env: VerdictEnvelope, target: GitHubTarge
   const { owner, repo, prNumber } = target
   const result: PostResult = { inlineFellBack: false }
 
-  // 1. Upsert the summary comment (dedup by marker).
+  // 1. Upsert the summary comment (dedup by marker). Paginate ALL comments —
+  //    on a busy PR the prior marker comment can be past the first page, and
+  //    missing it would post a duplicate summary on every rerun.
   const summary = renderSummary(env)
-  const existing = await octo.rest.issues.listComments({ owner, repo, issue_number: prNumber, per_page: 100 })
-  const prior = existing.data.find((c) => c.body?.includes(REVIEW_MARKER))
+  const existing = await octo.paginate(octo.rest.issues.listComments, {
+    owner,
+    repo,
+    issue_number: prNumber,
+    per_page: 100,
+  })
+  const prior = existing.find((c) => c.body?.includes(REVIEW_MARKER))
   if (prior) {
     const r = await octo.rest.issues.updateComment({ owner, repo, comment_id: prior.id, body: summary })
     result.summaryCommentId = r.data.id
@@ -104,8 +111,13 @@ export async function postGitHubReview(env: VerdictEnvelope, target: GitHubTarge
     // can't-approve-own-PR, 5xx) should NOT masquerade as "lines outside diff",
     // so we still retry event-only but record the real reason.
     const status = e?.status ?? e?.response?.status
-    result.inlineFellBack = status === 422
-    result.postError = status === 422 ? undefined : `${status ?? ""} ${e?.message ?? e}`.trim()
+    // Only a 422 that is actually about line POSITIONING justifies silently
+    // dropping inline comments. A generic 422 (and any other status) is a real
+    // error and must be reported, not masqueraded as "lines outside diff".
+    const detail = `${e?.message ?? ""} ${JSON.stringify(e?.response?.data?.errors ?? e?.errors ?? "")}`.toLowerCase()
+    const isPositioning = status === 422 && /(position|\bline\b|diff|commit)/.test(detail)
+    result.inlineFellBack = isPositioning
+    result.postError = isPositioning ? undefined : `${status ?? ""} ${e?.message ?? e}`.trim()
     try {
       const r = await octo.rest.pulls.createReview({
         owner,

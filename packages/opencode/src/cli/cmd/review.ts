@@ -78,10 +78,15 @@ export const ReviewCommand = cmd({
           )
         } else {
           const r = await postGitHubReview(env, target)
-          UI.println(
-            `Posted review to ${target.owner}/${target.repo}#${target.prNumber}` +
-              (r.inlineFellBack ? " (inline comments fell back to summary-only)" : ""),
-          )
+          const where = `${target.owner}/${target.repo}#${target.prNumber}`
+          if (r.postError) {
+            UI.println(`⚠️  Posted the summary comment to ${where}, but the review event failed: ${r.postError}`)
+          } else {
+            UI.println(
+              `Posted review to ${where}` +
+                (r.inlineFellBack ? " (inline comments fell back to summary-only)" : ""),
+            )
+          }
         }
       }
 

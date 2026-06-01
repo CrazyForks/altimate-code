@@ -62,12 +62,15 @@ export async function collectChangedFiles(opts: CollectOptions): Promise<Changed
   )
 }
 
-/** Build a getContent(path, side) resolver over git refs / the working tree. */
-export function makeContentResolver(opts: CollectOptions) {
+/** Build a getContent(path, side) resolver over git refs / the working tree.
+ *  `renames` maps a new path → its old path so the "old" side of a renamed file
+ *  resolves from where it actually lived at `base` (not the post-rename path). */
+export function makeContentResolver(opts: CollectOptions & { renames?: Map<string, string> }) {
   return async (file: string, side: "old" | "new"): Promise<string | undefined> => {
     try {
       if (side === "old") {
-        return await git(["show", `${opts.base}:${file}`], opts.cwd)
+        const oldFile = opts.renames?.get(file) ?? file
+        return await git(["show", `${opts.base}:${oldFile}`], opts.cwd)
       }
       if (opts.head) {
         return await git(["show", `${opts.head}:${file}`], opts.cwd)
