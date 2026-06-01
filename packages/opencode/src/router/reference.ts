@@ -27,6 +27,61 @@ export namespace ReferenceResolver {
     schema(workdir: string): Promise<unknown>
   }
 
+  /** Run a shell command; returns stdout + exit code. Injected so `gitDbtDeps` is testable. */
+  export type Exec = (cmd: string, args: string[], cwd: string) => Promise<{ stdout: string; code: number }>
+
+  export interface GitDbtOptions {
+    /** dbt binary (e.g. "dbt" or "altimate-dbt"). */
+    dbt?: string
+    /** Read compiled model SQL after a `dbt compile` in `dir` → Map<model, sql>. */
+    readCompiled: (dir: string) => Promise<Map<string, string>>
+    /** Build the engine schema for the project (best-effort; empty Schema ⇒ engine abstains → build-fallback). */
+    buildSchema: (workdir: string) => Promise<unknown>
+    /** Make an isolated checkout of `ref` for base-side compilation (e.g. git worktree); returns its path + a cleanup. */
+    checkoutBase: (workdir: string, ref: string) => Promise<{ dir: string; cleanup: () => Promise<void> }>
+  }
+
+  /**
+   * Production `Deps`: git for base/changed detection, dbt to compile each side, an
+   * injected schema builder. All process IO goes through `exec`/`opts` so the orchestration
+   * is unit-tested without git/dbt. NOTE: the live path (git-worktree base compile +
+   * warehouse schema) is pending E2E validation — it ships behind a flag and degrades to a
+   * build verdict (the engine abstains without a resolvable schema / unsupported dialect).
+   */
+  export function gitDbtDeps(exec: Exec, opts: GitDbtOptions): Deps {
+    const dbt = opts.dbt ?? "dbt"
+    return {
+      async baseRef(workdir) {
+        const r = await exec("git", ["rev-parse", "--verify", "HEAD"], workdir)
+        return r.code === 0 && r.stdout.trim() ? r.stdout.trim() : null // no commits ⇒ greenfield
+      },
+      async changedModels(workdir, base) {
+        const r = await exec("git", ["diff", "--name-only", base, "--", "models"], workdir)
+        if (r.code !== 0) return []
+        return r.stdout
+          .split("\n")
+          .map((l) => l.trim())
+          .filter((l) => l.endsWith(".sql"))
+          .map((l) => l.split("/").pop()!.replace(/\.sql$/, ""))
+      },
+      async compiledSql(workdir, ref) {
+        if (ref === "WORKING") {
+          await exec(dbt, ["compile"], workdir)
+          return opts.readCompiled(workdir)
+        }
+        const base = await opts.checkoutBase(workdir, ref)
+        try {
+          await exec(dbt, ["deps"], base.dir)
+          await exec(dbt, ["compile"], base.dir)
+          return await opts.readCompiled(base.dir)
+        } finally {
+          await base.cleanup()
+        }
+      },
+      schema: (workdir) => opts.buildSchema(workdir),
+    }
+  }
+
   /**
    * Build a `EquivalenceVerifier.ReferenceResolver` from injected deps.
    * Returns null (→ greenfield/build-fallback) when there is no base ref; returns [] when a

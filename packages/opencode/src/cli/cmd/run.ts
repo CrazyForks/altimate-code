@@ -15,6 +15,9 @@ import { Router } from "../../router/router"
 import { Verifier } from "../../router/verifier"
 import { Verdict } from "../../router/verdict"
 import { Policy } from "../../router/policy"
+import { EquivalenceVerifier } from "../../router/equivalence-verifier"
+import { ReferenceResolver } from "../../router/reference"
+import * as Dispatcher from "../../altimate/native/dispatcher"
 // altimate_change end
 import { Agent } from "../../agent/agent"
 import { PermissionNext } from "../../permission/next"
@@ -893,37 +896,115 @@ You are speaking to a non-technical business executive. Follow these rules stric
           reason: "no dbt project to verify",
           checks: [],
         }
-      try {
-        const proc = Bun.spawn(["dbt", "build"], { cwd: root, stdout: "pipe", stderr: "pipe" })
-        // Hard timeout so a hung dbt (lock, prompt, runaway query) can't stall the run.
-        let timedOut = false
-        const timer = setTimeout(() => {
-          timedOut = true
-          proc.kill()
-        }, 300_000)
-        const out = (await new Response(proc.stdout).text()) + (await new Response(proc.stderr).text())
-        const code = await proc.exited
-        clearTimeout(timer)
-        if (timedOut)
+
+      // Reference-free gate: `dbt build` in `dir`, judged by Verifier. Used directly (default)
+      // and as the fallback for the equivalence verifier (greenfield / undecidable).
+      const buildVerify = async (dir: string): Promise<Verifier.Verdict> => {
+        try {
+          const proc = Bun.spawn(["dbt", "build"], { cwd: dir, stdout: "pipe", stderr: "pipe" })
+          // Hard timeout so a hung dbt (lock, prompt, runaway query) can't stall the run.
+          let timedOut = false
+          const timer = setTimeout(() => {
+            timedOut = true
+            proc.kill()
+          }, 300_000)
+          const out = (await new Response(proc.stdout).text()) + (await new Response(proc.stderr).text())
+          const code = await proc.exited
+          clearTimeout(timer)
+          if (timedOut)
+            return {
+              ok: false,
+              strength: Verifier.Strength.BUILD,
+              decision: Verifier.Decision.FAILED,
+              reason: "dbt build timed out after 300s",
+              checks: [{ name: "dbt build", ok: false, detail: "timed out after 300s" }],
+            }
+          return Verifier.fromDbt(out, code)
+        } catch (e) {
+          // dbt binary missing / spawn failure → can't verify; mark unverifiable (fail-open, but honest).
           return {
-            ok: false,
-            strength: Verifier.Strength.BUILD,
-            decision: Verifier.Decision.FAILED,
-            reason: "dbt build timed out after 300s",
-            checks: [{ name: "dbt build", ok: false, detail: "timed out after 300s" }],
+            ok: true,
+            unverifiable: true,
+            strength: Verifier.Strength.UNVERIFIABLE,
+            decision: Verifier.Decision.OK,
+            reason: `verify skipped: ${String(e)}`,
+            checks: [],
           }
-        return Verifier.fromDbt(out, code)
-      } catch (e) {
-        // dbt binary missing / spawn failure → can't verify; mark unverifiable (fail-open, but honest).
-        return {
-          ok: true,
-          unverifiable: true,
-          strength: Verifier.Strength.UNVERIFIABLE,
-          decision: Verifier.Decision.OK,
-          reason: `verify skipped: ${String(e)}`,
-          checks: [],
         }
       }
+
+      // EXPERIMENTAL (flag-gated, default off): equivalence-backed verification in the
+      // reference-available regime — proven-equivalent vs the model's base version. Always
+      // falls back to `buildVerify` on greenfield / undecidable / any error, so it can never
+      // be less safe than the build gate. Value is gated on altimate-core dialect + schema
+      // coverage (altimate-core-internal #128 / #130); ships dormant until those land.
+      if (process.env["ALTIMATE_ROUTER_EQUIVALENCE"] === "1") {
+        try {
+          const exec: ReferenceResolver.Exec = async (cmd, args, cwd) => {
+            const p = Bun.spawn([cmd, ...args], { cwd, stdout: "pipe", stderr: "pipe" })
+            const stdout = await new Response(p.stdout).text()
+            return { stdout, code: await p.exited }
+          }
+          const readCompiled = async (dir: string): Promise<Map<string, string>> => {
+            const { readdir } = await import("node:fs/promises")
+            const map = new Map<string, string>()
+            const baseDir = path.join(dir, "target", "compiled")
+            if (!(await Filesystem.exists(baseDir))) return map
+            const walk = async (d: string) => {
+              for (const e of await readdir(d, { withFileTypes: true })) {
+                const fp = path.join(d, e.name)
+                if (e.isDirectory()) await walk(fp)
+                else if (e.name.endsWith(".sql")) map.set(e.name.replace(/\.sql$/, ""), await Bun.file(fp).text())
+              }
+            }
+            await walk(baseDir)
+            return map
+          }
+          const checkoutBase = async (workdir: string, ref: string) => {
+            const dir = path.join("/tmp", `altimate-base-${Date.now()}`)
+            await exec("git", ["worktree", "add", "--detach", dir, ref], workdir)
+            return {
+              dir,
+              cleanup: async () => {
+                await exec("git", ["worktree", "remove", "--force", dir], workdir)
+              },
+            }
+          }
+          const deps = ReferenceResolver.gitDbtDeps(exec, {
+            readCompiled,
+            // Best-effort: empty schema ⇒ the engine abstains on table refs ⇒ build fallback.
+            // A warehouse schema resolver lands with the dialect coverage work.
+            buildSchema: async () => undefined,
+            checkoutBase,
+          })
+          const check: EquivalenceVerifier.CheckEquivalence = async (head, base, schema) => {
+            const r = await Dispatcher.call("altimate_core.equivalence", {
+              sql1: head,
+              sql2: base,
+              schema_context: schema as Record<string, unknown> | undefined,
+            })
+            const d = ((r as { data?: Record<string, unknown> }).data ?? {}) as {
+              equivalent?: boolean
+              validation_errors?: string[]
+              differences?: { severity?: string; description?: string }[]
+              confidence?: number
+            }
+            return {
+              equivalent: !!d.equivalent,
+              validation_errors: d.validation_errors ?? [],
+              differences: d.differences ?? [],
+              confidence: d.confidence,
+            }
+          }
+          return await EquivalenceVerifier.create(check, ReferenceResolver.create(deps), {
+            verify: buildVerify,
+          }).verify(root)
+        } catch {
+          return buildVerify(root) // the experimental path must never break the run
+        }
+      }
+
+      return buildVerify(root)
     }
 
     // Run the tier ladder: cheap → verify → escalate with failing-check context, stop at first pass.

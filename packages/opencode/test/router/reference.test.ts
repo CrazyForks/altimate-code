@@ -42,3 +42,51 @@ describe("ReferenceResolver", () => {
     expect(pairs!.map((p) => p.model)).toEqual(["m1"]) // m_new dropped
   })
 })
+
+describe("ReferenceResolver.gitDbtDeps (orchestration, mocked exec)", () => {
+  const mkExec = (calls: string[][], outputs: Record<string, { stdout: string; code: number }>) =>
+    (async (cmd: string, args: string[]) => {
+      calls.push([cmd, ...args])
+      return outputs[`${cmd} ${args[0]}`] ?? { stdout: "", code: 0 }
+    }) as ReferenceResolver.Exec
+
+  const baseOpts = (over: Partial<ReferenceResolver.GitDbtOptions> = {}): ReferenceResolver.GitDbtOptions => ({
+    readCompiled: async () => new Map([["m1", "select 1"]]),
+    buildSchema: async () => ({ schema: true }),
+    checkoutBase: async () => ({ dir: "/tmp/base", cleanup: async () => {} }),
+    ...over,
+  })
+
+  test("baseRef: HEAD present → sha; absent → null (greenfield)", async () => {
+    const d1 = ReferenceResolver.gitDbtDeps(mkExec([], { "git rev-parse": { stdout: "abc123\n", code: 0 } }), baseOpts())
+    expect(await d1.baseRef("/ws")).toBe("abc123")
+    const d2 = ReferenceResolver.gitDbtDeps(mkExec([], { "git rev-parse": { stdout: "", code: 128 } }), baseOpts())
+    expect(await d2.baseRef("/ws")).toBeNull()
+  })
+
+  test("changedModels: parses git diff to bare model names, filters non-.sql", async () => {
+    const d = ReferenceResolver.gitDbtDeps(
+      mkExec([], { "git diff": { stdout: "models/agg/m1.sql\nmodels/schema.yml\nmodels/dim/m2.sql\n", code: 0 } }),
+      baseOpts(),
+    )
+    expect(await d.changedModels("/ws", "HEAD")).toEqual(["m1", "m2"])
+  })
+
+  test("compiledSql WORKING → dbt compile in workdir then readCompiled", async () => {
+    const calls: string[][] = []
+    const d = ReferenceResolver.gitDbtDeps(mkExec(calls, {}), baseOpts())
+    const sql = await d.compiledSql("/ws", "WORKING")
+    expect(sql.get("m1")).toBe("select 1")
+    expect(calls.some((c) => c[0] === "dbt" && c[1] === "compile")).toBe(true)
+  })
+
+  test("compiledSql base → checkout, deps+compile in the checkout, cleanup always runs", async () => {
+    let cleaned = false
+    const d = ReferenceResolver.gitDbtDeps(
+      mkExec([], {}),
+      baseOpts({ checkoutBase: async () => ({ dir: "/tmp/base", cleanup: async () => { cleaned = true } }) }),
+    )
+    await d.compiledSql("/ws", "abc123")
+    expect(cleaned).toBe(true)
+  })
+})
