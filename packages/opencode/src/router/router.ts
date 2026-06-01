@@ -47,9 +47,22 @@ export namespace Router {
     return tiers.length ? tiers : DEFAULT_LADDER
   }
 
-  /** Escalate iff the verdict failed AND a stronger tier remains. */
+  /**
+   * Escalate iff the verdict is escalation-worthy AND a stronger tier remains.
+   *
+   * Decision-aware: escalate on a build/test FAILURE or a PROVEN_DIFFERENT equivalence
+   * verdict, but NOT on UNDECIDABLE — a stronger model does not make an undecidable
+   * query decidable, and escalating on uncertainty is the gated-build cost-blowup
+   * failure mode. UNDECIDABLE is handled by the verifier's own build/test fallback.
+   * Falls back to the legacy `!ok` rule when a verdict carries no `decision` (back-compat).
+   */
   export function shouldEscalate(verdict: Verifier.Verdict, tierIndex: number, tiers: Tier[]): boolean {
-    return !verdict.ok && tierIndex < tiers.length - 1
+    if (tierIndex >= tiers.length - 1) return false
+    if (verdict.decision === undefined) return !verdict.ok
+    return (
+      verdict.decision === Verifier.Decision.FAILED ||
+      verdict.decision === Verifier.Decision.PROVEN_DIFFERENT
+    )
   }
 
   /** The note handed to the next tier — names the exact failing checks so it fixes them. */
@@ -97,7 +110,15 @@ export namespace Router {
         await params.runAgent(tier.model, note)
         verdict = await params.verify()
       } catch (e) {
-        verdict = { ok: false, reason: `tier error: ${String(e)}`, checks: [] }
+        // A thrown tier is a FAILED attempt (escalate to the next tier), at UNVERIFIABLE
+        // strength since no gate actually judged the output.
+        verdict = {
+          ok: false,
+          strength: Verifier.Strength.UNVERIFIABLE,
+          decision: Verifier.Decision.FAILED,
+          reason: `tier error: ${String(e)}`,
+          checks: [],
+        }
       }
       attempts.push({ tier, verdict })
       if (verdict.ok) return { solved: true, solvedBy: tier, attempts }

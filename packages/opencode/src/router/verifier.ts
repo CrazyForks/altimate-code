@@ -20,6 +20,38 @@ export namespace Verifier {
     detail?: string
   }
 
+  /**
+   * How strong is the evidence behind a verdict? Ordered weakest → strongest.
+   * The signed envelope carries this so a consumer knows whether a result was
+   * merely build-verified (value unknown) or proven equivalent to a reference.
+   */
+  export enum Strength {
+    /** No gate could run (fail-open). The result is NOT proven. */
+    UNVERIFIABLE = "unverifiable",
+    /** `dbt build` exited 0 with no errors: it compiles, but value-correctness is unknown. */
+    BUILD = "build",
+    /** dbt schema/unit tests passed: asserted invariants hold (still not full correctness). */
+    DBT_TEST = "dbt_test",
+    /** Proven semantically equivalent to a reference by the equivalence engine. */
+    EQUIVALENCE = "equivalence",
+  }
+
+  /**
+   * What did the gate conclude? Distinct from {@link Strength} (how it was judged).
+   * `UNDECIDABLE` is the equivalence engine's honest abstain — it must NEVER be
+   * silently treated as a pass, and must NOT trigger escalation (a stronger model
+   * does not make an undecidable query decidable); the caller falls back + flags.
+   */
+  export enum Decision {
+    OK = "ok",
+    /** The equivalence engine found a MATERIAL difference vs the reference. */
+    PROVEN_DIFFERENT = "proven_different",
+    /** The engine could not decide (validation errors / unsupported syntax / no reference). */
+    UNDECIDABLE = "undecidable",
+    /** A build/test gate failed. */
+    FAILED = "failed",
+  }
+
   export interface Verdict {
     ok: boolean
     /**
@@ -28,11 +60,33 @@ export namespace Verifier {
      * (fail-open), but the result was NOT proven — consumers/the envelope can tell.
      */
     unverifiable?: boolean
+    /**
+     * Evidence strength (optional for back-compat; populated by every constructor).
+     * Lets the signed envelope say "verified at strength EQUIVALENCE" vs "BUILD only".
+     */
+    strength?: Strength
+    /**
+     * Gate conclusion (optional for back-compat; populated by every constructor).
+     * Drives decision-aware escalation in the router.
+     */
+    decision?: Decision
+    /** Engine confidence in [0,1] when available (equivalence). Never 1.0 — soundness margin. */
+    confidence?: number
     /** Human/agent-readable reason when not ok (fed to the next tier on escalation). */
     reason?: string
     checks: Check[]
     /** Raw evidence excerpt (for the verdict envelope / audit). */
     evidence?: string
+  }
+
+  /** One model's equivalence result (subset of altimate-core's EquivalenceResult). */
+  export interface EquivalenceResult {
+    equivalent: boolean
+    /** Non-empty ⇒ the engine could not decide (undecidable), NOT "different". */
+    validation_errors?: string[]
+    /** Material differences when decidably non-equivalent. */
+    differences?: { severity?: string; description?: string }[]
+    confidence?: number
   }
 
   /** dbt's "Done. PASS=.. WARN=.. ERROR=.. SKIP=.. TOTAL=.." summary. */
@@ -115,11 +169,95 @@ export namespace Verifier {
       : s
         ? [{ name: "dbt build", ok, detail: `PASS=${s.pass} ERROR=${s.error} TOTAL=${s.total}` }]
         : [{ name: "dbt build", ok: false, detail: "no summary" }]
-    return { ok, reason, checks, evidence: output.slice(-800) }
+    return {
+      ok,
+      strength: Strength.BUILD,
+      decision: ok ? Decision.OK : Decision.FAILED,
+      reason,
+      checks,
+      evidence: output.slice(-800),
+    }
+  }
+
+  /**
+   * Build a Verdict from per-model equivalence results (reference-available regime).
+   *
+   * Folds N model verdicts into one, honoring the engine's soundness:
+   *  - any model with `validation_errors` (or a no-reference/error result) ⇒ UNDECIDABLE
+   *    for the whole verdict (the caller MUST fall back to build/test, never pass silently);
+   *  - else any model decidably non-equivalent ⇒ PROVEN_DIFFERENT (escalation-worthy);
+   *  - else (every model proven equivalent) ⇒ OK at EQUIVALENCE strength.
+   *
+   * `ok` is true only for the all-equivalent case. UNDECIDABLE and PROVEN_DIFFERENT are
+   * NOT `ok` (the run is not accepted on equivalence alone), but they differ in how the
+   * router reacts (see Router.shouldEscalate): escalate on PROVEN_DIFFERENT, fall back on
+   * UNDECIDABLE.
+   */
+  export function fromEquivalence(results: { model: string; result: EquivalenceResult }[]): Verdict {
+    if (results.length === 0) {
+      return {
+        ok: false,
+        strength: Strength.UNVERIFIABLE,
+        decision: Decision.UNDECIDABLE,
+        reason: "no models to compare (no reference resolved)",
+        checks: [],
+      }
+    }
+    const checks: Check[] = []
+    let anyUndecidable = false
+    let anyDifferent = false
+    // Track confidence only when a model actually reports it — never synthesize a
+    // 1.0 default (that would read as "100% confident" on a non-OK verdict).
+    let minConfidence: number | undefined
+    for (const { model, result } of results) {
+      const undecidable = !!(result.validation_errors && result.validation_errors.length > 0)
+      if (typeof result.confidence === "number")
+        minConfidence = minConfidence === undefined ? result.confidence : Math.min(minConfidence, result.confidence)
+      if (undecidable) {
+        anyUndecidable = true
+        checks.push({ name: model, ok: false, detail: `undecidable: ${result.validation_errors!.join("; ")}` })
+      } else if (!result.equivalent) {
+        anyDifferent = true
+        const diff = (result.differences ?? []).map((d) => d.description ?? d.severity ?? "diff").join("; ")
+        checks.push({ name: model, ok: false, detail: `not equivalent: ${diff || "material difference"}` })
+      } else {
+        checks.push({ name: model, ok: true, detail: "equivalent" })
+      }
+    }
+    // PROVEN_DIFFERENT outranks UNDECIDABLE: a proven material diff is actionable (escalate),
+    // even if another model in the change was undecidable.
+    if (anyDifferent) {
+      return {
+        ok: false,
+        strength: Strength.EQUIVALENCE,
+        decision: Decision.PROVEN_DIFFERENT,
+        confidence: minConfidence,
+        reason: `not equivalent to reference: ${checks.filter((c) => !c.ok).map((c) => c.name).join(", ")}`,
+        checks,
+      }
+    }
+    if (anyUndecidable) {
+      return {
+        ok: false,
+        strength: Strength.BUILD, // equivalence couldn't decide; caller falls back to build/test
+        decision: Decision.UNDECIDABLE,
+        reason: "equivalence undecidable for some models — falling back to build/test",
+        checks,
+      }
+    }
+    return {
+      ok: true,
+      strength: Strength.EQUIVALENCE,
+      decision: Decision.OK,
+      confidence: minConfidence,
+      checks,
+    }
   }
 
   /** Default that passes everything (ungated) — used when no real verifier is configured. */
-  export const ALLOW_ALL: Impl = { verify: () => ({ ok: true, checks: [] }) }
+  export const ALLOW_ALL: Impl = {
+    verify: () => ({ ok: true, strength: Strength.UNVERIFIABLE, decision: Decision.OK, unverifiable: true, checks: [] }),
+  }
 
   /**
    * Default deterministic verifier: runs `dbt build` in the workspace and judges
@@ -135,7 +273,15 @@ export namespace Verifier {
         } catch (e) {
           // Fail-open: can't verify → don't block, but mark unverifiable so it's not
           // mistaken for a real pass.
-          return { ok: true, unverifiable: true, reason: `verifier error: ${String(e)}`, checks: [], evidence: "verifier-error" }
+          return {
+            ok: true,
+            unverifiable: true,
+            strength: Strength.UNVERIFIABLE,
+            decision: Decision.UNDECIDABLE,
+            reason: `verifier error: ${String(e)}`,
+            checks: [],
+            evidence: "verifier-error",
+          }
         }
       },
     }

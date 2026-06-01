@@ -878,7 +878,14 @@ You are speaking to a non-technical business executive. Follow these rules stric
     async function verifyWorkspace(): Promise<Verifier.Verdict> {
       const root = process.cwd()
       if (!(await Filesystem.exists(path.join(root, "dbt_project.yml"))))
-        return { ok: true, unverifiable: true, reason: "no dbt project to verify", checks: [] }
+        return {
+          ok: true,
+          unverifiable: true,
+          strength: Verifier.Strength.UNVERIFIABLE,
+          decision: Verifier.Decision.OK,
+          reason: "no dbt project to verify",
+          checks: [],
+        }
       try {
         const proc = Bun.spawn(["dbt", "build"], { cwd: root, stdout: "pipe", stderr: "pipe" })
         // Hard timeout so a hung dbt (lock, prompt, runaway query) can't stall the run.
@@ -890,11 +897,25 @@ You are speaking to a non-technical business executive. Follow these rules stric
         const out = (await new Response(proc.stdout).text()) + (await new Response(proc.stderr).text())
         const code = await proc.exited
         clearTimeout(timer)
-        if (timedOut) return { ok: false, reason: "dbt build timed out after 300s", checks: [] }
+        if (timedOut)
+          return {
+            ok: false,
+            strength: Verifier.Strength.BUILD,
+            decision: Verifier.Decision.FAILED,
+            reason: "dbt build timed out after 300s",
+            checks: [{ name: "dbt build", ok: false, detail: "timed out after 300s" }],
+          }
         return Verifier.fromDbt(out, code)
       } catch (e) {
         // dbt binary missing / spawn failure → can't verify; mark unverifiable (fail-open, but honest).
-        return { ok: true, unverifiable: true, reason: `verify skipped: ${String(e)}`, checks: [] }
+        return {
+          ok: true,
+          unverifiable: true,
+          strength: Verifier.Strength.UNVERIFIABLE,
+          decision: Verifier.Decision.OK,
+          reason: `verify skipped: ${String(e)}`,
+          checks: [],
+        }
       }
     }
 
@@ -910,18 +931,27 @@ You are speaking to a non-technical business executive. Follow these rules stric
         return
       }
       const baseMessage = message
+      const originalModel = args.model
       const policy = Policy.resolve()
       const tiers = await policy.tiers({ prompt: baseMessage })
-      const result = await Router.route({
-        tiers,
-        runAgent: async (model, note) => {
-          args.model = model
-          message = note ? `${note}\n\n${baseMessage}` : baseMessage
-          await execute(sdk)
-        },
-        verify: verifyWorkspace,
-      })
-      message = baseMessage
+      let result
+      try {
+        result = await Router.route({
+          tiers,
+          runAgent: async (model, note) => {
+            args.model = model
+            message = note ? `${note}\n\n${baseMessage}` : baseMessage
+            await execute(sdk)
+          },
+          verify: verifyWorkspace,
+        })
+      } finally {
+        // Always restore the mutated request state, even if a tier throws — otherwise
+        // `message`/`args.model` leak the last tier's escalation prompt + model to any
+        // downstream logging/telemetry/retry.
+        message = baseMessage
+        args.model = originalModel
+      }
       const envelope = Verdict.build(result, { now: new Date().toISOString() })
       if (args.format === "json") {
         process.stdout.write(JSON.stringify({ type: "verdict", timestamp: Date.now(), ...envelope }) + EOL)
