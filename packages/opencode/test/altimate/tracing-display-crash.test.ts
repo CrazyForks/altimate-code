@@ -505,11 +505,11 @@ describe("flushSync — multiple calls", () => {
     tracer.flushSync("early crash")
     const flushedPath = tracer.getTracePath()!
 
-    // After flushSync, endTrace's export() must NOT overwrite the canonical
-    // crashed file (the FileExporter is now in _crashed=true state, see M3
-    // fix in tracing.ts). endTrace's export returns undefined so the file
-    // path comes from the still-valid flushSync write.
-    await tracer.endTrace()
+    // After flushSync, endTrace short-circuits and returns the canonical
+    // crashed file path. The crashed write is authoritative — endTrace
+    // does not call any exporter once Trace.crashed is set.
+    const endPath = await tracer.endTrace()
+    expect(endPath).toBe(flushedPath)
 
     const traceFile: TraceFile = JSON.parse(await fs.readFile(flushedPath, "utf-8"))
     expect(traceFile.summary.status).toBe("crashed")

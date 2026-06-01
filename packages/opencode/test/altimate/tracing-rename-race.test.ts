@@ -34,7 +34,12 @@ describe("trace corruption — flushSync vs in-flight rename race", () => {
   })
 
   afterEach(async () => {
-    ;(fs as any).rename = originalRename
+    // Safety guard: restore fs.rename even if a test failed mid-patch.
+    // Without this, a patched fs.rename leaks into subsequent test files
+    // because `fs/promises` is a process-global namespace object.
+    if ((fs as any).rename !== originalRename) {
+      ;(fs as any).rename = originalRename
+    }
     await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {})
   })
 
@@ -153,7 +158,9 @@ describe("trace corruption — flushSync vs in-flight rename race", () => {
     })
 
     // Within the rename's 150ms delay, fire B, C, D. snapshotPending is true,
-    // so each snapshot() returns early. No follow-up snapshot is scheduled.
+    // so each snapshot() returns early — but the M2 fix sets
+    // snapshotRequestedDuringPending so a follow-up snapshot is scheduled
+    // (via queueMicrotask in the in-flight snapshot's .finally).
     await new Promise((r) => setTimeout(r, 30))
     tracer.logToolCall({
       tool: "tool-B",
@@ -386,6 +393,49 @@ describe("trace corruption — flushSync vs in-flight rename race", () => {
     }
     expect(observedClobber).toBe(0)
   }, 120_000)
+
+  // Regression for the critical issue raised in the consensus review of PR #867:
+  // FileExporter._crashed was originally an instance-level boolean, but the TUI
+  // worker caches a single FileExporter across sessions (worker.ts shares
+  // `tracingExporters` via `Trace.withExporters([...tracingExporters])`).
+  // A single boolean meant one crashed session would permanently suppress
+  // exports for every subsequent session in the same worker. The fix is
+  // per-session crash tracking via Set<sessionId>.
+  test("shared FileExporter — flushSync on trace A must NOT suppress trace B's export", async () => {
+    const sharedExporter = new FileExporter(tmpDir)
+
+    // Trace A: flushSync → marks session-A crashed, writes canonical file
+    const traceA = Trace.withExporters([sharedExporter])
+    traceA.startTrace("session-A", { prompt: "A" })
+    await new Promise((r) => setTimeout(r, 50))
+    traceA.logToolCall({
+      tool: "tool-a",
+      callID: "ca",
+      state: { status: "completed", input: {}, output: "ok", time: { start: 1, end: 2 } },
+    })
+    traceA.flushSync("crash-A")
+
+    // Trace B: normal lifecycle on the SAME exporter instance — must export cleanly
+    const traceB = Trace.withExporters([sharedExporter])
+    traceB.startTrace("session-B", { prompt: "B" })
+    traceB.logToolCall({
+      tool: "tool-b",
+      callID: "cb",
+      state: { status: "completed", input: {}, output: "ok", time: { start: 1, end: 2 } },
+    })
+    const pathB = await traceB.endTrace()
+
+    // Trace A's file: crashed (flushSync wins)
+    const traceFileA: TraceFile = JSON.parse(
+      await fs.readFile(path.join(tmpDir, "session-A.json"), "utf-8"),
+    )
+    expect(traceFileA.summary.status).toBe("crashed")
+
+    // Trace B's file: completed (per-session guard scopes A's crash to A only)
+    expect(pathB).toBe(path.join(tmpDir, "session-B.json"))
+    const traceFileB: TraceFile = JSON.parse(await fs.readFile(pathB!, "utf-8"))
+    expect(traceFileB.summary.status).toBe("completed")
+  })
 
   test("baseline — flushSync alone writes crashed content correctly (no race)", async () => {
     // Sanity check: without the rename delay, flushSync's content lands and survives.

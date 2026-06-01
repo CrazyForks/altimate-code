@@ -148,6 +148,15 @@ export interface TraceFile {
 export interface TraceExporter {
   readonly name: string
   export(trace: TraceFile): Promise<string | undefined>
+  // altimate_change start — M3 fix: optional crash-guard hook.
+  // If implemented, Trace.flushSync() calls this with the crashing session's
+  // id BEFORE writing the canonical crashed file. Exporters that write to a
+  // shared canonical location (e.g. FileExporter on the local filesystem)
+  // should use it to suppress in-flight or subsequent exports that would
+  // race the synchronous crash write. Exporters that POST to remote
+  // endpoints (e.g. HttpExporter) don't need to implement it.
+  markCrashed?(sessionId: string): void
+  // altimate_change end
 }
 
 // ---------------------------------------------------------------------------
@@ -165,15 +174,22 @@ export class FileExporter implements TraceExporter {
   readonly name = "file"
   private dir: string
   private maxFiles: number
-  // altimate_change start — M3 fix: crash-guard for in-flight export() so
-  // flushSync's synchronous canonical-file write isn't clobbered by a
-  // late rename. Mirrors the existing `crashed` guard inside Trace.snapshot().
-  private _crashed = false
-  /** Mark this exporter as superseded by a synchronous crash write.
-   *  Subsequent or in-flight export() calls bail before they can overwrite
-   *  the canonical file. Idempotent. */
-  markCrashed() {
-    this._crashed = true
+  // altimate_change start — M3 fix: per-session crash-guard.
+  // We track which sessions have been crashed-out via flushSync rather than
+  // a single boolean, because the same FileExporter instance is shared
+  // across many Trace instances in the TUI worker (worker.ts caches a
+  // single exporter array at module init, then every session does
+  // `Trace.withExporters([...tracingExporters], ...)` which spreads the
+  // array but shares the inner objects). A single boolean would cause one
+  // crashed session to permanently suppress export() for all subsequent
+  // sessions in the same worker. Keying by sessionId scopes the guard to
+  // the actual crashing trace.
+  private crashedSessions = new Set<string>()
+  /** Mark a session's exports as superseded by a synchronous crash write.
+   *  Subsequent or in-flight export() calls for that session bail at the
+   *  next checkpoint (entry, pre-writeFile, or pre-rename). Idempotent. */
+  markCrashed(sessionId: string) {
+    if (sessionId) this.crashedSessions.add(sessionId)
   }
   // altimate_change end
 
@@ -183,8 +199,9 @@ export class FileExporter implements TraceExporter {
   }
 
   async export(trace: TraceFile): Promise<string | undefined> {
-    // altimate_change start — M3 fix: bail at entry if already superseded
-    if (this._crashed) return undefined
+    // altimate_change start — M3 fix: bail at entry if this session has been
+    // marked crashed by a concurrent flushSync.
+    if (this.crashedSessions.has(trace.sessionId)) return undefined
     // altimate_change end
     let tmpPath: string | undefined
     try {
@@ -198,13 +215,13 @@ export class FileExporter implements TraceExporter {
       // altimate_change start — M3 fix: re-check before the long writeFile.
       // For large traces the writeFile takes 100+ms — a wide window for
       // flushSync to interleave.
-      if (this._crashed) return undefined
+      if (this.crashedSessions.has(trace.sessionId)) return undefined
       // altimate_change end
       await fs.writeFile(tmpPath, JSON.stringify(trace, null, 2))
       // altimate_change start — M3 fix: re-check before the rename. If
       // flushSync ran during the writeFile, drop the tmp instead of
       // overwriting flushSync's crashed canonical file.
-      if (this._crashed) {
+      if (this.crashedSessions.has(trace.sessionId)) {
         await fs.unlink(tmpPath).catch(() => {})
         return undefined
       }
@@ -858,13 +875,26 @@ export class Trace {
   }
 
   /**
-   * Wait for any pending async snapshot to complete.
-   * Use from tests that need to read the trace file deterministically after
-   * a span completion (instead of `await sleep(50)` which races on slow CI runners).
-   * No-op if no snapshot is in flight.
+   * Wait for the on-disk snapshot to catch up with in-memory state.
+   *
+   * Drains both the current in-flight snapshot and any M2 follow-up snapshot
+   * scheduled by its `.finally`. Bounded by `MAX_DRAIN_ITER` to guard against
+   * pathological cases where events arrive faster than they can be drained.
    */
   async flush(): Promise<void> {
-    if (this.snapshotPromise) await this.snapshotPromise.catch(() => {})
+    // altimate_change start — M2 fix companion: drain follow-up snapshots so
+    // callers (and tests) see disk == memory after flush() returns. Without
+    // this drain loop, the M2 fix's queueMicrotask follow-up runs AFTER
+    // flush() resolves and the disk still trails by one snapshot.
+    const MAX_DRAIN_ITER = 16
+    for (let i = 0; i < MAX_DRAIN_ITER; i++) {
+      if (this.snapshotPromise) await this.snapshotPromise.catch(() => {})
+      if (!this.snapshotRequestedDuringPending && !this.snapshotPromise) return
+      // Yield so any queued microtask (the M2 follow-up) gets to run and
+      // populate snapshotPromise for the next iteration to await.
+      await new Promise<void>((r) => queueMicrotask(r))
+    }
+    // altimate_change end
   }
 
   /**
@@ -939,9 +969,24 @@ export class Trace {
     // altimate_change start — M2 fix companion: claim the canonical write
     // BEFORE awaiting the in-flight snapshot so any follow-up snapshot the
     // in-flight one might schedule in its `.finally` is suppressed.
-    // Without this, the follow-up's queued microtask runs after the await
-    // but before endTrace's root-span mutation, capturing stale spans.
+    //
+    // Microtask-ordering invariant we rely on below: when an in-flight
+    // snapshot resolves, its `.finally` runs synchronously inside the
+    // promise chain — and only THEN does the `await this.snapshotPromise`
+    // (line below) hand control back to this function. By that point, if
+    // the .finally tried to schedule a follow-up snapshot via
+    // `queueMicrotask`, the follow-up is queued but hasn't run yet. We set
+    // `endTraceStarted=true` BEFORE the await, so whether the .finally
+    // already checked the flag (during the await) or the queued microtask
+    // runs after this point (calling `snapshot()` which re-checks at line
+    // ~803), both paths see the flag and bail.
     this.endTraceStarted = true
+    // M3 fix: if flushSync already wrote the canonical crashed file, return
+    // the path to that file directly. Calling exporters would either bail
+    // (FileExporter, via the per-session crash guard) or POST stale
+    // "completed" data (HttpExporter). The crash signal is authoritative
+    // across exporters once flushSync has fired.
+    if (this.crashed) return this.getTracePath()
     // altimate_change end
 
     // Wait for any in-flight snapshot to complete before final write
@@ -1053,14 +1098,19 @@ export class Trace {
       // Set crashed BEFORE writing so any in-flight async snapshot() will
       // bail out at its rename step instead of clobbering our crashed file.
       this.crashed = true
-      // altimate_change start — M3 fix: also notify every FileExporter so any
-      // in-flight or future endTrace export() bails before its writeFile or
-      // rename can overwrite the canonical file we're about to write below.
+      // altimate_change start — M3 fix: notify every exporter that the current
+      // session is crashed BEFORE writing the canonical file synchronously
+      // below. Exporters that share a canonical write target (e.g. FileExporter)
+      // can suppress in-flight or future writes for this session. Polymorphic
+      // dispatch via the optional `markCrashed?` method — no instanceof check,
+      // so custom exporters with similar semantics participate automatically.
       // Without this, an in-flight `await endTrace()` whose export() is
       // mid-writeFile (a 100+ms window on multi-MB traces) lands its rename
       // after this synchronous write and clobbers the crashed content.
-      for (const exp of this.exporters) {
-        if (exp instanceof FileExporter) exp.markCrashed()
+      if (this.sessionId) {
+        for (const exp of this.exporters) {
+          exp.markCrashed?.(this.sessionId)
+        }
       }
       // altimate_change end
       this.currentGenerationSpanId = undefined
