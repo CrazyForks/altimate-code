@@ -240,7 +240,7 @@ export namespace Agent {
       reviewer: {
         name: "reviewer",
         description:
-          "Read-only dbt PR reviewer. Runs the dbt_pr_review verdict engine (lineage, equivalence, PII, grade) and posts findings. Cannot modify files or run destructive SQL.",
+          "dbt PR reviewer. Runs the dbt_pr_review verdict engine (lineage, equivalence, PII, grade) plus read-only analysis tools and posts findings. Edit/write tools are denied; bash is denied.",
         prompt: PROMPT_REVIEWER,
         options: {},
         permission: PermissionNext.merge(
@@ -261,23 +261,18 @@ export namespace Agent {
             schema_detect_pii: "allow",
             // Writes denied — review never mutates the project.
             sql_execute_write: "deny",
-            // Read-only file + repo access.
+            // Read-only file + repo access (structured tools, not bash).
             read: "allow",
             grep: "allow",
             glob: "allow",
             tool_lookup: "allow",
-            // Bash: read-only git/dbt inspection only (last-match-wins).
-            bash: {
-              "*": "deny",
-              "git diff *": "allow",
-              "git show *": "allow",
-              "git log *": "allow",
-              "git merge-base *": "allow",
-              "ls *": "allow",
-              "cat *": "allow",
-              "dbt ls *": "allow",
-              "dbt list *": "allow",
-            },
+            // Bash is DENIED. A string-prefix bash allowlist (e.g. `git log *`)
+            // cannot safely bound argv: shell redirects ride inside the matched
+            // command (`git log -p > ~/.ssh/authorized_keys`) and `cat *` reads
+            // any file — both bypass the "read-only" intent and enable
+            // write/exfil. The reviewer uses the structured read/grep/glob tools
+            // and the verdict engine (which does its own diffing) instead.
+            bash: "deny",
           }),
           userWithSafety,
         ),

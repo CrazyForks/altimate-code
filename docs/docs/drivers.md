@@ -17,7 +17,7 @@ Altimate Code connects to 13 databases natively via TypeScript drivers. No Pytho
 | Snowflake | `snowflake-sdk` | Password, Key-Pair (unencrypted + encrypted), OAuth | ✅ Live account | 37 E2E tests, key-pair with passphrase support |
 | BigQuery | `@google-cloud/bigquery` | Service Account, ADC | ✅ Live account | 25 E2E tests, UNNEST/STRUCT/DATE types |
 | Databricks | `@databricks/sql` | PAT, OAuth | ✅ Live account | 24 E2E tests, Unity Catalog support |
-| MongoDB | `mongodb` | Password, Connection String | ✅ Docker | 90 E2E tests, MQL queries, aggregation pipelines |
+| MongoDB | `mongodb` | Password, Connection String | ❌ Needs MongoDB server | 90 E2E tests, MQL queries, aggregation pipelines |
 | ClickHouse | `@clickhouse/client` | Password, Connection String, TLS | ✅ Docker | HTTP(S) protocol, ClickHouse Cloud support |
 | Trino | `trino-client` | None, Basic, Bearer Token | ❌ Needs Trino cluster | HTTP(S) protocol, catalog/schema support |
 | Oracle | `oracledb` (thin) | Password | ❌ Needs Oracle 12.1+ | Thin mode only, no Instant Client |

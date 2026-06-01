@@ -97,6 +97,21 @@ Options:
 > clearly labeled, never mistaken for a full verdict. Run `dbt compile` first for
 > the full verdict.
 
+!!! note "Current limitations"
+    - **BigQuery equivalence** on some compiled SQL (3-part backtick relations)
+      is currently *undecidable* — the reviewer reports a warning ("could not
+      prove equivalent") rather than an `APPROVE`-on-proof. It never reports a
+      false equivalence; it just can't prove some BigQuery refactors yet.
+    - With no manifest, the SQL dialect defaults to `snowflake`. For a
+      non-Snowflake project, pass a compiled `manifest.json` (its `adapter_type`
+      is auto-detected) or set `dialect:` in `.altimate/review.yml`.
+
+!!! tip "Reviewer vs validators"
+    `dbt-pr-review` reviews a **PR diff** and emits a verdict. The
+    [completion-gate validators](../data-engineering/validators.md) are a
+    different surface — they gate the **agent's own build loop** so it can't
+    declare "done" on failing dbt tests or schema drift.
+
 ## GitHub Action
 
 Add the review to any repo with a workflow that compiles the project, then runs
