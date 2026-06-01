@@ -30,6 +30,26 @@ inputs:
   signing_key:
     description: "Optional HMAC key to sign the verdict envelope (ALTIMATE_REVIEW_SIGNING_KEY)."
     required: false
+  # ── Advisory LLM reviewer (layer 3) — OPTIONAL ──
+  # The deterministic engine (lineage / equivalence / PII / grade / lint) needs
+  # NO model or credentials. These inputs only enable the advisory LLM comments;
+  # omit them all and the review runs deterministic-only (the AI lane self-disables).
+  altimate_api_key:
+    description: "Altimate API key → uses the hosted altimate model for the advisory lane. Pair with `altimate_instance`. Use a repo secret. Takes precedence over `model`."
+    required: false
+  altimate_instance:
+    description: "Altimate tenant/instance name (required when `altimate_api_key` is set)."
+    required: false
+  altimate_url:
+    description: "Altimate API base URL."
+    required: false
+    default: "https://api.myaltimate.com"
+  model:
+    description: "Bring-your-own advisory model as 'provider/model' (e.g. anthropic/claude-sonnet-4-6). Used when `altimate_api_key` is not set."
+    required: false
+  model_api_key:
+    description: "API key for `model`'s provider (e.g. an Anthropic key for an anthropic/* model). Use a repo secret."
+    required: false
 
 runs:
   using: "composite"
@@ -56,6 +76,49 @@ runs:
     - name: Add altimate-code to PATH
       shell: bash
       run: echo "$HOME/.altimate/bin" >> $GITHUB_PATH
+
+    # Configure the OPTIONAL advisory LLM lane. Two mutually-exclusive routes:
+    #   A) altimate_api_key (+ altimate_instance) → hosted altimate model
+    #   B) model (+ model_api_key)               → bring-your-own provider
+    # Neither set → the LLM lane self-disables and the review is deterministic-only.
+    - name: Configure advisory reviewer model + credentials
+      shell: bash
+      env:
+        IN_ALT_KEY: ${{ inputs.altimate_api_key }}
+        IN_ALT_INSTANCE: ${{ inputs.altimate_instance }}
+        IN_ALT_URL: ${{ inputs.altimate_url }}
+        IN_MODEL: ${{ inputs.model }}
+        IN_MODEL_API_KEY: ${{ inputs.model_api_key }}
+      run: |
+        set -euo pipefail
+        if [[ -n "${IN_ALT_KEY:-}" ]]; then
+          # Route A — hosted altimate model (altimate-backend).
+          if [[ -z "${IN_ALT_INSTANCE:-}" ]]; then
+            echo "::error::altimate_api_key is set but altimate_instance is empty — provide the tenant/instance name."
+            exit 1
+          fi
+          mkdir -p "$HOME/.altimate"
+          jq -nc \
+            --arg url "${IN_ALT_URL:-https://api.myaltimate.com}" \
+            --arg inst "$IN_ALT_INSTANCE" \
+            --arg key "$IN_ALT_KEY" \
+            '{altimateUrl:$url, altimateInstanceName:$inst, altimateApiKey:$key}' \
+            > "$HOME/.altimate/altimate.json"
+          echo "Advisory lane: hosted altimate model (tenant: $IN_ALT_INSTANCE)."
+        elif [[ -n "${IN_MODEL:-}" ]]; then
+          # Route B — bring-your-own provider/model via inline opencode config.
+          PROVIDER="${IN_MODEL%%/*}"
+          if [[ -n "${IN_MODEL_API_KEY:-}" ]]; then
+            CONTENT=$(jq -nc --arg m "$IN_MODEL" --arg p "$PROVIDER" --arg k "$IN_MODEL_API_KEY" \
+              '{model:$m, provider: {($p): {options: {apiKey:$k}}}}')
+          else
+            CONTENT=$(jq -nc --arg m "$IN_MODEL" '{model:$m}')
+          fi
+          echo "OPENCODE_CONFIG_CONTENT=$CONTENT" >> "$GITHUB_ENV"
+          echo "Advisory lane: bring-your-own model ($IN_MODEL)."
+        else
+          echo "Advisory lane: no model/credentials provided — running deterministic-only."
+        fi
 
     - name: Run dbt PR review
       shell: bash

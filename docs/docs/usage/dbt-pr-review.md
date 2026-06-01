@@ -123,7 +123,29 @@ jobs:
           mode: comment                       # `gate` to block merges
           manifest_path: target/manifest.json
           severity_threshold: suggestion
+          # Advisory LLM lane (OPTIONAL — see below). Hosted altimate model:
+          altimate_api_key: ${{ secrets.ALTIMATE_API_KEY }}
+          altimate_instance: ${{ secrets.ALTIMATE_INSTANCE }}
+          # …or bring your own:  model: anthropic/claude-sonnet-4-6
+          #                      model_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
+
+### Model & credentials for the advisory lane
+
+The deterministic engine (lineage, equivalence, PII, grade, lint — the only layer
+that can **block**) runs entirely from the compiled artifacts and needs **no model
+or credentials**. The optional layer-3 **LLM reviewer** does — supply it one of two
+ways, or neither (it self-disables, leaving a deterministic-only review):
+
+| Route | Action inputs | Result |
+|-------|---------------|--------|
+| **Hosted altimate model** | `altimate_api_key` + `altimate_instance` (+ optional `altimate_url`) | uses the altimate-hosted default model |
+| **Bring-your-own** | `model` (e.g. `anthropic/claude-sonnet-4-6`) + `model_api_key` | uses your provider/model |
+
+Always pass keys as repo **secrets**. Warehouse credentials are consumed by the
+`dbt compile` step (via your `profiles.yml`), **not** by the review step. A
+complete, copy-paste workflow lives at
+[`github/review/examples/altimate-ingestion.yml`](https://github.com/AltimateAI/altimate-code/blob/main/github/review/examples/altimate-ingestion.yml).
 
 Re-pushing commits updates the same summary comment in place; fixed findings are
 dropped on the next run. GitLab CI is supported via `altimate review --post` in a
