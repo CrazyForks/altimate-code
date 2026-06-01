@@ -5,10 +5,10 @@ import { Auth, OAUTH_DUMMY_KEY } from "@/auth"
 // All other models reject tools with "tool calling is not supported".
 const TOOLCALL_MODELS = new Set([
   // Claude
-  "claude-sonnet-4-6", "claude-opus-4-6", "claude-sonnet-4-5", "claude-opus-4-5",
+  "claude-opus-4-7", "claude-sonnet-4-6", "claude-opus-4-6", "claude-sonnet-4-5", "claude-opus-4-5",
   "claude-haiku-4-5", "claude-4-sonnet", "claude-4-opus", "claude-3-7-sonnet", "claude-3-5-sonnet",
   // OpenAI
-  "openai-gpt-4.1", "openai-gpt-5", "openai-gpt-5-mini", "openai-gpt-5-nano",
+  "openai-gpt-4.1", "openai-gpt-5", "openai-gpt-5.1", "openai-gpt-5.2", "openai-gpt-5-mini", "openai-gpt-5-nano",
   "openai-gpt-5-chat", "openai-gpt-oss-120b", "openai-o4-mini",
 ])
 

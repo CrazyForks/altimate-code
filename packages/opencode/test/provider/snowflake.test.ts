@@ -586,6 +586,95 @@ describe("snowflake-cortex provider", () => {
     }
   })
 
+  test("models added per Snowflake regional availability docs (issue #851)", async () => {
+    // Regression: PR for issue #851 added 8 models that Snowflake Cortex
+    // supports but were missing from the hardcoded list. Lock them in so a
+    // future refactor doesn't silently drop them.
+    await setupOAuth()
+    try {
+      await using tmp = await tmpdir({
+        init: async (dir) => {
+          await Bun.write(path.join(dir, "opencode.json"), JSON.stringify({ $schema: "https://altimate.ai/config.json" }))
+        },
+      })
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const providers = await Provider.list()
+          const models = providers["snowflake-cortex"].models
+          // Claude (toolcall: true)
+          expect(models["claude-opus-4-7"]).toBeDefined()
+          expect(models["claude-opus-4-7"].capabilities.toolcall).toBe(true)
+          // OpenAI (toolcall: true)
+          expect(models["openai-gpt-5.1"]).toBeDefined()
+          expect(models["openai-gpt-5.1"].capabilities.toolcall).toBe(true)
+          expect(models["openai-gpt-5.2"]).toBeDefined()
+          expect(models["openai-gpt-5.2"].capabilities.toolcall).toBe(true)
+          // Llama (toolcall: false)
+          expect(models["llama4-scout"]).toBeDefined()
+          expect(models["llama4-scout"].capabilities.toolcall).toBe(false)
+          expect(models["llama3.3-70b"]).toBeDefined()
+          expect(models["llama3.3-70b"].capabilities.toolcall).toBe(false)
+          expect(models["snowflake-llama-3.1-405b"]).toBeDefined()
+          expect(models["snowflake-llama-3.1-405b"].capabilities.toolcall).toBe(false)
+          // Mixtral (toolcall: false)
+          expect(models["mixtral-8x7b"]).toBeDefined()
+          expect(models["mixtral-8x7b"].capabilities.toolcall).toBe(false)
+          // Gemini (toolcall: false — unverified on Cortex)
+          expect(models["gemini-3.1-pro"]).toBeDefined()
+          expect(models["gemini-3.1-pro"].capabilities.toolcall).toBe(false)
+        },
+      })
+    } finally {
+      await restoreAuth()
+    }
+  })
+
+  test("user can register a model not in the hardcoded list via opencode.json", async () => {
+    // Documents the option (2) escape hatch: when Snowflake adds a model
+    // before the CLI's hardcoded list catches up, users add it under
+    // provider['snowflake-cortex'].models and it merges into the picker.
+    await setupOAuth()
+    try {
+      await using tmp = await tmpdir({
+        init: async (dir) => {
+          await Bun.write(
+            path.join(dir, "opencode.json"),
+            JSON.stringify({
+              $schema: "https://altimate.ai/config.json",
+              provider: {
+                "snowflake-cortex": {
+                  models: {
+                    "future-model-x": {
+                      name: "Future Model X",
+                      limit: { context: 200000, output: 32000 },
+                      tool_call: true,
+                    },
+                  },
+                },
+              },
+            }),
+          )
+        },
+      })
+      await Instance.provide({
+        directory: tmp.path,
+        fn: async () => {
+          const providers = await Provider.list()
+          const m = providers["snowflake-cortex"].models["future-model-x"]
+          expect(m).toBeDefined()
+          expect(m.name).toBe("Future Model X")
+          expect(m.capabilities.toolcall).toBe(true)
+          expect(m.limit.context).toBe(200000)
+          // Built-in models still present alongside the config-added one.
+          expect(providers["snowflake-cortex"].models["claude-opus-4-7"]).toBeDefined()
+        },
+      })
+    } finally {
+      await restoreAuth()
+    }
+  })
+
   test("claude-3-5-sonnet output limit is 8192", async () => {
     await setupOAuth()
     try {
