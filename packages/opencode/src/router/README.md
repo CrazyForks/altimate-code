@@ -17,6 +17,12 @@ Flag-gated (`ALTIMATE_ROUTER`), default off — the normal single-model path is 
   the *reference-available* regime (editing an existing model) — compares base↔head
   compiled SQL via the altimate-core equivalence engine. **Not wired into the default run
   path in v1** (see "What v1 verifies"); it ships dormant behind the dbt build verifier.
+- **`reference.ts`** — `ReferenceResolver`: produces the base↔head compiled-SQL pairs the
+  equivalence verifier needs (all git/dbt-compile/schema IO injected → unit-tested). Returns
+  `null` for greenfield (no base → build-fallback). Dormant alongside `equivalence-verifier`;
+  the production git+dbt-backed `Deps` + a flag-gated `verifyWorkspace` switch are the final
+  connect step, pending broader warehouse-dialect coverage in altimate-core
+  (equivalence currently abstains on dialect functions like duckdb `STRFTIME`).
 - **`router.ts`** — `Router`: the escalation mechanism. `route({tiers, runAgent, verify})`
   runs each tier, verifies, escalates on a failed verdict with the failing checks
   (`escalationContext`), stops at the first pass. `shouldEscalate` is **decision-aware**:
