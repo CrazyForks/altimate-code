@@ -52,6 +52,14 @@ import { Truncate } from "@/tool/truncation"
 import { decodeDataUrl } from "@/util/data-url"
 // altimate_change start - import fingerprint for env-based skill selection
 import { Fingerprint } from "../altimate/fingerprint"
+// altimate_change end
+
+// altimate_change start - validator framework (see session/validators/types.ts header)
+import { ValidatorRegistry } from "./validators/registry"
+import { registerAltimateValidators } from "../altimate/validators"
+// Explicit registration call (not a side-effect import) so bun's --single
+// bundler cannot tree-shake the validator registrations.
+registerAltimateValidators()
 import { Config } from "../config/config"
 import { Tracer } from "../altimate/observability/tracing"
 // altimate_change end
@@ -303,13 +311,15 @@ export namespace SessionPrompt {
     const s = state()
     const match = s[sessionID]
     if (!match) {
+      // Session already ended or was never started — set idle directly since no processor will do it
       await SessionStatus.set(sessionID, { type: "idle" })
       return
     }
     match.abort.abort()
     delete s[sessionID]
-    await SessionStatus.set(sessionID, { type: "idle" })
-    return
+    // Do NOT set idle status here — on abort the processor's catch block
+    // publishes session.error THEN sets idle, preserving correct event ordering.
+    // On normal completion, loop() sets idle after the while loop exits (see below).
   }
   // altimate_change end
 
@@ -355,6 +365,9 @@ export namespace SessionPrompt {
     let sessionTotalTokens = 0
     let toolCallCount = 0
     let compactionCount = 0
+    // altimate_change start — validator framework retry counter
+    let validatorRetryCount = 0
+    // altimate_change end
     let sessionAgentName = ""
     let sessionHadError = false
     // altimate_change start — plan refinement tracking
@@ -1095,6 +1108,181 @@ export namespace SessionPrompt {
       }
       // altimate_change end
 
+      // altimate_change start — validator dispatch (harness-side completion gate)
+      // Fires when the model declares a clean stop on this step (finish === "stop"
+      // and no tool calls outstanding). Runs all registered validators that
+      // declare themselves applicable to this session. If any validator says
+      // the work is not done, the framework injects a synthetic user message
+      // describing the gap and continues the loop — the model gets one more
+      // turn to fix the issue. Bounded by a per-session retry budget; once
+      // exhausted the loop falls through to the natural break.
+      //
+      // Feature flag: ALTIMATE_VALIDATORS_ENABLED=1 opts in. Default OFF so
+      // existing sessions are unaffected until validators are vetted in
+      // production.
+      //
+      // ALTIMATE_VALIDATORS_SHADOW=1 runs validators WITHOUT enforcement so
+      // telemetry can measure "would have fired" rates against historical
+      // traffic, but no subprocess spawns or synthetic-message retries happen
+      // unless this is also set. By default, NEITHER flag is set so
+      // non-opting-in sessions skip the entire dispatch path (no fs scan,
+      // no subprocess spawn, no perf tax).
+      const validatorsEnabled = process.env.ALTIMATE_VALIDATORS_ENABLED === "1"
+      const validatorsShadow = process.env.ALTIMATE_VALIDATORS_SHADOW === "1"
+      const validatorsActive = validatorsEnabled || validatorsShadow
+      const maxValidatorRetries = Number(process.env.ALTIMATE_VALIDATORS_MAX_RETRIES ?? "3")
+      const validatorsDebug = process.env.ALTIMATE_VALIDATORS_DEBUG === "1"
+      const validatorCount = ValidatorRegistry.list().length
+      // Always emit to opencode's file log. Mirror to stderr only when
+      // ALTIMATE_VALIDATORS_DEBUG=1 — needed during framework bring-up so
+      // benchmark harness logs capture the hook signal, but noisy enough
+      // that we keep it off by default for normal sessions.
+      const diag = {
+        kind: "validator_hook_reached",
+        sessionID,
+        step,
+        result,
+        finish: processor.message.finish,
+        hasError: Boolean(processor.message.error),
+        validatorsEnabled,
+        validatorCount,
+        validatorRetryCount,
+      }
+      log.info("validator_hook_reached", diag)
+      if (validatorsDebug) {
+        // eslint-disable-next-line no-console
+        console.error("[altimate-validators] " + JSON.stringify(diag))
+      }
+      if (
+        validatorsActive &&
+        result !== "stop" &&
+        result !== "compact" &&
+        processor.message.finish === "stop" &&
+        !processor.message.error &&
+        validatorCount > 0
+      ) {
+        try {
+          const vCtx = {
+            sessionID,
+            workingDirectory: Instance.directory,
+            sessionStartMs: sessionStartTime,
+            step,
+            retryCount: validatorRetryCount,
+          }
+          if (validatorsDebug) {
+            // eslint-disable-next-line no-console
+            console.error(
+              "[altimate-validators] " +
+                JSON.stringify({ kind: "dispatch_enter", sessionID, step, cwd: vCtx.workingDirectory, sessionStartMs: vCtx.sessionStartMs }),
+            )
+          }
+          const checks = await ValidatorRegistry.runAll(vCtx)
+          if (validatorsDebug) {
+            // eslint-disable-next-line no-console
+            console.error(
+              "[altimate-validators] " +
+                JSON.stringify({
+                  kind: "dispatch_result",
+                  sessionID,
+                  step,
+                  checks_count: checks.length,
+                  results: checks.map((c) => ({ name: c.validator.name, ok: c.result.ok, details: c.result.details })),
+                }),
+            )
+          }
+          const failures = checks.filter((c) => !c.result.ok)
+
+          // Telemetry: emit one event per validator that ran, plus a session
+          // rollup. Always emitted, even when the feature flag is off, so we
+          // can measure baseline fire rate vs prompt-only enforcement.
+          for (const { validator, result: vRes } of checks) {
+            Telemetry.track({
+              type: "validator_check",
+              timestamp: Date.now(),
+              session_id: sessionID,
+              validator_name: validator.name,
+              ok: vRes.ok,
+              step,
+              retry_count: validatorRetryCount,
+              enforced: validatorsEnabled,
+              ...(vRes.details && { details: vRes.details }),
+            } as any)
+          }
+
+          if (failures.length > 0 && validatorsEnabled && validatorRetryCount < maxValidatorRetries) {
+            // Build a single synthetic user-turn body that aggregates every
+            // failing validator's reason + fixHint. The agent sees this as
+            // the next user message and gets one more turn to address it.
+            const body = failures
+              .map(({ validator, result: vRes }) => {
+                const head = `[altimate-validator: ${validator.name}] ${vRes.reason ?? "validation failed"}`
+                const tail = vRes.fixHint ? `\n${vRes.fixHint}` : ""
+                return head + tail
+              })
+              .join("\n\n")
+
+            log.info("validator failures detected, injecting synthetic user turn", {
+              sessionID,
+              failures: failures.map((f) => f.validator.name),
+              retry: validatorRetryCount + 1,
+            })
+
+            const syntheticMessageID = MessageID.ascending()
+            await Session.updateMessage({
+              id: syntheticMessageID,
+              role: "user" as const,
+              sessionID,
+              time: { created: Date.now() },
+              agent: lastUser.agent,
+              model: lastUser.model,
+            } as MessageV2.Info)
+
+            // Append the validator body as a text part on the new user message.
+            await Session.updatePart({
+              id: PartID.ascending(),
+              messageID: syntheticMessageID,
+              sessionID,
+              type: "text",
+              text: body,
+              time: { start: Date.now(), end: Date.now() },
+            })
+
+            validatorRetryCount++
+            continue
+          } else if (failures.length > 0 && validatorsEnabled && validatorRetryCount >= maxValidatorRetries) {
+            // Retry budget exhausted with outstanding failures. Session will
+            // terminate on the natural break below. Emit an explicit signal so
+            // the operator dashboard can distinguish "completed cleanly" from
+            // "completed with unresolved validator failures".
+            log.warn("validator retries exhausted, session terminating with unresolved failures", {
+              sessionID,
+              failures: failures.map((f) => f.validator.name),
+            })
+            Telemetry.track({
+              type: "validator_retries_exhausted",
+              timestamp: Date.now(),
+              session_id: sessionID,
+              step,
+              validator_names: failures.map((f) => f.validator.name),
+            } as any)
+          }
+        } catch (e) {
+          // A bug in the validator framework should never block the agent loop.
+          log.warn("validator dispatch errored, skipping", {
+            sessionID,
+            error: e instanceof Error ? e.message : String(e),
+          })
+          if (validatorsDebug) {
+            // eslint-disable-next-line no-console
+            console.error(
+              "[altimate-validators] " +
+                JSON.stringify({ kind: "dispatch_error", sessionID, step, error: e instanceof Error ? e.message : String(e) }),
+            )
+          }
+        }
+      }
+      // altimate_change end
+
       if (result === "stop") break
       if (result === "compact") {
         // altimate_change start — track compaction count
@@ -1110,6 +1298,11 @@ export namespace SessionPrompt {
       }
       continue
     }
+    // altimate_change start — set idle on normal loop exit; abort path is handled by processor catch block
+    if (!abort.aborted) {
+      await SessionStatus.set(sessionID, { type: "idle" })
+    }
+    // altimate_change end
     SessionCompaction.prune({ sessionID })
     // altimate_change start — session end telemetry
     const outcome = abort.aborted

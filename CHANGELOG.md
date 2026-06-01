@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- **Completion-gate validator framework.** A new opt-in harness-side check
+  that runs after the LLM declares `finish === "stop"`. Two built-in
+  validators for dbt projects: `dbt-tests-pass` (runs `altimate-dbt test`
+  against modified models) and `dbt-schema-verify` (runs `altimate-dbt
+  schema-verify` against modified models). On failure, the framework
+  injects a synthetic user turn so the agent gets one more chance to fix
+  the issue, bounded by a per-session retry budget. Two opt-in modes:
+  `ALTIMATE_VALIDATORS_ENABLED=1` (enforcement + retries) and
+  `ALTIMATE_VALIDATORS_SHADOW=1` (telemetry-only — measure "would have
+  caught" rates without blocking). Default is **off** with zero overhead.
+  Two new telemetry events (`validator_check`, `validator_retries_exhausted`).
+  Configuration via `ALTIMATE_VALIDATORS_{MAX_RETRIES,TIMEOUT_MS,CONCURRENCY,DEBUG}`.
+  See [Validators docs](https://docs.altimate.sh/data-engineering/validators/)
+  for the full reference, performance characteristics, and the phased
+  rollout plan. (#849)
+
 ## [0.7.3] - 2026-05-24
 
 A telemetry-driven hardening release. Five P0 fixes merged from a `telemetry-analysis-2026-05-21` pass — every one tied to a measured failure number from the App Insights pipeline. The headline wins are user-visible: `finops_*` tools now work without an explicit `warehouse=` parameter (auto-pick the first compatible connection); `project_scan` no longer crashes on hosts where `git` isn't in PATH (the silent 437-user regression was masked by the PII filter collapsing the binary name to `?` in error messages); and `webfetch` caches 404/410/451 responses for up to 30 minutes so the agent stops re-asking dead URLs. Two telemetry-only fixes (build-agent name normalization, Anthropic token-count semantics) clean up dashboard mis-bucketing without changing user-visible behavior.
