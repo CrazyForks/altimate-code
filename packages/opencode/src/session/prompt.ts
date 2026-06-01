@@ -42,6 +42,9 @@ import { NamedError } from "@opencode-ai/util/error"
 import { fn } from "@/util/fn"
 import { SessionProcessor } from "./processor"
 import { TaskTool } from "@/tool/task"
+// altimate_change start — critic gate
+import { Critic } from "@/tool/critic"
+// altimate_change end
 import { Tool } from "@/tool/tool"
 import { PermissionNext } from "@/permission/next"
 import { SessionStatus } from "./status"
@@ -1501,6 +1504,28 @@ export namespace SessionPrompt {
               args,
             },
           )
+          // altimate_change start — critic gate (pre-execution safety check)
+          // Flag-gated (ALTIMATE_CRITIC_GATE), default off. On a hard verdict we
+          // skip execution and feed the reason back so the model can retry, while
+          // still emitting tool.execute.after so observability sees the blocked call.
+          if (Critic.enabled()) {
+            const verdict = await Critic.gate(item.id, args as Record<string, any>, Critic.basicSafetyVerifier)
+            if (!verdict.allow) {
+              const blocked = {
+                title: `Blocked: ${item.id}`,
+                metadata: { critic: { blocked: true, reason: verdict.feedback } } as any,
+                output: verdict.feedback ?? "Blocked by altimate verifier.",
+                attachments: [] as never[],
+              }
+              await Plugin.trigger(
+                "tool.execute.after",
+                { tool: item.id, sessionID: ctx.sessionID, callID: ctx.callID, args },
+                blocked,
+              )
+              return blocked
+            }
+          }
+          // altimate_change end
           const result = await item.execute(args, ctx)
           const output = {
             ...result,
