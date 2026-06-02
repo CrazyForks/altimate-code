@@ -21,9 +21,17 @@ export const ReviewMode = z.enum([
 ])
 export type ReviewMode = z.infer<typeof ReviewMode>
 
-/** Maps a Verdict to a VCS review event. */
+/** Maps a Verdict to a VCS review event.
+ *
+ * An `APPROVE` verdict posts a **COMMENT** review event, NOT a GitHub "APPROVE".
+ * The reviewer is a bot: it must never submit a formal approval that could
+ * satisfy branch protection / required reviews and let a PR merge without human
+ * sign-off (matching CodeRabbit/Greptile/etc., which comment but never approve).
+ * The "approved — no findings" outcome is conveyed in the comment body instead.
+ * `REQUEST_CHANGES` still maps through (in `gate` mode it blocks; `comment` mode
+ * softens it to COMMENT via {@link applyMode}). */
 export const VCS_EVENT: Record<Verdict, "APPROVE" | "COMMENT" | "REQUEST_CHANGES"> = {
-  APPROVE: "APPROVE",
+  APPROVE: "COMMENT",
   COMMENT: "COMMENT",
   REQUEST_CHANGES: "REQUEST_CHANGES",
 }

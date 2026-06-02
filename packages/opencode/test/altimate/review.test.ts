@@ -12,6 +12,7 @@ import {
   clampSeverity,
   computeIdealVerdict,
   applyMode,
+  VCS_EVENT,
   buildEnvelope,
   signEnvelope,
   verifyEnvelope,
@@ -196,6 +197,13 @@ describe("verdict", () => {
 
   test("single suggestion → COMMENT", () => {
     expect(computeIdealVerdict([mk("suggestion")], DEFAULT_RUBRIC)).toBe("COMMENT")
+  })
+
+  test("the bot NEVER emits a formal APPROVE review event", () => {
+    // A bot approval could satisfy branch protection and merge a PR without human
+    // sign-off. An APPROVE verdict must post a COMMENT review event instead.
+    expect(VCS_EVENT.APPROVE).toBe("COMMENT")
+    expect(Object.values(VCS_EVENT)).not.toContain("APPROVE")
   })
 
   test("comment mode softens REQUEST_CHANGES → COMMENT", () => {
