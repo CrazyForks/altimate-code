@@ -6,8 +6,10 @@ import { renderSummary, inlineComments, REVIEW_MARKER, verdictHeadline } from ".
 /**
  * Post a verdict envelope to a GitHub pull request: an upserted summary comment
  * (deduped by the review marker, so re-reviews update in place) plus a single
- * batched review with inline comments. In `comment` mode the review event is
- * always COMMENT; in `gate` mode it maps the verdict to APPROVE/REQUEST_CHANGES.
+ * batched review with inline comments. The review event is never a formal
+ * GitHub APPROVE (a bot approval could satisfy branch protection): an APPROVE
+ * verdict posts COMMENT. In `comment` mode REQUEST_CHANGES is also softened to
+ * COMMENT; in `gate` mode REQUEST_CHANGES maps through as a blocking review.
  *
  * Self-contained (uses GITHUB_TOKEN) so it works from CI without the GitHub App
  * flow. Defensive: inline comments outside the diff fall back to an event-only
@@ -78,8 +80,10 @@ export async function postGitHubReview(env: VerdictEnvelope, target: GitHubTarge
     result.summaryCommentId = r.data.id
   }
 
-  // 2. Post a review. In comment mode the engine already softened the verdict
-  //    to COMMENT; gate mode keeps APPROVE / REQUEST_CHANGES.
+  // 2. Post a review. `env.verdict` arrives already mode-gated from
+  //    buildEnvelope (comment mode softened REQUEST_CHANGES → COMMENT upstream);
+  //    this map only translates verdict → GitHub event. APPROVE always maps to a
+  //    COMMENT event — the bot must never submit a formal GitHub approval.
   const event = VCS_EVENT[env.verdict]
   const comments = inlineComments(env)
   const reviewBody = verdictHeadline(env)

@@ -211,6 +211,45 @@ describe("verdict", () => {
     expect(applyMode("REQUEST_CHANGES", "gate")).toBe("REQUEST_CHANGES")
   })
 
+  test("composition: computeIdealVerdict → applyMode → VCS_EVENT maps to the right event in both modes", () => {
+    // Adversarial composition test. The static-map test guards the table in
+    // isolation; this asserts the POSITIVE expected GitHub event for every
+    // verdict-producing finding-set across both modes, so a regression at any
+    // layer (computeIdealVerdict, applyMode, or the map) is caught — not just a
+    // resurrected APPROVE path. Each case lists [findings, gate event, comment event].
+    type Event = "COMMENT" | "REQUEST_CHANGES"
+    const cases: Array<{ findings: Finding[]; gate: Event; comment: Event }> = [
+      { findings: [], gate: "COMMENT", comment: "COMMENT" }, // ideal APPROVE → never a formal APPROVE
+      { findings: [mk("suggestion")], gate: "COMMENT", comment: "COMMENT" }, // ideal COMMENT
+      { findings: [mk("critical", "lineage_breakage")], gate: "REQUEST_CHANGES", comment: "COMMENT" }, // blocking critical
+      { findings: [mk("warning"), mk("warning"), mk("warning")], gate: "REQUEST_CHANGES", comment: "COMMENT" }, // risk pattern
+    ]
+    for (const { findings, gate, comment } of cases) {
+      const gateEnv = buildEnvelope({ findings, tier: "full", mode: "gate" })
+      const commentEnv = buildEnvelope({ findings, tier: "full", mode: "comment" })
+      expect(VCS_EVENT[gateEnv.verdict]).toBe(gate)
+      expect(VCS_EVENT[commentEnv.verdict]).toBe(comment)
+      // No mode/finding combination may ever emit a formal APPROVE.
+      expect(VCS_EVENT[gateEnv.verdict]).not.toBe("APPROVE")
+      expect(VCS_EVENT[commentEnv.verdict]).not.toBe("APPROVE")
+    }
+
+    // Separation of semantic verdict vs VCS event: with no findings in gate mode
+    // the internal verdict is still APPROVE (audit signal preserved), but the
+    // posted event is COMMENT — the bot never formally approves.
+    const approve = buildEnvelope({ findings: [], tier: "full", mode: "gate" })
+    expect(approve.verdict).toBe("APPROVE")
+    expect(approve.idealVerdict).toBe("APPROVE")
+    expect(VCS_EVENT[approve.verdict]).toBe("COMMENT")
+
+    // Comment mode preserves the would-have-blocked audit trail: idealVerdict is
+    // REQUEST_CHANGES while the gated verdict (and event) soften to COMMENT.
+    const softened = buildEnvelope({ findings: [mk("critical", "lineage_breakage")], tier: "full", mode: "comment" })
+    expect(softened.idealVerdict).toBe("REQUEST_CHANGES")
+    expect(softened.verdict).toBe("COMMENT")
+    expect(VCS_EVENT[softened.verdict]).toBe("COMMENT")
+  })
+
   test("envelope signs and verifies; tamper is detected", () => {
     const env = buildEnvelope({
       findings: [mk("critical", "pii_exposure")],
