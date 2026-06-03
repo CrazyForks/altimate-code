@@ -5,7 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.8.0] - 2026-06-01
+## [0.8.1] - 2026-06-02
+
+A reliability + correctness patch on top of 0.8.0. Highlights: **8 new Snowflake Cortex models** (with a config escape-hatch so you never wait for a release again), a **trace-corruption fix** for long-running sessions, and a **behavior change to the dbt PR reviewer** — it now always posts a GitHub *comment* and never a formal *approval*.
+
+### Added
+
+- **Snowflake Cortex — 8 new selectable models.** Closes the drift between altimate-code's hardcoded Cortex model list and Snowflake's current regional-availability matrix: adds `claude-opus-4-7`, `openai-gpt-5.1`, `openai-gpt-5.2`, `llama4-scout`, `llama3.3-70b`, `snowflake-llama-3.1-405b`, `mixtral-8x7b`, and `gemini-3.1-pro` (Claude + OpenAI tool-capable; the rest chat-only, the conservative default until tool calling is verified on Cortex). When Cortex adds a model before the next release, you can now add it yourself under `provider["snowflake-cortex"].models` in `altimate-code.json` and it merges into the picker — no fork, no waiting. See [Snowflake Cortex provider docs](https://docs.altimate.sh/configure/providers/). (#866)
+
+### Fixed
+
+- **dbt PR reviewer never posts a formal GitHub *Approve* — behavior change.** The reviewer's `APPROVE` verdict now posts a GitHub **COMMENT** review event (the "approved — no findings" outcome is in the comment body), never a formal *Approve*. A review bot must not be able to satisfy branch protection / required reviews and let a PR merge without human sign-off (observed on a real PR where the bot had auto-approved). The no-formal-approval invariant is now enforced at compile time. **Migration:** to block merges, gate on the verdict **check** (`--mode gate`), not on requiring this bot as a reviewer — if your branch protection previously *required the altimate bot's approval*, remove that requirement or those merges will stay blocked. (#870, #872)
+- **Trace corruption in long-running sessions.** Two concurrency bugs in the observability tracer are fixed: bursty turns (an LLM step firing many tool calls back-to-back) could drop the tail of a burst from the trace file when the process exited in the debounce gap (M2), and a crash during a large trace export could be overwritten by the in-flight export and show a stale terminal status instead of `crashed` (M3). Trace files now reliably reflect what actually happened, scoped per session in the shared TUI worker. (#865)
 
 Headlined by **dbt PR Review** — a Cloudflare-style, dbt/SQL-specialized code reviewer that emits a single **signed** verdict (`APPROVE` / `COMMENT` / `REQUEST_CHANGES`) where every *blocking* finding is backed by a deterministic `altimate-core` engine call over parsed SQL ASTs, not a model's opinion. An optional LLM lane adds advisory context but can never block. This release also adds a **native Trino driver**, the opt-in **completion-gate validators**, and reliability/cost fixes. A five-persona pre-release review drove a security hardening pass on the new `reviewer` agent (see Security).
 
