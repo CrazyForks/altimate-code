@@ -434,6 +434,20 @@ describe("plan prompt safety", () => {
     expect(planTxt.length).toBeLessThan(5000) // Not bloated
   })
 
+  test("plan.txt mandates investigation before drafting", async () => {
+    // Regression guard: weaker non-Anthropic tool-capable models (e.g. GPT-5.5 via
+    // altimate-default) often skip exploration and write plans from prompt context
+    // alone. The prompt must explicitly require a read-only tool call before any
+    // plan content. If this contract is removed, the plan-no-tool warning in
+    // processor.ts fires more often and plan quality degrades silently.
+    const planTxt = await fs.readFile(
+      path.join(__dirname, "../../src/session/prompt/plan.txt"),
+      "utf-8",
+    )
+    expect(planTxt).toMatch(/investigate before drafting|before you write any plan/i)
+    expect(planTxt).toMatch(/read|grep|glob|explore/i)
+  })
+
   test("plan.txt does not contain debug or TODO markers", async () => {
     const planTxt = await fs.readFile(
       path.join(__dirname, "../../src/session/prompt/plan.txt"),

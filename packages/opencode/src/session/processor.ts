@@ -381,9 +381,12 @@ export namespace SessionProcessor {
                       type: "text",
                       synthetic: true,
                       text:
-                        `⚠️ altimate-code: the \`plan\` agent is running on \`${input.model.providerID}/${input.model.id}\`, ` +
-                        `which returned text without calling any tools. If you expected the plan agent to explore the ` +
-                        `codebase, try switching to a model with stronger tool-use via \`/model\`.`,
+                        `⚠️ altimate-code: the \`plan\` agent on \`${input.model.providerID}/${input.model.id}\` ` +
+                        `produced a plan without first reading any files. Plans written from prompt context alone ` +
+                        `often miss existing patterns and reference files that may not exist. To get an investigated ` +
+                        `plan, either reply asking it to explore the codebase first (\`read\`/\`grep\`/\`glob\`/\`explore\`), ` +
+                        `or use \`/model\` to switch to a model that is more eager to investigate before drafting ` +
+                        `(e.g. a Claude Sonnet/Opus tier).`,
                       time: { start: Date.now(), end: Date.now() },
                     })
                   }
