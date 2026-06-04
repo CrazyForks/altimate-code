@@ -382,11 +382,12 @@ export namespace SessionProcessor {
                       synthetic: true,
                       text:
                         `⚠️ altimate-code: the \`plan\` agent on \`${input.model.providerID}/${input.model.id}\` ` +
-                        `produced a plan without first reading any files. Plans written from prompt context alone ` +
-                        `often miss existing patterns and reference files that may not exist. To get an investigated ` +
-                        `plan, either reply asking it to explore the codebase first (\`read\`/\`grep\`/\`glob\`/\`explore\`), ` +
-                        `or use \`/model\` to switch to a model that is more eager to investigate before drafting ` +
-                        `(e.g. a Claude Sonnet/Opus tier).`,
+                        `stopped without calling any tools — it neither read, searched, nor explored the codebase. ` +
+                        `Common causes: (a) the model wrote a plan from prompt context alone, (b) the model declined ` +
+                        `to engage with the request (content-policy refusal), or (c) the request was too thin to act on. ` +
+                        `To recover, try one of: reply asking it to investigate first (\`read\`/\`grep\`/\`glob\`/\`explore\`); ` +
+                        `rephrase the request more concretely; or \`/model\` to a tier that's more eager to explore ` +
+                        `(e.g. Claude Sonnet/Opus).`,
                       time: { start: Date.now(), end: Date.now() },
                     })
                   }
