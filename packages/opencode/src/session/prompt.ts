@@ -694,6 +694,14 @@ export namespace SessionPrompt {
         session,
       })
 
+      // altimate_change start — hoist synthetic <system-reminder> parts into the
+      // system prompt for non-Anthropic-like models. The synthetic flag is the
+      // trust boundary: only parts written by insertReminders (PROMPT_PLAN /
+      // BUILD_SWITCH) qualify; raw user text starting with `<system-reminder>`
+      // is left untouched and never gains system-role priority. See #887/#888.
+      const hoistedReminders = hoistSyntheticReminders(msgs, model)
+      // altimate_change end
+
       // altimate_change start — plan refinement detection and telemetry
       if (agent.name === "plan") {
         // Check if plan file has been written in a previous step
@@ -968,6 +976,7 @@ export namespace SessionPrompt {
         ...(skills ? [skills] : []),
         ...(knowledgeInjection ? [knowledgeInjection] : []),
         ...(await InstructionPrompt.system()),
+        ...hoistedReminders,
       ]
       const format = lastUser.format ?? { type: "text" }
       if (format.type === "json_schema") {
@@ -2038,6 +2047,43 @@ export namespace SessionPrompt {
       parts,
     }
   }
+
+  // altimate_change start — trust-aware <system-reminder> hoist for non-Anthropic models
+  function isAnthropicLikeModel(model: Provider.Model): boolean {
+    return (
+      model.providerID === "anthropic" ||
+      model.providerID === "google-vertex-anthropic" ||
+      model.family?.toLowerCase() === "anthropic" ||
+      model.api.npm === "@ai-sdk/anthropic" ||
+      model.api.id.includes("anthropic") ||
+      model.api.id.includes("claude")
+    )
+  }
+
+  function hoistSyntheticReminders(messages: MessageV2.WithParts[], model: Provider.Model): string[] {
+    // Anthropic-family models recognize <system-reminder>...</system-reminder> on a
+    // user-role text part as authoritative — keep that behavior unchanged.
+    // Other models (observed: GPT-5.x via altimate-backend gateway) pattern-match
+    // those tags inside user content as prompt-injection attempts and refuse.
+    // For them, lift our internally-generated reminders into a proper system-role
+    // message. The synthetic flag is the trust boundary — only parts we ourselves
+    // wrote in insertReminders qualify; raw user text starting with the same
+    // characters is left intact and never gains system priority.
+    if (isAnthropicLikeModel(model)) return []
+    const hoisted: string[] = []
+    for (const msg of messages) {
+      if (msg.info.role !== "user") continue
+      for (const part of msg.parts) {
+        if (part.type !== "text") continue
+        if (!part.synthetic) continue
+        if (!part.text.trimStart().startsWith("<system-reminder>")) continue
+        hoisted.push(part.text)
+        part.ignored = true
+      }
+    }
+    return hoisted
+  }
+  // altimate_change end
 
   async function insertReminders(input: { messages: MessageV2.WithParts[]; agent: Agent.Info; session: Session.Info }) {
     const userMessage = input.messages.findLast((msg) => msg.info.role === "user")

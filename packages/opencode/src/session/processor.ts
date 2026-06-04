@@ -303,7 +303,7 @@ export namespace SessionProcessor {
                   })
                   break
 
-                case "finish-step":
+                case "finish-step": {
                   const usage = Session.getUsage({
                     model: input.model,
                     usage: value.usage,
@@ -445,6 +445,7 @@ export namespace SessionProcessor {
                     needsCompaction = true
                   }
                   break
+                }
 
                 case "text-start":
                   currentText = {

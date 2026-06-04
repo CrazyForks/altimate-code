@@ -6,10 +6,10 @@ import { SystemPrompt } from "../../src/session/system"
 import type { Provider } from "../../src/provider/provider"
 import { tmpdir } from "../fixture/fixture"
 
-function makeModel(overrides: Partial<Provider.Model> & { apiId: string; family?: string; providerID?: string }): Provider.Model {
+function makeModel(overrides: { apiId: string; family?: string; providerID?: string }): Provider.Model {
   return {
     id: overrides.apiId as any,
-    providerID: (overrides.providerID ?? "test") as any,
+    providerID: (overrides.providerID ?? "test") as Provider.Model["providerID"],
     api: { id: overrides.apiId, url: "", npm: "@ai-sdk/openai-compatible" },
     name: overrides.apiId,
     family: overrides.family,
@@ -32,16 +32,10 @@ function makeModel(overrides: Partial<Provider.Model> & { apiId: string; family?
 }
 
 describe("session.system.provider routing", () => {
-  // Regression guard for the altimate-default routing bug (GH #887 / AI-6957).
-  // Before this fix, `altimate-default` (api.id literal, kept stable for backward
-  // compatibility) matched none of the string-based conditions and fell through
-  // to PROMPT_ANTHROPIC_WITHOUT_TODO (qwen.txt), whose Claude-style "MUST refuse
-  // if borderline/malicious" directives caused the upstream GPT-5.x gateway
-  // model to refuse benign requests in plan mode.
   // `codex_header.txt` (GPT-5 prompt) is the only base prompt with `## Editing
-  // constraints` / `apply_patch` — codex-specific. The Claude-style fallback
-  // (`qwen.txt`) is the only base prompt that begins with "Refuse to write code
-  // or explain code that may be used maliciously".
+  // constraints` / `apply_patch`. The Claude-style fallback (`qwen.txt`) is the
+  // only base prompt that begins with "Refuse to write code or explain code
+  // that may be used maliciously".
 
   test("altimate-default routes to GPT-5 prompt via provider+family, not the Anthropic fallback", () => {
     const prompts = SystemPrompt.provider(
@@ -53,12 +47,41 @@ describe("session.system.provider routing", () => {
     expect(prompts[0]).not.toMatch(/Refuse to write code or explain code that may be used maliciously/)
   })
 
-  test("altimate-backend anthropic-family routes to Claude prompt, not GPT-5 codex", () => {
+  test("altimate-backend anthropic-family routes to the same Claude prompt as direct anthropic", () => {
     const prompts = SystemPrompt.provider(
       makeModel({ apiId: "altimate-something", providerID: "altimate-backend", family: "anthropic" }),
     )
-    expect(prompts[0]).not.toMatch(/## Editing constraints/)
-    expect(prompts[0]).not.toMatch(/Refuse to write code or explain code that may be used maliciously/)
+    const baselineAnthropic = SystemPrompt.provider(
+      makeModel({ apiId: "claude-3-7-sonnet", providerID: "anthropic", family: "anthropic" }),
+    )
+    expect(prompts).toEqual(baselineAnthropic)
+  })
+
+  test("altimate-backend with unknown / missing family defaults to GPT-5 codex (gateway is openai-compatible)", () => {
+    // Without this default the unknown-family branch would fall through to
+    // PROMPT_ANTHROPIC_WITHOUT_TODO, recreating the GH #887 routing problem
+    // the moment a new family value appears in config.
+    for (const family of [undefined, "", "unknown-future-family"]) {
+      const prompts = SystemPrompt.provider(
+        makeModel({ apiId: "altimate-default", providerID: "altimate-backend", family }),
+      )
+      expect(prompts[0]).toMatch(/## Editing constraints/)
+      expect(prompts[0]).not.toMatch(/Refuse to write code or explain code that may be used maliciously/)
+    }
+  })
+
+  test("altimate-backend family lookup is case-insensitive", () => {
+    const lower = SystemPrompt.provider(
+      makeModel({ apiId: "altimate-default", providerID: "altimate-backend", family: "anthropic" }),
+    )
+    const upper = SystemPrompt.provider(
+      makeModel({ apiId: "altimate-default", providerID: "altimate-backend", family: "Anthropic" }),
+    )
+    const mixed = SystemPrompt.provider(
+      makeModel({ apiId: "altimate-default", providerID: "altimate-backend", family: "ANTHROPIC" }),
+    )
+    expect(upper).toEqual(lower)
+    expect(mixed).toEqual(lower)
   })
 
   test("non-altimate openai models still use the existing api.id matching", () => {

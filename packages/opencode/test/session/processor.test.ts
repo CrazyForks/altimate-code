@@ -544,10 +544,10 @@ describe("plan-agent no-tool-generation detection", () => {
   })
 
   // Regression guard: SessionProcessor.create() is called per-step by loop(),
-  // so sessionToolCallsMade is per-step in practice (not session-wide as the
-  // 2026-06-04 comment claimed). A multi-step plan-mode session that runs many
-  // tools and then produces a final text-only step would false-positive without
-  // also consulting the conversation history. See processor.ts comment block.
+  // so sessionToolCallsMade is per-step in practice. A multi-step plan-mode
+  // session that runs many tools and then produces a final text-only step
+  // would false-positive without also consulting the conversation history.
+  // See processor.ts comment block.
   test("does not fire on final text-only step when prior steps used tools", () => {
     const result = simulateFinishStep({
       ...baseOpts,
