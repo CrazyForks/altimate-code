@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.2] - 2026-06-03
+
+A small correctness patch. The dbt PR reviewer's deterministic engine never required an altimate API key — but two tool descriptions said it did, which could push the reviewer into lint-only mode and send users chasing a key they don't need. This release corrects that and documents what "lint-only" actually means.
+
+### Fixed
+
+- **`dbt_pr_review` no longer implies it needs an altimate API key.** The native `altimate-core` engine behind the reviewer (column-lineage blast radius, query equivalence, PII classification, A–F grade) runs **fully offline** via the bundled napi binary — there is no `altimate_core.init` and no API-key gate in that path. Two tool descriptions (`altimate_core_column_lineage`, `altimate_core_track_lineage`) still carried a stale Python-bridge-era line claiming *"Requires `altimate_core.init()` with API key"*, so a stuck **lint-only** run was mis-diagnosed as missing auth. The descriptions now state the tools run offline with no key. **Lint-only actually means the dbt `manifest.json` didn't resolve** (wrong path, stale manifest, or wrong working directory) — the [dbt PR Review docs](https://docs.altimate.sh/usage/dbt-pr-review/) now spell out how to fix it. The only thing that ever needs a key is the optional advisory LLM lane, which can never block a verdict. (#882)
+
 ## [0.8.1] - 2026-06-02
 
 A reliability + correctness patch on top of 0.8.0. Highlights: **8 new Snowflake Cortex models** (with a config escape-hatch so you never wait for a release again), a **trace-corruption fix** for long-running sessions, and a **behavior change to the dbt PR reviewer** — it now always posts a GitHub *comment* and never a formal *approval*.
