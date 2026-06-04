@@ -29,6 +29,22 @@ export namespace SystemPrompt {
   }
 
   export function provider(model: Provider.Model) {
+    // altimate_change start — route altimate-backend gateway models by `family`
+    // before the api.id string-match fallthrough. The gateway's model.api.id is
+    // the opaque alias `altimate-default` (kept stable for backward compat —
+    // users persist it in model.json), which matches none of the patterns below.
+    // Without this guard it fell through to PROMPT_ANTHROPIC_WITHOUT_TODO
+    // (qwen.txt), whose leading "MUST refuse if borderline/malicious" Claude-
+    // style directives, stacked on plan.txt's "STRICTLY FORBIDDEN/ZERO
+    // exceptions" language, pushed the upstream GPT-5.x model into refusing
+    // benign requests like "add a button to the UI" (see #887 / AI-6957).
+    // Family is the authoritative signal — the provider definition pins it.
+    if (model.providerID === "altimate-backend") {
+      if (model.family === "openai") return [PROMPT_CODEX]
+      if (model.family === "anthropic") return [PROMPT_ANTHROPIC]
+      if (model.family === "gemini") return [PROMPT_GEMINI]
+    }
+    // altimate_change end
     if (model.api.id.includes("gpt-5")) return [PROMPT_CODEX]
     if (model.api.id.includes("gpt-") || model.api.id.includes("o1") || model.api.id.includes("o3"))
       return [PROMPT_BEAST]
