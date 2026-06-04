@@ -472,15 +472,10 @@ describe("plan prompt safety", () => {
       "utf-8",
     )
     // Must consume the trusted-parts contract.
-    expect(promptTs).toMatch(/trustedReminderParts/)
-    // The hoist loop must iterate the returned trusted parts.
-    expect(promptTs).toMatch(/for \(const part of reminderResult\.trustedReminderParts\)/)
+    expect(promptTs).toMatch(/reminderResult\.trustedReminderParts/)
     // The hoist must NOT have been re-implemented as a scan over `part.synthetic`,
     // which would re-open the prompt-injection vector via attached file content.
     expect(promptTs).not.toMatch(/hoistSyntheticReminders/)
-    // The loose `if (!part.synthetic) continue` shape must not reappear in any
-    // trust-boundary context. The remaining `synthetic` usages should only be
-    // setters or the unrelated text-wrap skip at the queued-message reminder.
   })
 
   test("insertReminders return shape includes trustedReminderParts", async () => {
@@ -494,6 +489,50 @@ describe("plan prompt safety", () => {
     expect(promptTs).toMatch(
       /type InsertRemindersResult = \{ messages: MessageV2\.WithParts\[\]; trustedReminderParts: MessageV2\.TextPart\[\] \}/,
     )
+  })
+
+  // #888 J2 regression guard. Persisted experimental-mode reminders must carry
+  // `ignored: true` for non-Anthropic models — otherwise on turn 2+ they reload
+  // from DB with `ignored: undefined`, slip into the user-role payload via
+  // `toModelMessages` (which gates on `!part.ignored`), and re-trigger the GPT-5.x
+  // refusal class this PR was meant to fix.
+  test("insertReminders bakes `ignored: true` into trusted reminders for non-Anthropic models", async () => {
+    const promptTs = await fs.readFile(
+      path.join(__dirname, "../../src/session/prompt.ts"),
+      "utf-8",
+    )
+    // The function must take `model` so it can compute the hoist decision once.
+    expect(promptTs).toMatch(/async function insertReminders\(input:\s*\{[\s\S]*?model: Provider\.Model/)
+    // The `nonAnthropic` decision must drive an `ignored: true` annotation on
+    // each trusted part (and on the Session.updatePart payload for experimental
+    // persisted rows).
+    expect(promptTs).toMatch(/const nonAnthropic = !isAnthropicLikeModel\(input\.model\)/)
+    // At least one persisted-write site must include the conditional `ignored: true`.
+    const nonAnthropicIgnored = promptTs.match(/nonAnthropic \? \{ ignored: true \} : \{\}/g)
+    expect((nonAnthropicIgnored ?? []).length).toBeGreaterThanOrEqual(4)
+    // And the caller must no longer mutate `part.ignored = true` — that contract
+    // is now owned by insertReminders.
+    expect(promptTs).not.toMatch(/part\.ignored = true/)
+  })
+
+  // #888 J1 regression guard. `family` is a free-form string and the model
+  // registry uses specific values (`claude-sonnet`, `gemini-pro`, …); an exact
+  // `family === "anthropic"` match would silently fall through to PROMPT_CODEX
+  // on any altimate-backend gateway path exposing a Claude/Gemini model.
+  test("family routing uses the shared familyVendor helper, not exact-match literals", async () => {
+    const systemTs = await fs.readFile(
+      path.join(__dirname, "../../src/session/system.ts"),
+      "utf-8",
+    )
+    const promptTs = await fs.readFile(
+      path.join(__dirname, "../../src/session/prompt.ts"),
+      "utf-8",
+    )
+    expect(systemTs).toMatch(/familyVendor\(model\.family\)/)
+    expect(promptTs).toMatch(/familyVendor\(model\.family\)/)
+    // Exact-match `family === "anthropic"` shape must not reappear in the
+    // altimate-backend routing block.
+    expect(systemTs).not.toMatch(/model\.providerID === "altimate-backend"[\s\S]{0,200}family === "anthropic"/)
   })
 })
 
