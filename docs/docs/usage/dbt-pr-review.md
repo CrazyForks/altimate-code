@@ -110,6 +110,24 @@ Options:
 > clearly labeled, never mistaken for a full verdict. Run `dbt compile` first for
 > the full verdict.
 
+!!! question "Stuck in lint-only mode? It is **not** an API-key problem."
+    The deterministic engine (lineage, equivalence, PII, grade) runs fully
+    offline via the bundled native binary — **no altimate API key or account is
+    required** for any part of the verdict. A key is only ever needed for the
+    *optional* advisory LLM lane (see [below](#model--credentials-for-the-advisory-lane)),
+    and that lane can never block a verdict.
+
+    Lint-only means the **manifest didn't resolve**, not that auth failed. Check:
+
+    - **Path.** The default is `target/manifest.json` *relative to the project
+      root you run from*. If your manifest lives elsewhere, pass it explicitly:
+      `dbt_pr_review({ manifest_path: "target/manifest.json" })` (or `--manifest`
+      on the CLI), or set `manifestPath:` in `.altimate/review.yml`.
+    - **Freshness.** A stale manifest that predates the changed models can't
+      resolve them. Run `dbt compile` (or `dbt build`) to regenerate it before reviewing.
+    - **Working directory.** Run the review from the dbt project root so the
+      relative manifest path resolves.
+
 !!! note "Current limitations"
     - **BigQuery equivalence** on some compiled SQL (3-part backtick relations)
       is currently *undecidable* — the reviewer reports a warning ("could not
