@@ -64,6 +64,48 @@ export namespace LLM {
     ])
     const isCodex = provider.id === "openai" && auth?.type === "oauth"
 
+    // altimate_change start — for non-Anthropic models, hoist `<system-reminder>`-wrapped
+    // synthetic text parts out of user messages and into the system array.
+    //
+    // Plan mode (and a few other paths) attaches PROMPT_PLAN as a text part on the latest
+    // user message, wrapped in `<system-reminder>...</system-reminder>` tags — an Anthropic-
+    // Claude convention that Claude is trained to recognize as legitimate system-level
+    // instructions even when it arrives in a user-role message. OpenAI / Google / etc. are
+    // NOT trained on that convention. When GPT-5.x via the altimate gateway sees a user
+    // message that contains a `<system-reminder>` block with aggressive constraint language
+    // (STRICTLY FORBIDDEN, ZERO exceptions, MUST, ABSOLUTE CONSTRAINT), it pattern-matches
+    // it as a prompt-injection attempt and emits a content-policy refusal ("I'm sorry, but
+    // I cannot assist with that request.") — reliably, even on benign requests like
+    // "add a button". GH #887 / AI-6957. Hoisting these parts into actual system-role
+    // messages routes around the misinterpretation.
+    const isAnthropicLike =
+      input.model.providerID === "anthropic" ||
+      input.model.providerID === "google-vertex-anthropic" ||
+      input.model.family === "anthropic" ||
+      input.model.api.npm === "@ai-sdk/anthropic" ||
+      input.model.api.id.includes("anthropic") ||
+      input.model.api.id.includes("claude")
+    const hoistedReminders: string[] = []
+    if (!isAnthropicLike) {
+      input.messages = input.messages.map((m) => {
+        if (m.role !== "user" || !Array.isArray(m.content)) return m
+        const kept: typeof m.content = []
+        for (const part of m.content) {
+          if (part.type === "text" && typeof part.text === "string" && part.text.trimStart().startsWith("<system-reminder>")) {
+            hoistedReminders.push(part.text)
+          } else {
+            kept.push(part)
+          }
+        }
+        return { ...m, content: kept }
+      })
+      // Drop user messages that became empty (had only system-reminder parts).
+      input.messages = input.messages.filter(
+        (m) => !(m.role === "user" && Array.isArray(m.content) && m.content.length === 0),
+      )
+    }
+    // altimate_change end
+
     const system = []
     system.push(
       [
@@ -72,6 +114,10 @@ export namespace LLM {
         ...(input.agent.prompt ? [input.agent.prompt] : isCodex ? [] : SystemPrompt.provider(input.model)),
         // any custom prompt passed into this call
         ...input.system,
+        // altimate_change start — hoisted reminders appended after the base provider
+        // prompt so the model sees them as authoritative session-level instructions.
+        ...hoistedReminders,
+        // altimate_change end
         // any custom prompt from last user message
         ...(input.user.system ? [input.user.system] : []),
       ]

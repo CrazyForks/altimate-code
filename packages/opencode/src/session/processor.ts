@@ -348,10 +348,27 @@ export namespace SessionProcessor {
                   // Users read the text, see no progress, and abandon. Surface a
                   // warning + telemetry so the pattern is measurable and the user
                   // knows to try a different model.
+                  //
+                  // sessionToolCallsMade tracks tool calls in the CURRENT step only
+                  // — SessionProcessor.create() is called per-step by loop() (see
+                  // prompt.ts), so the closure variable resets each step. A multi-
+                  // step plan-mode session (read → grep → read → … → final text)
+                  // would then false-positive on the final text-only step. Also
+                  // scan streamInput.messages for any prior assistant tool-call
+                  // content; if found, the session has used tools and the warning
+                  // should be suppressed.
+                  const sessionHasPriorToolCalls =
+                    sessionToolCallsMade > 0 ||
+                    streamInput.messages.some(
+                      (m) =>
+                        m.role === "assistant" &&
+                        Array.isArray(m.content) &&
+                        m.content.some((p) => p.type === "tool-call"),
+                    )
                   if (
                     input.assistantMessage.agent === "plan" &&
                     value.finishReason === "stop" &&
-                    sessionToolCallsMade === 0 &&
+                    !sessionHasPriorToolCalls &&
                     !planNoToolWarningEmitted
                   ) {
                     planNoToolWarningEmitted = true
