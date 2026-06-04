@@ -688,18 +688,25 @@ export namespace SessionPrompt {
       const agent = await Agent.get(lastUser.agent)
       const maxSteps = agent.steps ?? Infinity
       const isLastStep = step >= maxSteps
-      msgs = await insertReminders({
+      // altimate_change start — insertReminders now returns the trusted reminder
+      // parts it appended; for non-Anthropic-like models we hoist them into the
+      // system prompt and mark the parts ignored so they don't ALSO appear in
+      // the user message. The returned-parts list is the trust boundary —
+      // never the `synthetic` flag (other code paths set it on file/resource
+      // expansions, which are user-derived). See #887/#888 review thread.
+      const reminderResult = await insertReminders({
         messages: msgs,
         agent,
         session,
       })
-
-      // altimate_change start — hoist synthetic <system-reminder> parts into the
-      // system prompt for non-Anthropic-like models. The synthetic flag is the
-      // trust boundary: only parts written by insertReminders (PROMPT_PLAN /
-      // BUILD_SWITCH) qualify; raw user text starting with `<system-reminder>`
-      // is left untouched and never gains system-role priority. See #887/#888.
-      const hoistedReminders = hoistSyntheticReminders(msgs, model)
+      msgs = reminderResult.messages
+      const hoistedReminders: string[] = []
+      if (!isAnthropicLikeModel(model)) {
+        for (const part of reminderResult.trustedReminderParts) {
+          hoistedReminders.push(part.text)
+          part.ignored = true
+        }
+      }
       // altimate_change end
 
       // altimate_change start — plan refinement detection and telemetry
@@ -2048,7 +2055,7 @@ export namespace SessionPrompt {
     }
   }
 
-  // altimate_change start — trust-aware <system-reminder> hoist for non-Anthropic models
+  // altimate_change start — model-family helper used by the trust-aware hoist below
   function isAnthropicLikeModel(model: Provider.Model): boolean {
     return (
       model.providerID === "anthropic" ||
@@ -2059,60 +2066,53 @@ export namespace SessionPrompt {
       model.api.id.includes("claude")
     )
   }
-
-  function hoistSyntheticReminders(messages: MessageV2.WithParts[], model: Provider.Model): string[] {
-    // Anthropic-family models recognize <system-reminder>...</system-reminder> on a
-    // user-role text part as authoritative — keep that behavior unchanged.
-    // Other models (observed: GPT-5.x via altimate-backend gateway) pattern-match
-    // those tags inside user content as prompt-injection attempts and refuse.
-    // For them, lift our internally-generated reminders into a proper system-role
-    // message. The synthetic flag is the trust boundary — only parts we ourselves
-    // wrote in insertReminders qualify; raw user text starting with the same
-    // characters is left intact and never gains system priority.
-    if (isAnthropicLikeModel(model)) return []
-    const hoisted: string[] = []
-    for (const msg of messages) {
-      if (msg.info.role !== "user") continue
-      for (const part of msg.parts) {
-        if (part.type !== "text") continue
-        if (!part.synthetic) continue
-        if (!part.text.trimStart().startsWith("<system-reminder>")) continue
-        hoisted.push(part.text)
-        part.ignored = true
-      }
-    }
-    return hoisted
-  }
   // altimate_change end
 
-  async function insertReminders(input: { messages: MessageV2.WithParts[]; agent: Agent.Info; session: Session.Info }) {
+  // altimate_change start — return the trusted reminder parts insertReminders just appended
+  // so the caller can hoist them into the system prompt on non-Anthropic models.
+  // The returned-parts contract is the trust boundary: only parts that *this function*
+  // creates are eligible for promotion. The schema-wide `synthetic` flag is set by other
+  // code paths too (file/resource expansions at lines ~1729/1751/1801 attach
+  // file content as synthetic text), so it is not safe to infer trust from `synthetic`
+  // alone. See #888 review feedback.
+  type InsertRemindersResult = { messages: MessageV2.WithParts[]; trustedReminderParts: MessageV2.TextPart[] }
+  async function insertReminders(input: {
+    messages: MessageV2.WithParts[]
+    agent: Agent.Info
+    session: Session.Info
+  }): Promise<InsertRemindersResult> {
+    const trustedReminderParts: MessageV2.TextPart[] = []
     const userMessage = input.messages.findLast((msg) => msg.info.role === "user")
-    if (!userMessage) return input.messages
+    if (!userMessage) return { messages: input.messages, trustedReminderParts }
 
     // Original logic when experimental plan mode is disabled
     if (!Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE) {
       if (input.agent.name === "plan") {
-        userMessage.parts.push({
+        const part: MessageV2.TextPart = {
           id: PartID.ascending(),
           messageID: userMessage.info.id,
           sessionID: userMessage.info.sessionID,
           type: "text",
           text: PROMPT_PLAN,
           synthetic: true,
-        })
+        }
+        userMessage.parts.push(part)
+        trustedReminderParts.push(part)
       }
       const wasPlan = input.messages.some((msg) => msg.info.role === "assistant" && msg.info.agent === "plan")
       if (wasPlan && input.agent.name === "builder") {
-        userMessage.parts.push({
+        const part: MessageV2.TextPart = {
           id: PartID.ascending(),
           messageID: userMessage.info.id,
           sessionID: userMessage.info.sessionID,
           type: "text",
           text: BUILD_SWITCH,
           synthetic: true,
-        })
+        }
+        userMessage.parts.push(part)
+        trustedReminderParts.push(part)
       }
-      return input.messages
+      return { messages: input.messages, trustedReminderParts }
     }
 
     // New plan mode logic when flag is enabled
@@ -2133,8 +2133,9 @@ export namespace SessionPrompt {
           synthetic: true,
         })
         userMessage.parts.push(part)
+        trustedReminderParts.push(part as MessageV2.TextPart)
       }
-      return input.messages
+      return { messages: input.messages, trustedReminderParts }
     }
 
     // Entering plan mode
@@ -2236,10 +2237,12 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         synthetic: true,
       })
       userMessage.parts.push(part)
-      return input.messages
+      trustedReminderParts.push(part as MessageV2.TextPart)
+      return { messages: input.messages, trustedReminderParts }
     }
-    return input.messages
+    return { messages: input.messages, trustedReminderParts }
   }
+  // altimate_change end
 
   export const ShellInput = z.object({
     sessionID: SessionID.zod,

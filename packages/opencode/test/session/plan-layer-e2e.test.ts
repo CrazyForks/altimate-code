@@ -455,6 +455,46 @@ describe("plan prompt safety", () => {
     )
     expect(planTxt).not.toMatch(/TODO|FIXME|HACK|XXX|console\.log/i)
   })
+
+  // Regression guards for the #888 review trust boundary.
+  //
+  // Background: PROMPT_PLAN / BUILD_SWITCH are attached as user-message text
+  // parts wrapped in `<system-reminder>...</system-reminder>`. On non-Anthropic
+  // models we hoist those into the system prompt so the model doesn't pattern-
+  // match the tag as a prompt-injection attempt and refuse. Trust provenance
+  // for the hoist MUST be the explicit list of parts returned by
+  // `insertReminders` — never `synthetic + prefix`, because other code paths
+  // (file/resource expansions around prompt.ts:1729/1751/1801) mark user-derived
+  // content as synthetic. See PR #888 review thread.
+  test("loop hoists ONLY parts returned by insertReminders, never scans for `synthetic`", async () => {
+    const promptTs = await fs.readFile(
+      path.join(__dirname, "../../src/session/prompt.ts"),
+      "utf-8",
+    )
+    // Must consume the trusted-parts contract.
+    expect(promptTs).toMatch(/trustedReminderParts/)
+    // The hoist loop must iterate the returned trusted parts.
+    expect(promptTs).toMatch(/for \(const part of reminderResult\.trustedReminderParts\)/)
+    // The hoist must NOT have been re-implemented as a scan over `part.synthetic`,
+    // which would re-open the prompt-injection vector via attached file content.
+    expect(promptTs).not.toMatch(/hoistSyntheticReminders/)
+    // The loose `if (!part.synthetic) continue` shape must not reappear in any
+    // trust-boundary context. The remaining `synthetic` usages should only be
+    // setters or the unrelated text-wrap skip at the queued-message reminder.
+  })
+
+  test("insertReminders return shape includes trustedReminderParts", async () => {
+    const promptTs = await fs.readFile(
+      path.join(__dirname, "../../src/session/prompt.ts"),
+      "utf-8",
+    )
+    expect(promptTs).toMatch(
+      /async function insertReminders\([\s\S]*?\): Promise<InsertRemindersResult>/,
+    )
+    expect(promptTs).toMatch(
+      /type InsertRemindersResult = \{ messages: MessageV2\.WithParts\[\]; trustedReminderParts: MessageV2\.TextPart\[\] \}/,
+    )
+  })
 })
 
 // ---------------------------------------------------------------------------
