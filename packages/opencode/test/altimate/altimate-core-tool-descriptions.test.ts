@@ -9,9 +9,13 @@
  * read those descriptions, concluded it needed an altimate API key, and degraded
  * `dbt_pr_review` to lint-only mode.
  *
- * This test pins the descriptions so the false claim can never silently return.
+ * This test pins the two corrected descriptions so the false claim can never
+ * silently return, and sweeps EVERY `altimate-core-*` tool source so the stale
+ * `altimate_core.init()` marker can't reappear in a newly added tool either.
  */
 import { describe, test, expect } from "bun:test"
+import { readdirSync, readFileSync } from "node:fs"
+import { join } from "node:path"
 import { AltimateCoreColumnLineageTool } from "../../src/altimate/tools/altimate-core-column-lineage"
 import { AltimateCoreTrackLineageTool } from "../../src/altimate/tools/altimate-core-track-lineage"
 
@@ -30,9 +34,34 @@ describe("altimate-core tool descriptions (issue #881)", () => {
       // Guard the *false claim* (that a key/init is required), not the word
       // "api key" itself: the corrected copy legitimately says "no API key required".
       expect(lower).not.toContain("altimate_core.init")
-      expect(lower).not.toMatch(/requires?\b[^.]{0,40}\bapi key\b/)
+      // Lazy `.*?` (no length cap) catches long-gap variants like
+      // "requires an API key for authentication" that a bounded pattern misses.
+      expect(lower).not.toMatch(/requires?\b.*?\bapi key\b/)
       // And it should positively state the offline / no-key reality.
       expect(lower).toContain("no api key")
+    })
+  }
+})
+
+/**
+ * Forward guard: no `altimate-core-*` tool may reintroduce the stale
+ * `altimate_core.init()` marker — the unambiguous fingerprint of the
+ * Python-bridge-era "needs an API key" claim. No native engine tool calls a
+ * dispatcher method by that name, so any occurrence is a regression. Scanning
+ * the source (not just the two known tools) auto-covers tools added later.
+ */
+describe("altimate-core tool sources must not reference altimate_core.init() (issue #881)", () => {
+  const toolsDir = join(import.meta.dir, "../../src/altimate/tools")
+  const files = readdirSync(toolsDir).filter((f) => f.startsWith("altimate-core-") && f.endsWith(".ts"))
+
+  test("there is at least one altimate-core tool to scan", () => {
+    expect(files.length).toBeGreaterThan(0)
+  })
+
+  for (const file of files) {
+    test(`${file} must not contain the stale altimate_core.init() marker`, () => {
+      const src = readFileSync(join(toolsDir, file), "utf8")
+      expect(src).not.toContain("altimate_core.init")
     })
   }
 })
