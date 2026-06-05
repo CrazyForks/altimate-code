@@ -219,7 +219,25 @@ const startEventStream = (input: { directory: string; workspaceID?: string }) =>
                 // call `setPrompt(text)` only — never `setTitle` — to avoid racing
                 // the auto-generated title from `session.updated` (Path C).
                 if (part.type === "text") {
-                  if (part.messageID && sessionUserMsgIds.get(part.sessionID)?.has(part.messageID)) {
+                  // altimate_change start — skip synthetic / ignored text parts.
+                  // `Session.createUserMessage` (prompt.ts) attaches many `synthetic: true`
+                  // text parts to the user message — MCP resource banners, decoded file
+                  // contents, retry/reminder text, plan-mode reminders, agent-handoff
+                  // tags. They all share the user's `messageID` so they would otherwise
+                  // pass the `sessionUserMsgIds` check below and override `metadata.prompt`
+                  // with the LAST synthetic blob (typically file content) and render one
+                  // fake "▶ You" bubble per synthetic part in the chat tab. The synthetic
+                  // and ignored flags exist precisely to mark non-authored content; this
+                  // is exactly the place to consult them. We skip silently rather than
+                  // `continue`-ing the event-loop iteration because the outer loop still
+                  // needs to forward the event downstream via `Rpc.emit`.
+                  const isAuthoredText = !part.synthetic && !part.ignored
+                  // altimate_change end
+                  if (
+                    isAuthoredText &&
+                    part.messageID &&
+                    sessionUserMsgIds.get(part.sessionID)?.has(part.messageID)
+                  ) {
                     const text = String(part.text || "")
                     if (text) {
                       trace.setPrompt(text)
@@ -231,7 +249,7 @@ const startEventStream = (input: { directory: string; workspaceID?: string }) =>
                       trace.logUserMessage(text)
                       // altimate_change end
                     }
-                  } else if (part.time?.end) {
+                  } else if (isAuthoredText && part.time?.end) {
                     // Assistant response text (only counts when processing-end fires)
                     trace.logText(part)
                   }

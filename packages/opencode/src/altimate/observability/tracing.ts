@@ -345,6 +345,12 @@ function formatDurationShort(ms: number): string {
 }
 // altimate_change end
 
+// altimate_change start — shared truncation cap for `logUserMessage` span input.
+// Exported so the viewer's chat-tab dedupe can compare against the same boundary
+// (otherwise it'd silently drift if either side changes the magic number).
+export const USER_MESSAGE_INPUT_MAX_CHARS = 4000
+// altimate_change end
+
 export class Trace {
   // Global active trace — set when a session starts, cleared on end.
   private static _active: Trace | null = null
@@ -565,6 +571,23 @@ export class Trace {
       delete (r as { endTime?: number }).endTime
       r.status = "ok"
     }
+    // Close any in-flight generation spans as interrupted. The transient state
+    // these spans depended on (`this.currentGenerationSpanId`, `generationText`,
+    // `generationToolCalls`, `pendingToolResults`) lives only in memory and
+    // can't be reconstructed from the on-disk file. If we leave open spans
+    // open, the next `step-finish` event for that turn drops at the
+    // `if (!this.currentGenerationSpanId) return` guard in `logStepFinish`
+    // and any later `logToolCall` falls back to attaching tool spans to
+    // `rootSpanId`, silently degrading the trace shape. Marking them
+    // interrupted preserves the partial data and makes the boundary visible.
+    const now = Date.now()
+    for (const s of this.spans) {
+      if (s.kind === "generation" && s.endTime === undefined) {
+        s.endTime = now
+        s.status = "error"
+        s.statusMessage = "interrupted (worker restart / cache eviction before step-finish)"
+      }
+    }
     this.endTraceStarted = false
     return true
   }
@@ -617,15 +640,16 @@ export class Trace {
     if (!this.rootSpanId) return
     if (!text) return
     try {
+      const now = Date.now()
       this.spans.push({
         spanId: randomUUIDv7(),
         parentSpanId: this.rootSpanId,
         name: "user-message",
         kind: "user-message",
-        startTime: Date.now(),
-        endTime: Date.now(),
+        startTime: now,
+        endTime: now,
         status: "ok",
-        input: text.slice(0, 4000),
+        input: text.length > USER_MESSAGE_INPUT_MAX_CHARS ? text.slice(0, USER_MESSAGE_INPUT_MAX_CHARS) : text,
       })
       this.snapshot()
     } catch {

@@ -12,7 +12,7 @@
  * Branded with Altimate Trace colors. Includes share/export features for virality.
  */
 
-import type { TraceFile } from "./tracing"
+import { USER_MESSAGE_INPUT_MAX_CHARS, type TraceFile } from "./tracing"
 
 export function renderTraceViewer(trace: TraceFile, options?: { live?: boolean; apiPath?: string }): string {
   const traceJSON = JSON.stringify(trace).replace(/<\//g, "<\\/")
@@ -1323,12 +1323,15 @@ function showDetail(span) {
   var userMsgs = spans.filter(function(s){return s.kind==='user-message';});
   var gens = spans.filter(function(s){return s.kind==='generation';});
   if (t.metadata.prompt) {
-    // \`logUserMessage\` truncates span input to 4000 chars (see tracing.ts);
-    // \`metadata.prompt\` stores the full string. For prompts longer than the
-    // truncation length, strict equality would miss the dedupe and the same
-    // text would render twice. Match against the truncated form as well.
+    // \`logUserMessage\` truncates span input to USER_MESSAGE_INPUT_MAX_CHARS
+    // (see tracing.ts); \`metadata.prompt\` stores the full string. For prompts
+    // longer than the truncation length, strict equality would miss the dedupe
+    // and the same text would render twice. Match against the truncated form as
+    // well. The constant is interpolated at render time so the two sides can't
+    // drift.
+    var USER_MSG_TRUNCATE = ${USER_MESSAGE_INPUT_MAX_CHARS};
     var promptStr = String(t.metadata.prompt);
-    var promptTruncated = promptStr.slice(0, 4000);
+    var promptTruncated = promptStr.slice(0, USER_MSG_TRUNCATE);
     var promptAlreadyInSpan = userMsgs.some(function(u){
       return typeof u.input === 'string' && (u.input === promptStr || u.input === promptTruncated);
     });

@@ -133,6 +133,26 @@ describe("trace-clearing-on-workspace-set regression", () => {
     )
   })
 
+  // Major #1 from the multi-LLM consensus review (codex-verified). The user-text
+  // branch must NOT feed `setPrompt`/`logUserMessage` from synthetic or ignored
+  // parts — `Session.createUserMessage` (prompt.ts) attaches MCP resource banners,
+  // decoded file contents, retry/reminder text, and plan-mode reminders as
+  // `synthetic: true` text parts that share the user's `messageID`. Without the
+  // gate, `metadata.prompt` ends up holding the LAST synthetic part (typically
+  // a file blob) and the chat tab renders one fake "▶ You" bubble per synthetic
+  // span — defeating the two display surfaces this PR fixes.
+  test("user-text branch skips synthetic/ignored parts before calling setPrompt+logUserMessage", async () => {
+    const workerSrc = await fs.readFile(path.join(ROOT, "src/cli/cmd/tui/worker.ts"), "utf-8")
+    // The synthetic+ignored gate must exist literally somewhere.
+    expect(workerSrc).toMatch(/!part\.synthetic\s*&&\s*!part\.ignored/)
+    // And the two write paths must be co-located inside a guard built from the
+    // same predicate — verified by checking that the `isAuthoredText &&` gate
+    // appears, followed (lazily) by both `trace.setPrompt` and `trace.logUserMessage`.
+    expect(workerSrc).toMatch(
+      /isAuthoredText\s*&&[\s\S]*?trace\.setPrompt[\s\S]*?trace\.logUserMessage/,
+    )
+  })
+
   test("Trace.setPrompt exists and only mutates metadata.prompt", async () => {
     const tracingSrc = await fs.readFile(
       path.join(ROOT, "src/altimate/observability/tracing.ts"),

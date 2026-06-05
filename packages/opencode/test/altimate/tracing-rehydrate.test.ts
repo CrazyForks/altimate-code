@@ -212,6 +212,43 @@ describe("Trace.rehydrateFromFile + cache-miss rehydration", () => {
     expect(sortedByStart).toEqual(allSpans)
   })
 
+  test("rehydrate marks any in-flight generation span as interrupted", async () => {
+    // Without this, the transient state that `logStepStart` opened (currentGenerationSpanId,
+    // generationText, generationToolCalls, pendingToolResults) is lost on reconstruction.
+    // A later `step-finish` event for that turn would drop at the
+    // `if (!this.currentGenerationSpanId) return` guard, and follow-up `logToolCall`
+    // would mis-parent its span at the root. Marking open generation spans interrupted
+    // makes the boundary visible and prevents the silent degrade.
+    await using tmp = await tmpdir()
+    const sessionId = "ses_inflight_gen"
+
+    const original = makeTrace(tmp.path)
+    original.startTrace(sessionId, {})
+    // Open a generation span via logStepStart. `logStepStart` does not itself
+    // snapshot to disk, so follow with a tool call (which does snapshot) to
+    // force a flush of the open generation span. Do NOT call logStepFinish —
+    // the point is to leave the generation span open on disk.
+    original.logStepStart({ id: "step-1" } as any)
+    original.logToolCall({ tool: "read", state: { status: "completed", input: { f: "a" } } } as any)
+    await original.flush()
+    const beforeFile = await readTraceFile(tmp.path, sessionId)
+    const openGen = beforeFile.spans.find((s) => s.kind === "generation")
+    expect(openGen).toBeDefined()
+    expect(openGen?.endTime).toBeUndefined()
+
+    const reconstructed = makeTrace(tmp.path)
+    expect(reconstructed.rehydrateFromFile(sessionId)).toBe(true)
+    // Trigger a snapshot so the rehydrated state lands on disk.
+    reconstructed.logToolCall({ tool: "read", state: { status: "completed", input: { f: "a" } } } as any)
+    await reconstructed.flush()
+
+    const afterFile = await readTraceFile(tmp.path, sessionId)
+    const interruptedGen = afterFile.spans.find((s) => s.spanId === openGen?.spanId)
+    expect(interruptedGen?.endTime).toBeDefined()
+    expect(interruptedGen?.status).toBe("error")
+    expect(interruptedGen?.statusMessage).toMatch(/interrupted/i)
+  })
+
   test("rehydrate clears endTime on the root span so the trace renders as still in-progress", async () => {
     await using tmp = await tmpdir()
     const sessionId = "ses_endtime_clear"
