@@ -1311,15 +1311,25 @@ function showDetail(span) {
   var el = document.getElementById('v-chat');
   var html = '';
   // Build a chronologically sorted list of conversation turns by interleaving
-  // user-message spans with generation spans. Older traces (no user-message
-  // spans) fall back to rendering metadata.prompt at the top as a single "You"
-  // bubble. Once user-message spans are present, we prefer those and skip
-  // metadata.prompt to avoid double-rendering the first turn.
+  // user-message spans with generation spans. We render \`metadata.prompt\` at
+  // the top as a fallback whenever it carries a value not already represented
+  // by a user-message span — that covers three cases:
+  //   1. Pre-fix traces with no user-message spans (just the legacy prompt).
+  //   2. Mixed traces: an older session rehydrated with only metadata.prompt,
+  //      then continued under the new code which added user-message spans for
+  //      later turns. Without this, the legacy first turn would be dropped.
+  //   3. Brand-new traces where the first user-message span input equals
+  //      metadata.prompt — we skip the duplicate to avoid double-rendering.
   var userMsgs = spans.filter(function(s){return s.kind==='user-message';});
   var gens = spans.filter(function(s){return s.kind==='generation';});
-  if (userMsgs.length === 0 && t.metadata.prompt) {
-    html += '<div class="chat-msg user"><div class="chat-role">\\u25B6 You</div>';
-    html += '<div class="chat-bubble">' + e(t.metadata.prompt) + '</div></div>';
+  if (t.metadata.prompt) {
+    var promptAlreadyInSpan = userMsgs.some(function(u){
+      return typeof u.input === 'string' && u.input === t.metadata.prompt;
+    });
+    if (!promptAlreadyInSpan) {
+      html += '<div class="chat-msg user"><div class="chat-role">\\u25B6 You</div>';
+      html += '<div class="chat-bubble">' + e(t.metadata.prompt) + '</div></div>';
+    }
   }
   var turns = userMsgs.concat(gens).sort(function(a, b) { return (a.startTime||0) - (b.startTime||0); });
   turns.forEach(function(s) {

@@ -63,8 +63,16 @@ describe("trace-clearing-on-workspace-set regression", () => {
     // that value.
     expect(routeSrc).toMatch(/createEffect\(\s*on\(\s*\(\)\s*=>\s*session\(\)\?\.workspaceID/)
 
-    // The unguarded inline form must not reappear — that would re-introduce the bug.
-    expect(routeSrc).not.toMatch(/createEffect\(\(\)\s*=>\s*\{\s*\n\s*if\s*\(session\(\)\?\.workspaceID\)/)
+    // Reject the three bug-equivalent spellings the reviewers flagged. Each
+    // pattern is bounded so it can't span across unrelated createEffect bodies
+    // elsewhere in the file (the route file has many createEffects).
+    //
+    // Inline expression: `createEffect(() => session()?.workspaceID && ...)`
+    // Inline ternary:    `createEffect(() => session()?.workspaceID ? ... : ...)`
+    expect(routeSrc).not.toMatch(/createEffect\(\s*\(\s*\)\s*=>\s*session\(\)\?\.workspaceID\s*[&?]/)
+    // Block body with `if (session()?.workspaceID)` — `[^{}]*?` prevents the
+    // match from crossing into other blocks.
+    expect(routeSrc).not.toMatch(/createEffect\(\s*\(\s*\)\s*=>\s*\{[^{}]*?if\s*\(session\(\)\?\.workspaceID/)
   })
 
   // The real root cause: a session.status=idle handler that called endTrace +
@@ -107,6 +115,14 @@ describe("trace-clearing-on-workspace-set regression", () => {
     // branch — that shape must not be present anymore, because user-input
     // parts never have `time.end` set.
     expect(workerSrc).not.toMatch(/if \(part\.type === "text" && part\.time\?\.end\)/)
+
+    // Broader guard: no `part.time?.end` check is permitted INSIDE the
+    // user-text branch (identified by `sessionUserMsgIds.get(...).has(...)`).
+    // Catches a nested `if (part.time?.end)` shape that would re-introduce
+    // the same drop.
+    expect(workerSrc).not.toMatch(
+      /sessionUserMsgIds\.get\(part\.sessionID\)\?\.has\(part\.messageID\)[\s\S]{0,400}part\.time\?\.end/,
+    )
 
     // The user-text branch must call setPrompt (not setTitle) so the auto-
     // generated session title from Path C isn't overwritten by raw user text.

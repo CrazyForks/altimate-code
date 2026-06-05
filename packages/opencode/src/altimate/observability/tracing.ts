@@ -516,13 +516,29 @@ export class Trace {
     } catch {
       return false
     }
-    if (!trace || trace.sessionId !== sessionId || !Array.isArray(trace.spans) || trace.spans.length === 0) {
+    // `buildTraceFile` writes the sanitized form of `sessionId` (see ~line 808
+    // `.replace(/[/\\.:]/g, "_")`), so compare the same way — otherwise valid
+    // trace files with `/`, `\`, `.`, `:` in the session id would be rejected
+    // and the caller would fall back to `startTrace`, clobbering them.
+    const normalizedSessionId = sessionId.replace(/[/\\.:]/g, "_") || "unknown"
+    if (
+      !trace ||
+      trace.sessionId !== normalizedSessionId ||
+      !Array.isArray(trace.spans) ||
+      trace.spans.length === 0
+    ) {
       return false
     }
     const root = trace.spans.find((s) => s.parentSpanId === null && s.kind === "session")
     if (!root) return false
 
     this.sessionId = sessionId
+    // Restore the original traceId so post-rehydrate snapshots/exports keep
+    // the same trace identity (downstream OTLP/Jaeger-style consumers and the
+    // trace viewer URL both depend on it being stable across rehydration).
+    if (typeof trace.traceId === "string" && trace.traceId.length > 0) {
+      this.traceId = trace.traceId
+    }
     this.spans = trace.spans.map((s) => ({ ...s }))
     this.rootSpanId = root.spanId
     this.metadata = { ...(trace.metadata ?? {}) }

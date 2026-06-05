@@ -104,6 +104,65 @@ describe("Trace.rehydrateFromFile + cache-miss rehydration", () => {
     expect(result).toBe(false)
   })
 
+  test("rehydrate preserves traceId across instance reconstruction", async () => {
+    // Without this, downstream trace consumers (viewer URL, OTLP exporters)
+    // see a different traceId on every snapshot after rehydration — breaks
+    // trace identity across instance lifetimes.
+    const sessionId = "ses_traceid_preservation"
+    const original = makeTrace()
+    original.startTrace(sessionId, {})
+    original.logToolCall({ tool: "read", state: { status: "completed", input: { f: "a" } } } as any)
+    await original.flush()
+    const beforeFile = await readTraceFile(sessionId)
+    const originalTraceId = beforeFile.traceId
+    expect(typeof originalTraceId).toBe("string")
+
+    const reconstructed = makeTrace()
+    expect(reconstructed.rehydrateFromFile(sessionId)).toBe(true)
+    reconstructed.logToolCall({ tool: "grep", state: { status: "completed", input: { p: "x" } } } as any)
+    await reconstructed.flush()
+    const afterFile = await readTraceFile(sessionId)
+    expect(afterFile.traceId).toBe(originalTraceId)
+  })
+
+  test("rehydrate matches sessionIds containing sanitized characters", async () => {
+    // `buildTraceFile` writes the sanitized form (slashes/dots/colons → "_").
+    // The match check needs to normalize before comparing, otherwise valid
+    // files would be rejected for sessions with those characters.
+    const sessionId = "ses_with/slash.and:colon"
+    const safeId = sessionId.replace(/[/\\.:]/g, "_")
+    // Write a valid file at the sanitized path with the sanitized sessionId
+    // inside (mirrors what buildTraceFile actually does).
+    await fs.writeFile(
+      path.join(tmpDir, `${safeId}.json`),
+      JSON.stringify({
+        version: 2,
+        traceId: "tr_x",
+        sessionId: safeId,
+        startedAt: new Date(0).toISOString(),
+        endedAt: new Date(0).toISOString(),
+        metadata: {},
+        spans: [
+          { spanId: "r", parentSpanId: null, name: safeId, kind: "session", startTime: 0, status: "ok" },
+        ],
+        summary: {
+          totalTokens: 0,
+          totalCost: 0,
+          totalToolCalls: 0,
+          totalGenerations: 0,
+          duration: 0,
+          status: "completed",
+          tokens: { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 },
+        },
+      }),
+    )
+
+    const trace = makeTrace()
+    // Pass the RAW sessionId (with slashes/dots/colons). Pre-fix this would have
+    // returned false because "ses_with/slash.and:colon" !== "ses_with_slash_and_colon".
+    expect(trace.rehydrateFromFile(sessionId)).toBe(true)
+  })
+
   test("rehydrate returns false when on-disk trace is for a different session", async () => {
     // Stage a mismatched file at the expected path for "session-A".
     await fs.writeFile(
