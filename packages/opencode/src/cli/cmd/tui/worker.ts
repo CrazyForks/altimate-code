@@ -221,7 +221,16 @@ const startEventStream = (input: { directory: string; workspaceID?: string }) =>
                 if (part.type === "text") {
                   if (part.messageID && sessionUserMsgIds.get(part.sessionID)?.has(part.messageID)) {
                     const text = String(part.text || "")
-                    if (text) trace.setPrompt(text)
+                    if (text) {
+                      trace.setPrompt(text)
+                      // altimate_change start — record each user message as a span
+                      // so the chat tab can render multi-turn conversations.
+                      // Without a span, the viewer can only display `metadata.prompt`
+                      // (singular) and every subsequent user message is silently
+                      // dropped from the conversation rendering.
+                      trace.logUserMessage(text)
+                      // altimate_change end
+                    }
                   } else if (part.time?.end) {
                     // Assistant response text (only counts when processing-end fires)
                     trace.logText(part)

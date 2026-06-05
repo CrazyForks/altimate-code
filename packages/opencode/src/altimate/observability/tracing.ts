@@ -42,7 +42,7 @@ export interface TraceSpan {
   spanId: string
   parentSpanId: string | null
   name: string
-  kind: "session" | "generation" | "tool" | "text" | "span"
+  kind: "session" | "generation" | "tool" | "text" | "span" | "user-message"
   startTime: number
   endTime?: number
   status: "ok" | "error"
@@ -588,6 +588,33 @@ export class Trace {
   // method for prompt-only capture.
   setPrompt(prompt: string) {
     if (prompt) this.metadata.prompt = prompt
+  }
+  // altimate_change end
+
+  // altimate_change start — record an individual user message as a span so the
+  // chat tab can render multi-turn conversations. Without this, the viewer's
+  // chat tab can only display `metadata.prompt` at the top — a single string —
+  // and every later user message is silently dropped from the conversation
+  // rendering. Tracked as `kind: "user-message"` so the viewer can interleave
+  // these with `kind: "generation"` spans by startTime.
+  logUserMessage(text: string) {
+    if (!this.rootSpanId) return
+    if (!text) return
+    try {
+      this.spans.push({
+        spanId: randomUUIDv7(),
+        parentSpanId: this.rootSpanId,
+        name: "user-message",
+        kind: "user-message",
+        startTime: Date.now(),
+        endTime: Date.now(),
+        status: "ok",
+        input: text.slice(0, 4000),
+      })
+      this.snapshot()
+    } catch {
+      // best-effort
+    }
   }
   // altimate_change end
 

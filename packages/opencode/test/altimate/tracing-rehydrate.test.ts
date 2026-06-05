@@ -132,6 +132,32 @@ describe("Trace.rehydrateFromFile + cache-miss rehydration", () => {
     expect(result).toBe(false)
   })
 
+  test("logUserMessage records each user turn as a span so the chat tab can interleave them", async () => {
+    const sessionId = "ses_user_messages"
+
+    const trace = makeTrace()
+    trace.startTrace(sessionId, {})
+    trace.logUserMessage("first user message")
+    trace.logToolCall({ tool: "read", state: { status: "completed", input: { f: "a" } } } as any)
+    trace.logUserMessage("second user message")
+    trace.logToolCall({ tool: "grep", state: { status: "completed", input: { p: "x" } } } as any)
+    trace.logUserMessage("third user message")
+    await trace.flush()
+
+    const fileContent = await readTraceFile(sessionId)
+    const userMessages = fileContent.spans.filter((s) => s.kind === "user-message")
+    expect(userMessages).toHaveLength(3)
+    expect((userMessages[0] as any).input).toBe("first user message")
+    expect((userMessages[1] as any).input).toBe("second user message")
+    expect((userMessages[2] as any).input).toBe("third user message")
+
+    // Chronological order — user-message spans must precede each generation/tool
+    // span that came after them, so the chat tab renders them in turn order.
+    const allSpans = fileContent.spans
+    const sortedByStart = [...allSpans].sort((a, b) => (a.startTime || 0) - (b.startTime || 0))
+    expect(sortedByStart).toEqual(allSpans)
+  })
+
   test("rehydrate clears endTime on the root span so the trace renders as still in-progress", async () => {
     const sessionId = "ses_endtime_clear"
 

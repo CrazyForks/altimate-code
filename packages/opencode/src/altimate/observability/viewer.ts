@@ -1310,13 +1310,29 @@ function showDetail(span) {
 (function() {
   var el = document.getElementById('v-chat');
   var html = '';
-  if (t.metadata.prompt) {
+  // Build a chronologically sorted list of conversation turns by interleaving
+  // user-message spans with generation spans. Older traces (no user-message
+  // spans) fall back to rendering metadata.prompt at the top as a single "You"
+  // bubble. Once user-message spans are present, we prefer those and skip
+  // metadata.prompt to avoid double-rendering the first turn.
+  var userMsgs = spans.filter(function(s){return s.kind==='user-message';});
+  var gens = spans.filter(function(s){return s.kind==='generation';});
+  if (userMsgs.length === 0 && t.metadata.prompt) {
     html += '<div class="chat-msg user"><div class="chat-role">\\u25B6 You</div>';
     html += '<div class="chat-bubble">' + e(t.metadata.prompt) + '</div></div>';
   }
-  var gens = spans.filter(function(s){return s.kind==='generation';});
-  gens.forEach(function(gen) {
-    var tools = spans.filter(function(s){return s.parentSpanId===gen.spanId && s.kind==='tool';});
+  var turns = userMsgs.concat(gens).sort(function(a, b) { return (a.startTime||0) - (b.startTime||0); });
+  turns.forEach(function(s) {
+    if (s.kind === 'user-message') {
+      var utxt = typeof s.input === 'string' ? s.input : (s.input != null ? JSON.stringify(s.input) : '');
+      if (!utxt) return;
+      html += '<div class="chat-msg user"><div class="chat-role">\\u25B6 You</div>';
+      html += '<div class="chat-bubble">' + e(utxt) + '</div></div>';
+      return;
+    }
+    // Generation: render its tool children first, then the agent response.
+    var gen = s;
+    var tools = spans.filter(function(c){return c.parentSpanId===gen.spanId && c.kind==='tool';});
     if (tools.length) {
       tools.forEach(function(tool) {
         html += '<div class="chat-tool' + (tool.status === 'error' ? ' err' : '') + '">';
