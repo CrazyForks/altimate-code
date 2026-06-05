@@ -1323,12 +1323,18 @@ function showDetail(span) {
   var userMsgs = spans.filter(function(s){return s.kind==='user-message';});
   var gens = spans.filter(function(s){return s.kind==='generation';});
   if (t.metadata.prompt) {
+    // \`logUserMessage\` truncates span input to 4000 chars (see tracing.ts);
+    // \`metadata.prompt\` stores the full string. For prompts longer than the
+    // truncation length, strict equality would miss the dedupe and the same
+    // text would render twice. Match against the truncated form as well.
+    var promptStr = String(t.metadata.prompt);
+    var promptTruncated = promptStr.slice(0, 4000);
     var promptAlreadyInSpan = userMsgs.some(function(u){
-      return typeof u.input === 'string' && u.input === t.metadata.prompt;
+      return typeof u.input === 'string' && (u.input === promptStr || u.input === promptTruncated);
     });
     if (!promptAlreadyInSpan) {
       html += '<div class="chat-msg user"><div class="chat-role">\\u25B6 You</div>';
-      html += '<div class="chat-bubble">' + e(t.metadata.prompt) + '</div></div>';
+      html += '<div class="chat-bubble">' + e(promptStr) + '</div></div>';
     }
   }
   var turns = userMsgs.concat(gens).sort(function(a, b) { return (a.startTime||0) - (b.startTime||0); });
