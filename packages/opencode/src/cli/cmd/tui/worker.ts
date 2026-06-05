@@ -211,16 +211,23 @@ const startEventStream = (input: { directory: string; workspaceID?: string }) =>
               if (trace) {
                 if (part.type === "step-start") trace.logStepStart(part)
                 if (part.type === "step-finish") trace.logStepFinish(part)
-                if (part.type === "text" && part.time?.end) {
+                // altimate_change start — split the user-vs-assistant text routes.
+                // User text parts arrive without `time.end` set (it's a meaningful
+                // concept only for processing-end of assistant chunks), so the old
+                // `&& part.time?.end` gate dropped the prompt entirely. We trust
+                // `sessionUserMsgIds.has(messageID)` as the user-text signal and
+                // call `setPrompt(text)` only — never `setTitle` — to avoid racing
+                // the auto-generated title from `session.updated` (Path C).
+                if (part.type === "text") {
                   if (part.messageID && sessionUserMsgIds.get(part.sessionID)?.has(part.messageID)) {
-                    // This is user prompt text — capture as title/prompt
                     const text = String(part.text || "")
-                    if (text) trace.setTitle(text.slice(0, 80), text)
-                  } else {
-                    // This is assistant response text
+                    if (text) trace.setPrompt(text)
+                  } else if (part.time?.end) {
+                    // Assistant response text (only counts when processing-end fires)
                     trace.logText(part)
                   }
                 }
+                // altimate_change end
                 if (part.type === "tool" && (part.state?.status === "completed" || part.state?.status === "error")) {
                   trace.logToolCall(part)
                 }

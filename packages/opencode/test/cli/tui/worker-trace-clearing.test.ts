@@ -94,4 +94,37 @@ describe("trace-clearing-on-workspace-set regression", () => {
       /if \(!trace\.rehydrateFromFile\(sessionID\)\)\s*\{\s*\n\s*trace\.startTrace\(sessionID, \{\}\)\s*\n\s*\}/,
     )
   })
+
+  // User-text-part branch must accept parts that have no `time.end` (user input
+  // never has a meaningful processing-end) and must capture the prompt via
+  // `setPrompt` — NOT `setTitle`. Otherwise the user text races the
+  // title-agent's auto-generated title from `session.updated` and overwrites
+  // it (e.g. "Greeting" → "hi"). See codex review feedback this round.
+  test("user text part is captured via setPrompt, drops time.end precondition, never touches title", async () => {
+    const workerSrc = await fs.readFile(path.join(ROOT, "src/cli/cmd/tui/worker.ts"), "utf-8")
+
+    // The old shape gated on `part.time?.end` for the entire user/assistant
+    // branch — that shape must not be present anymore, because user-input
+    // parts never have `time.end` set.
+    expect(workerSrc).not.toMatch(/if \(part\.type === "text" && part\.time\?\.end\)/)
+
+    // The user-text branch must call setPrompt (not setTitle) so the auto-
+    // generated session title from Path C isn't overwritten by raw user text.
+    expect(workerSrc).toMatch(/sessionUserMsgIds\.get\(part\.sessionID\)\?\.has\(part\.messageID\)[\s\S]{0,200}trace\.setPrompt/)
+    // The user-text branch must NOT call setTitle.
+    expect(workerSrc).not.toMatch(
+      /sessionUserMsgIds\.get\(part\.sessionID\)\?\.has\(part\.messageID\)[\s\S]{0,200}trace\.setTitle\(text/,
+    )
+  })
+
+  test("Trace.setPrompt exists and only mutates metadata.prompt", async () => {
+    const tracingSrc = await fs.readFile(
+      path.join(ROOT, "src/altimate/observability/tracing.ts"),
+      "utf-8",
+    )
+    // Method must exist with the documented signature.
+    expect(tracingSrc).toMatch(/setPrompt\(prompt: string\)\s*\{[\s\S]{0,200}this\.metadata\.prompt = prompt/)
+    // Must NOT touch metadata.title.
+    expect(tracingSrc).not.toMatch(/setPrompt\(prompt: string\)\s*\{[\s\S]{0,300}this\.metadata\.title/)
+  })
 })

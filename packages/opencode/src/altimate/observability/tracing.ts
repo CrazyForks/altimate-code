@@ -579,6 +579,18 @@ export class Trace {
     if (prompt) this.metadata.prompt = prompt
   }
 
+  // altimate_change start — set only the user prompt without mutating title.
+  // The bus emits an auto-generated session title (Path C, `session.updated`)
+  // separately from the user's actual prompt text (Path B, `message.part.updated`).
+  // Capturing the prompt via `setTitle(text, text)` would race the title-agent:
+  // if the user text part arrived after `session.updated`, the nice generated
+  // title ("Greeting") would regress to the raw user input ("hi"). Use this
+  // method for prompt-only capture.
+  setPrompt(prompt: string) {
+    if (prompt) this.metadata.prompt = prompt
+  }
+  // altimate_change end
+
   /**
    * Open a generation span from a step-start event.
    */
