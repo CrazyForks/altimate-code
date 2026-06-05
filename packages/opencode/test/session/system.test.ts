@@ -84,6 +84,23 @@ describe("session.system.provider routing", () => {
     expect(mixed).toEqual(lower)
   })
 
+  test("altimate-backend gemini-family routes to the same prompt as a direct gemini model", () => {
+    // familyVendor maps the specific gateway family values (`gemini-pro`,
+    // `gemini-flash`, …) to "gemini", so an altimate-backend Gemini model must
+    // land on PROMPT_GEMINI — not fall through to the codex default. Guards the
+    // #888 J1 class for the gemini branch specifically.
+    const prompts = SystemPrompt.provider(
+      makeModel({ apiId: "altimate-default", providerID: "altimate-backend", family: "gemini-pro" }),
+    )
+    const baselineGemini = SystemPrompt.provider(makeModel({ apiId: "gemini-2.0-flash", providerID: "google" }))
+    expect(prompts).toEqual(baselineGemini)
+    // And it must NOT be the codex default that an unknown family gets.
+    const codexDefault = SystemPrompt.provider(
+      makeModel({ apiId: "altimate-default", providerID: "altimate-backend", family: "unknown-future-family" }),
+    )
+    expect(prompts).not.toEqual(codexDefault)
+  })
+
   test("non-altimate openai models still use the existing api.id matching", () => {
     const gpt5 = SystemPrompt.provider(makeModel({ apiId: "gpt-5", providerID: "openai" }))
     expect(gpt5[0]).toMatch(/## Editing constraints/)
