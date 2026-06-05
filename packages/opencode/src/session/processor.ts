@@ -398,7 +398,6 @@ export namespace SessionProcessor {
                       type: "text",
                       synthetic: true,
                       text:
-                        // altimate_change start — #888 follow-up: reworded warning copy (de-blame the user, /model last resort)
                         `⚠️ altimate-code: the \`plan\` agent on \`${input.model.providerID}/${input.model.id}\` ` +
                         `stopped without calling any tools — it neither read, searched, nor explored the codebase. ` +
                         `Common causes: (a) the model wrote a plan from prompt context alone, (b) the model declined ` +
@@ -406,7 +405,6 @@ export namespace SessionProcessor {
                         `To recover, try one of: reply asking it to investigate first (\`read\`/\`grep\`/\`glob\`/\`explore\`); ` +
                         `rephrase the request more concretely; or, if it keeps refusing, \`/model\` to a tier that's more ` +
                         `eager to explore (e.g. Claude Sonnet/Opus).`,
-                        // altimate_change end
                       time: { start: Date.now(), end: Date.now() },
                     })
                   }
