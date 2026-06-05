@@ -96,7 +96,15 @@ function getOrCreateTrace(sessionID: string): Trace | null {
     const trace = tracingExporters
       ? Trace.withExporters([...tracingExporters], { maxFiles: tracingMaxFiles })
       : Trace.create()
-    trace.startTrace(sessionID, {})
+    // altimate_change start — prefer disk-rehydration on cache miss for an
+    // existing session (worker restart, MAX_TRACES eviction). startTrace would
+    // push a fresh root span into empty `this.spans` and the immediate
+    // snapshot would clobber the rich on-disk file. Defense in depth in
+    // addition to keeping the cache alive across turns.
+    if (!trace.rehydrateFromFile(sessionID)) {
+      trace.startTrace(sessionID, {})
+    }
+    // altimate_change end
     Trace.setActive(trace)
     sessionTraces.set(sessionID, trace)
     return trace
@@ -229,19 +237,21 @@ const startEventStream = (input: { directory: string; workspaceID?: string }) =>
               if (trace) trace.setTitle(String(info.title))
             }
           }
-          // Finalize trace when session reaches idle (completed)
-          if (event.type === "session.status") {
-            const sid = (event as any).properties?.sessionID
-            const status = (event as any).properties?.status?.type
-            if (status === "idle" && sid) {
-              const trace = sessionTraces.get(sid)
-              if (trace) {
-                void trace.endTrace().catch(() => {})
-                sessionTraces.delete(sid)
-                sessionUserMsgIds.delete(sid)
-              }
-            }
-          }
+          // altimate_change start — DO NOT finalize the trace on session.status=idle.
+          // `idle` fires after every turn (busy → idle transition), not at session end.
+          // Calling `endTrace` + `sessionTraces.delete` here treats each turn as the
+          // end of the session: the next event for the same session in a later turn
+          // hits a cache miss in getOrCreateTrace, constructs a fresh Trace.create()
+          // with empty `this.spans`, and the immediate `snapshot()` clobbers the
+          // rich on-disk `ses_<id>.json` with a single root-span file. Symptoms:
+          //   - waterfall view collapses to the system-prompt span after every turn
+          //   - "What was asked / No prompt recorded" because metadata.prompt was
+          //     captured on the destroyed instance, never on the replacement
+          // Sessions in altimate-code are long-lived across many turns; the Trace
+          // should live as long as the worker has the session in cache. Finalization
+          // happens on `shutdown` (worker.ts:312) and on MAX_TRACES eviction
+          // (worker.ts:87). No per-turn finalization is correct.
+          // altimate_change end
         } catch {
           // Trace must never interrupt event forwarding
         }

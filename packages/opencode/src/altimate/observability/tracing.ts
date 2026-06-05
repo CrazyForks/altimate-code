@@ -490,6 +490,70 @@ export class Trace {
     this.snapshot()
   }
 
+  // altimate_change start — rehydrate a Trace from an existing on-disk file.
+  // Used by `getOrCreateTrace` on cache miss for a session whose trace file
+  // already exists (worker restart, MAX_TRACES eviction). Without this, the
+  // fresh Trace.create() + startTrace() path would push a single root span
+  // into an empty `this.spans` and the immediate snapshot would clobber the
+  // rich on-disk trace. Returns true if a usable trace was loaded; false
+  // otherwise (the caller should fall back to startTrace).
+  //
+  // Does NOT call snapshot — the file is already correct on disk; an
+  // unnecessary write here would compete with concurrent flushSync paths.
+  rehydrateFromFile(sessionId: string): boolean {
+    if (!this.snapshotDir) return false
+    const safeId = sessionId.replace(/[/\\.:]/g, "_") || "unknown"
+    const filePath = path.join(this.snapshotDir, `${safeId}.json`)
+    let raw: string
+    try {
+      raw = fsSync.readFileSync(filePath, "utf-8")
+    } catch {
+      return false
+    }
+    let trace: TraceFile
+    try {
+      trace = JSON.parse(raw) as TraceFile
+    } catch {
+      return false
+    }
+    if (!trace || trace.sessionId !== sessionId || !Array.isArray(trace.spans) || trace.spans.length === 0) {
+      return false
+    }
+    const root = trace.spans.find((s) => s.parentSpanId === null && s.kind === "session")
+    if (!root) return false
+
+    this.sessionId = sessionId
+    this.spans = trace.spans.map((s) => ({ ...s }))
+    this.rootSpanId = root.spanId
+    this.metadata = { ...(trace.metadata ?? {}) }
+    this.startTime = root.startTime
+    if (trace.summary) {
+      this.totalTokens = trace.summary.totalTokens ?? 0
+      this.totalCost = trace.summary.totalCost ?? 0
+      this.toolCallCount = trace.summary.totalToolCalls ?? 0
+      this.generationCount = trace.summary.totalGenerations ?? 0
+      if (trace.summary.tokens) {
+        this.tokensBreakdown = {
+          input: trace.summary.tokens.input ?? 0,
+          output: trace.summary.tokens.output ?? 0,
+          reasoning: trace.summary.tokens.reasoning ?? 0,
+          cacheRead: trace.summary.tokens.cacheRead ?? 0,
+          cacheWrite: trace.summary.tokens.cacheWrite ?? 0,
+        }
+      }
+    }
+    // Mid-session rehydration: the root span's endTime (if any) was set by a
+    // prior endTrace; clear it so the trace doesn't render as "completed."
+    const r = this.spans.find((s) => s.spanId === this.rootSpanId)
+    if (r) {
+      delete (r as { endTime?: number }).endTime
+      r.status = "ok"
+    }
+    this.endTraceStarted = false
+    return true
+  }
+  // altimate_change end
+
   /**
    * Enrich the trace with model/provider info from the first assistant message.
    * Called when the message.updated event fires with assistant role.

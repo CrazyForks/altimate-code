@@ -66,4 +66,32 @@ describe("trace-clearing-on-workspace-set regression", () => {
     // The unguarded inline form must not reappear — that would re-introduce the bug.
     expect(routeSrc).not.toMatch(/createEffect\(\(\)\s*=>\s*\{\s*\n\s*if\s*\(session\(\)\?\.workspaceID\)/)
   })
+
+  // The real root cause: a session.status=idle handler that called endTrace +
+  // sessionTraces.delete after every turn. `idle` fires on busy→idle transition
+  // (i.e. after every agent turn finishes), not at session-end. Each fire
+  // destroyed the Trace instance; the next event in a later turn forced a fresh
+  // Trace.create() whose 1-span initial snapshot clobbered the rich on-disk
+  // trace. Also explains the "What was asked / No prompt recorded" symptom —
+  // metadata.prompt was captured on the destroyed instance, never on the
+  // replacement. The handler is now a no-op; finalization happens on worker
+  // shutdown and MAX_TRACES eviction only.
+  test("worker does NOT call endTrace+delete on session.status=idle", async () => {
+    const workerSrc = await fs.readFile(path.join(ROOT, "src/cli/cmd/tui/worker.ts"), "utf-8")
+
+    // The destructive shape must not exist anywhere in the file.
+    expect(workerSrc).not.toMatch(/status === "idle"[\s\S]{0,200}sessionTraces\.delete/)
+    expect(workerSrc).not.toMatch(/status === "idle"[\s\S]{0,200}trace\.endTrace\(\)/)
+  })
+
+  // Defense-in-depth: `getOrCreateTrace` on cache miss must try to load an
+  // existing on-disk trace before falling back to startTrace. Otherwise a
+  // worker restart or MAX_TRACES eviction recreates the trace empty and
+  // the next snapshot clobbers the rich file.
+  test("getOrCreateTrace prefers rehydrateFromFile over startTrace on cache miss", async () => {
+    const workerSrc = await fs.readFile(path.join(ROOT, "src/cli/cmd/tui/worker.ts"), "utf-8")
+    expect(workerSrc).toMatch(
+      /if \(!trace\.rehydrateFromFile\(sessionID\)\)\s*\{\s*\n\s*trace\.startTrace\(sessionID, \{\}\)\s*\n\s*\}/,
+    )
+  })
 })
