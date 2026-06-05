@@ -183,11 +183,23 @@ export function Session() {
     return new CustomSpeedScroll(3)
   })
 
-  createEffect(() => {
-    if (session()?.workspaceID) {
-      sdk.setWorkspace(session()?.workspaceID)
-    }
-  })
+  // altimate_change start — gate setWorkspace on actual workspaceID change.
+  // Plain `createEffect(() => session()?.workspaceID && sdk.setWorkspace(...))`
+  // re-fires whenever any field on the session signal changes (message count,
+  // status, parts) — including the cascade of updates at agent-finish. Every
+  // spurious fire propagates into `worker.setWorkspace` → `startEventStream` →
+  // `sessionTraces.clear()` → next snapshot overwrites the rich on-disk trace
+  // with a near-empty one. `on()` here restricts the effect to fire only when
+  // the projected `workspaceID` value actually changes.
+  createEffect(
+    on(
+      () => session()?.workspaceID,
+      (workspaceID) => {
+        if (workspaceID) sdk.setWorkspace(workspaceID)
+      },
+    ),
+  )
+  // altimate_change end
 
   createEffect(async () => {
     await sync.session

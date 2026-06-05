@@ -261,6 +261,16 @@ const startEventStream = (input: { directory: string; workspaceID?: string }) =>
   })
 }
 
+// altimate_change start — track the last workspaceID used to start the event stream
+// so `setWorkspace` becomes idempotent on unchanged values. SolidJS effects in the
+// session route can fire on every `session()` signal change (including agent-finish);
+// without this guard, every fire propagates to `startEventStream` which clears
+// `sessionTraces`, which causes the next snapshot from a freshly-created Trace to
+// overwrite the rich on-disk trace with a near-empty one. Symptom: waterfall view
+// collapses to the system-prompt span after every turn.
+let currentWorkspaceID: string | undefined
+// altimate_change end
+
 startEventStream({ directory: process.cwd() })
 
 export const rpc = {
@@ -306,6 +316,10 @@ export const rpc = {
     await Instance.disposeAll()
   },
   async setWorkspace(input: { workspaceID?: string }) {
+    // altimate_change start — idempotency guard; see currentWorkspaceID comment above
+    if (input.workspaceID === currentWorkspaceID) return
+    currentWorkspaceID = input.workspaceID
+    // altimate_change end
     startEventStream({ directory: process.cwd(), workspaceID: input.workspaceID })
   },
   async shutdown() {
