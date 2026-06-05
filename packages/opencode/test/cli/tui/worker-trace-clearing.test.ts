@@ -143,13 +143,21 @@ describe("trace-clearing-on-workspace-set regression", () => {
   // span — defeating the two display surfaces this PR fixes.
   test("user-text branch skips synthetic/ignored parts before calling setPrompt+logUserMessage", async () => {
     const workerSrc = await fs.readFile(path.join(ROOT, "src/cli/cmd/tui/worker.ts"), "utf-8")
-    // The synthetic+ignored gate must exist literally somewhere.
-    expect(workerSrc).toMatch(/!part\.synthetic\s*&&\s*!part\.ignored/)
-    // And the two write paths must be co-located inside a guard built from the
-    // same predicate — verified by checking that the `isAuthoredText &&` gate
-    // appears, followed (lazily) by both `trace.setPrompt` and `trace.logUserMessage`.
+    // The synthetic+ignored gate must build the `isAuthoredText` predicate
+    // from BOTH flags. Stronger than just searching for the literal anywhere.
     expect(workerSrc).toMatch(
-      /isAuthoredText\s*&&[\s\S]*?trace\.setPrompt[\s\S]*?trace\.logUserMessage/,
+      /const\s+isAuthoredText\s*=\s*!part\.synthetic\s*&&\s*!part\.ignored/,
+    )
+    // Both write paths must sit inside the user-text branch (gated on the
+    // `sessionUserMsgIds...has(...)` membership check) AND inside an
+    // `if (text)` body whose contents don't cross block boundaries.
+    // The `[^{}]` bounds on the inner spans prevent the match from extending
+    // past the closing brace of the `if (text)` body, so unrelated
+    // `trace.setPrompt` / `trace.logUserMessage` calls elsewhere in the file
+    // can't satisfy this assertion — exactly what the previous loose regex
+    // allowed and what CodeRabbit flagged.
+    expect(workerSrc).toMatch(
+      /sessionUserMsgIds\.get\(part\.sessionID\)\?\.has\(part\.messageID\)[\s\S]{0,400}if\s*\(\s*text\s*\)\s*\{[^{}]*trace\.setPrompt[^{}]*trace\.logUserMessage/,
     )
   })
 
