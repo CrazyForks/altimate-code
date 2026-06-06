@@ -591,7 +591,7 @@ export class Trace {
       if (s.kind === "generation" && s.endTime === undefined) {
         s.endTime = now
         s.status = "error"
-        s.statusMessage = "interrupted (worker restart / cache eviction before step-finish)"
+        s.statusMessage = "interrupted — altimate-code restarted before this step finished recording; not an agent failure"
       }
     }
     this.endTraceStarted = false
