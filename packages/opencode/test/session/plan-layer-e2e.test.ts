@@ -18,6 +18,8 @@ import fs from "fs/promises"
 import { describe, expect, test, beforeEach } from "bun:test"
 import { Log } from "../../src/util/log"
 import { SessionPrompt } from "../../src/session/prompt"
+import { MessageV2 } from "../../src/session/message-v2"
+import { Flag } from "../../src/flag/flag"
 import type { Provider } from "../../src/provider/provider"
 
 Log.init({ print: false })
@@ -251,11 +253,11 @@ describe("plan action classification: tricky edge cases", () => {
     expect(classifyPlanAction("ship it, but instead use postgres")).toBe("refine")
   })
 
-  test('empty string → refine', () => {
+  test("empty string → refine", () => {
     expect(classifyPlanAction("")).toBe("refine")
   })
 
-  test('just whitespace → refine', () => {
+  test("just whitespace → refine", () => {
     expect(classifyPlanAction("   ")).toBe("refine")
   })
 
@@ -270,10 +272,7 @@ describe("plan action classification: tricky edge cases", () => {
 
 describe("non-plan agent safety", () => {
   test("planRevisionCount and planHasWritten are initialized to safe defaults", async () => {
-    const promptTs = await fs.readFile(
-      path.join(__dirname, "../../src/session/prompt.ts"),
-      "utf-8",
-    )
+    const promptTs = await fs.readFile(path.join(__dirname, "../../src/session/prompt.ts"), "utf-8")
 
     // These must be initialized BEFORE the loop starts
     expect(promptTs).toContain("let planRevisionCount = 0")
@@ -285,10 +284,7 @@ describe("non-plan agent safety", () => {
   })
 
   test("plan refinement block is unreachable for non-plan agents", async () => {
-    const promptTs = await fs.readFile(
-      path.join(__dirname, "../../src/session/prompt.ts"),
-      "utf-8",
-    )
+    const promptTs = await fs.readFile(path.join(__dirname, "../../src/session/prompt.ts"), "utf-8")
 
     // Find the plan refinement block
     const refinementIdx = promptTs.indexOf('type: "plan_revision"')
@@ -300,10 +296,7 @@ describe("non-plan agent safety", () => {
   })
 
   test("plan file detection only runs for plan agent", async () => {
-    const promptTs = await fs.readFile(
-      path.join(__dirname, "../../src/session/prompt.ts"),
-      "utf-8",
-    )
+    const promptTs = await fs.readFile(path.join(__dirname, "../../src/session/prompt.ts"), "utf-8")
 
     // The Filesystem.exists check for plan files must be behind agent guard
     const existsIdx = promptTs.indexOf("planHasWritten = await Filesystem.exists")
@@ -319,10 +312,7 @@ describe("non-plan agent safety", () => {
 
 describe("sessionAgentName fix safety", () => {
   test("sessionAgentName is set from lastUser.agent before break conditions", async () => {
-    const promptTs = await fs.readFile(
-      path.join(__dirname, "../../src/session/prompt.ts"),
-      "utf-8",
-    )
+    const promptTs = await fs.readFile(path.join(__dirname, "../../src/session/prompt.ts"), "utf-8")
 
     // sessionAgentName assignment should come before "exiting loop"
     const agentNameIdx = promptTs.indexOf("sessionAgentName = lastUser.agent")
@@ -333,10 +323,7 @@ describe("sessionAgentName fix safety", () => {
   })
 
   test("agent_outcome telemetry uses sessionAgentName", async () => {
-    const promptTs = await fs.readFile(
-      path.join(__dirname, "../../src/session/prompt.ts"),
-      "utf-8",
-    )
+    const promptTs = await fs.readFile(path.join(__dirname, "../../src/session/prompt.ts"), "utf-8")
 
     // Find agent_outcome emission and assert it routes through the shared
     // `normalizeAgentName` helper. Anchored regex (not a token-presence check
@@ -352,10 +339,7 @@ describe("sessionAgentName fix safety", () => {
     // Funnel analysis from session_start → agent_outcome must see the same
     // bucket name; otherwise sessions appear to "vanish" when the legacy
     // "build" value at start gets normalized to "builder" at end.
-    const promptTs = await fs.readFile(
-      path.join(__dirname, "../../src/session/prompt.ts"),
-      "utf-8",
-    )
+    const promptTs = await fs.readFile(path.join(__dirname, "../../src/session/prompt.ts"), "utf-8")
     const startIdx = promptTs.indexOf('type: "session_start"')
     expect(startIdx).toBeGreaterThan(-1)
     const block = promptTs.slice(startIdx, startIdx + 600)
@@ -365,10 +349,7 @@ describe("sessionAgentName fix safety", () => {
   test("normalizeAgentName helper is declared exactly once (single source of truth)", async () => {
     // If a second normalizer is ever introduced the two will inevitably drift.
     // Pin a single implementation.
-    const promptTs = await fs.readFile(
-      path.join(__dirname, "../../src/session/prompt.ts"),
-      "utf-8",
-    )
+    const promptTs = await fs.readFile(path.join(__dirname, "../../src/session/prompt.ts"), "utf-8")
     const declarations = promptTs.match(/function\s+normalizeAgentName\s*\(/g) ?? []
     expect(declarations.length).toBe(1)
   })
@@ -378,10 +359,7 @@ describe("sessionAgentName fix safety", () => {
     // could surface "Build" or "BUILD". Without case-folding, the phantom
     // bucket comes back. Pin that the helper does the toLowerCase() guard
     // so a refactor can't silently drop it.
-    const promptTs = await fs.readFile(
-      path.join(__dirname, "../../src/session/prompt.ts"),
-      "utf-8",
-    )
+    const promptTs = await fs.readFile(path.join(__dirname, "../../src/session/prompt.ts"), "utf-8")
     const declIdx = promptTs.indexOf("function normalizeAgentName")
     expect(declIdx).toBeGreaterThan(-1)
     const body = promptTs.slice(declIdx, declIdx + 1200)
@@ -401,10 +379,7 @@ describe("sessionAgentName fix safety", () => {
     //   - strips control chars
     //   - NFKC-normalizes
     //   - caps length
-    const promptTs = await fs.readFile(
-      path.join(__dirname, "../../src/session/prompt.ts"),
-      "utf-8",
-    )
+    const promptTs = await fs.readFile(path.join(__dirname, "../../src/session/prompt.ts"), "utf-8")
     const declIdx = promptTs.indexOf("function normalizeAgentName")
     const body = promptTs.slice(declIdx, declIdx + 1200)
     expect(body).toMatch(/\[\\x00-\\x1f/) // C0 strip
@@ -419,27 +394,18 @@ describe("sessionAgentName fix safety", () => {
 
 describe("revision cap", () => {
   test("cap is enforced at exactly 5 revisions", async () => {
-    const promptTs = await fs.readFile(
-      path.join(__dirname, "../../src/session/prompt.ts"),
-      "utf-8",
-    )
+    const promptTs = await fs.readFile(path.join(__dirname, "../../src/session/prompt.ts"), "utf-8")
     expect(promptTs).toMatch(/planRevisionCount\s*>=\s*5/)
   })
 
   test("cap_reached triggers synthetic message to LLM", async () => {
-    const promptTs = await fs.readFile(
-      path.join(__dirname, "../../src/session/prompt.ts"),
-      "utf-8",
-    )
+    const promptTs = await fs.readFile(path.join(__dirname, "../../src/session/prompt.ts"), "utf-8")
     expect(promptTs).toContain("maximum revision limit")
     expect(promptTs).toContain("cap_reached")
   })
 
   test("cap_reached telemetry is emitted", async () => {
-    const promptTs = await fs.readFile(
-      path.join(__dirname, "../../src/session/prompt.ts"),
-      "utf-8",
-    )
+    const promptTs = await fs.readFile(path.join(__dirname, "../../src/session/prompt.ts"), "utf-8")
     // cap_reached should be in a Telemetry.track call
     const capIdx = promptTs.indexOf('"cap_reached"')
     expect(capIdx).toBeGreaterThan(-1)
@@ -448,10 +414,7 @@ describe("revision cap", () => {
   })
 
   test("synthetic message does not persist to database", async () => {
-    const promptTs = await fs.readFile(
-      path.join(__dirname, "../../src/session/prompt.ts"),
-      "utf-8",
-    )
+    const promptTs = await fs.readFile(path.join(__dirname, "../../src/session/prompt.ts"), "utf-8")
     // The comment should clarify it's local-only
     expect(promptTs).toMatch(/does not persist|local.*copy/i)
   })
@@ -463,10 +426,7 @@ describe("revision cap", () => {
 
 describe("telemetry type: plan_revision", () => {
   test("plan_revision action type includes cap_reached", async () => {
-    const telemetryTs = await fs.readFile(
-      path.join(__dirname, "../../src/altimate/telemetry/index.ts"),
-      "utf-8",
-    )
+    const telemetryTs = await fs.readFile(path.join(__dirname, "../../src/altimate/telemetry/index.ts"), "utf-8")
     expect(telemetryTs).toContain("cap_reached")
     expect(telemetryTs).toContain("plan_revision")
   })
@@ -478,10 +438,7 @@ describe("telemetry type: plan_revision", () => {
 
 describe("plan prompt safety", () => {
   test("plan.txt adds instructions without removing existing content", async () => {
-    const planTxt = await fs.readFile(
-      path.join(__dirname, "../../src/session/prompt/plan.txt"),
-      "utf-8",
-    )
+    const planTxt = await fs.readFile(path.join(__dirname, "../../src/session/prompt/plan.txt"), "utf-8")
     // Must have the two-step approach
     expect(planTxt).toMatch(/two-?step/i)
     expect(planTxt).toMatch(/outline|bullet/i)
@@ -497,19 +454,13 @@ describe("plan prompt safety", () => {
     // alone. The prompt must explicitly require a read-only tool call before any
     // plan content. If this contract is removed, the plan-no-tool warning in
     // processor.ts fires more often and plan quality degrades silently.
-    const planTxt = await fs.readFile(
-      path.join(__dirname, "../../src/session/prompt/plan.txt"),
-      "utf-8",
-    )
+    const planTxt = await fs.readFile(path.join(__dirname, "../../src/session/prompt/plan.txt"), "utf-8")
     expect(planTxt).toMatch(/investigate before drafting|before you write any plan/i)
     expect(planTxt).toMatch(/read|grep|glob|explore/i)
   })
 
   test("plan.txt does not contain debug or TODO markers", async () => {
-    const planTxt = await fs.readFile(
-      path.join(__dirname, "../../src/session/prompt/plan.txt"),
-      "utf-8",
-    )
+    const planTxt = await fs.readFile(path.join(__dirname, "../../src/session/prompt/plan.txt"), "utf-8")
     expect(planTxt).not.toMatch(/TODO|FIXME|HACK|XXX|console\.log/i)
   })
 
@@ -524,10 +475,7 @@ describe("plan prompt safety", () => {
   // (file/resource expansions around prompt.ts:1729/1751/1801) mark user-derived
   // content as synthetic. See PR #888 review thread.
   test("loop hoists ONLY parts returned by insertReminders, never scans for `synthetic`", async () => {
-    const promptTs = await fs.readFile(
-      path.join(__dirname, "../../src/session/prompt.ts"),
-      "utf-8",
-    )
+    const promptTs = await fs.readFile(path.join(__dirname, "../../src/session/prompt.ts"), "utf-8")
     // Must consume the trusted-parts contract.
     expect(promptTs).toMatch(/reminderResult\.trustedReminderParts/)
     // The hoist must NOT have been re-implemented as a scan over `part.synthetic`,
@@ -535,14 +483,13 @@ describe("plan prompt safety", () => {
     expect(promptTs).not.toMatch(/hoistSyntheticReminders/)
   })
 
-  test("insertReminders return shape includes trustedReminderParts", async () => {
-    const promptTs = await fs.readFile(
-      path.join(__dirname, "../../src/session/prompt.ts"),
-      "utf-8",
-    )
-    expect(promptTs).toMatch(
-      /async function insertReminders\([\s\S]*?\): Promise<InsertRemindersResult>/,
-    )
+  // Source-structure guard: the InsertRemindersResult type alias and the
+  // function's return-type annotation must keep the `trustedReminderParts`
+  // contract. The runtime behaviour of that contract is exercised in the
+  // "trust boundary (behavioral)" describe block below.
+  test("InsertRemindersResult type alias and insertReminders return annotation declare trustedReminderParts", async () => {
+    const promptTs = await fs.readFile(path.join(__dirname, "../../src/session/prompt.ts"), "utf-8")
+    expect(promptTs).toMatch(/async function insertReminders\([\s\S]*?\): Promise<InsertRemindersResult>/)
     expect(promptTs).toMatch(
       /type InsertRemindersResult = \{ messages: MessageV2\.WithParts\[\]; trustedReminderParts: MessageV2\.TextPart\[\] \}/,
     )
@@ -554,10 +501,7 @@ describe("plan prompt safety", () => {
   // `toModelMessages` (which gates on `!part.ignored`), and re-trigger the GPT-5.x
   // refusal class this PR was meant to fix.
   test("insertReminders bakes `ignored: true` into trusted reminders for non-Anthropic models", async () => {
-    const promptTs = await fs.readFile(
-      path.join(__dirname, "../../src/session/prompt.ts"),
-      "utf-8",
-    )
+    const promptTs = await fs.readFile(path.join(__dirname, "../../src/session/prompt.ts"), "utf-8")
     // The function must take `model` so it can compute the hoist decision once.
     expect(promptTs).toMatch(/async function insertReminders\(input:\s*\{[\s\S]*?model: Provider\.Model/)
     // The `nonAnthropic` decision must drive an `ignored: true` annotation on
@@ -577,14 +521,8 @@ describe("plan prompt safety", () => {
   // `family === "anthropic"` match would silently fall through to PROMPT_CODEX
   // on any altimate-backend gateway path exposing a Claude/Gemini model.
   test("family routing uses the shared familyVendor helper, not exact-match literals", async () => {
-    const systemTs = await fs.readFile(
-      path.join(__dirname, "../../src/session/system.ts"),
-      "utf-8",
-    )
-    const promptTs = await fs.readFile(
-      path.join(__dirname, "../../src/session/prompt.ts"),
-      "utf-8",
-    )
+    const systemTs = await fs.readFile(path.join(__dirname, "../../src/session/system.ts"), "utf-8")
+    const promptTs = await fs.readFile(path.join(__dirname, "../../src/session/prompt.ts"), "utf-8")
     expect(systemTs).toMatch(/familyVendor\(model\.family\)/)
     expect(promptTs).toMatch(/familyVendor\(model\.family\)/)
     // Exact-match `family === "anthropic"` shape must not reappear in the
@@ -602,15 +540,29 @@ describe("plan prompt safety", () => {
 
 describe("trust boundary (behavioral)", () => {
   const planAgent = { name: "plan" } as any
-  const dummySession = {} as any // unused in the default (non-experimental) path
+  // Structurally valid session (not `{} as any`): the experimental plan-mode
+  // branch calls `Session.plan(session)`, which reads `session.slug` and
+  // `session.time.created`. Providing a real shape means a future flag flip
+  // surfaces as a clear assertion failure (below), not an opaque TypeError.
+  const validSession = { slug: "test-session", time: { created: 0 } } as any
+  const gptGatewayModel = makeModel({ apiId: "altimate-default", providerID: "altimate-backend", family: "openai" })
+
+  // Precondition: these tests exercise the DEFAULT (non-experimental) plan-mode
+  // path. If OPENCODE_EXPERIMENTAL_PLAN_MODE ever defaults true, the injected
+  // reminder text and code path change — fail loudly here rather than letting
+  // the assertions below break in confusing ways. (Experimental-path coverage
+  // is tracked separately in #890.)
+  test("precondition: experimental plan mode is OFF for this suite", () => {
+    expect(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE).toBe(false)
+  })
 
   test("a malicious <system-reminder> user/file part is NEVER promoted to trustedReminderParts", async () => {
     const messages = userMessageWithMaliciousPart()
     const result = await SessionPrompt.insertReminders({
       messages,
       agent: planAgent,
-      session: dummySession,
-      model: makeModel({ apiId: "altimate-default", providerID: "altimate-backend", family: "openai" }),
+      session: validSession,
+      model: gptGatewayModel,
     })
     // The plan reminder altimate-code injects IS trusted...
     expect(result.trustedReminderParts.length).toBe(1)
@@ -627,15 +579,13 @@ describe("trust boundary (behavioral)", () => {
     const result = await SessionPrompt.insertReminders({
       messages: userMessageWithMaliciousPart(),
       agent: planAgent,
-      session: dummySession,
-      model: makeModel({ apiId: "altimate-default", providerID: "altimate-backend", family: "openai" }),
+      session: validSession,
+      model: gptGatewayModel,
     })
     expect(result.trustedReminderParts[0].ignored).toBe(true)
     // The hoist the loop performs: only the trusted parts' text, and only for
     // non-Anthropic models.
-    const hoisted = SessionPrompt.isAnthropicLikeModel(
-      makeModel({ apiId: "altimate-default", providerID: "altimate-backend", family: "openai" }),
-    )
+    const hoisted = SessionPrompt.isAnthropicLikeModel(gptGatewayModel)
       ? []
       : result.trustedReminderParts.map((p) => p.text)
     expect(hoisted).toHaveLength(1)
@@ -647,7 +597,7 @@ describe("trust boundary (behavioral)", () => {
     const result = await SessionPrompt.insertReminders({
       messages: userMessageWithMaliciousPart(),
       agent: planAgent,
-      session: dummySession,
+      session: validSession,
       model,
     })
     expect(result.trustedReminderParts.length).toBe(1)
@@ -655,15 +605,44 @@ describe("trust boundary (behavioral)", () => {
     const hoisted = SessionPrompt.isAnthropicLikeModel(model) ? [] : result.trustedReminderParts.map((p) => p.text)
     expect(hoisted).toHaveLength(0)
   })
+
+  // End-to-end SINK test. The tests above prove the intermediate state
+  // (trustedReminderParts). This one drives the result through the actual
+  // model-input sinks the loop uses — the `system` array (built from the
+  // hoisted reminder text) and `MessageV2.toModelMessages` (which drops
+  // `ignored` parts from the user role) — and asserts attacker text never
+  // reaches `system`, and the hoisted reminder is not duplicated into the
+  // user role. A refactor that keeps trustedReminderParts correct but
+  // regresses a sink fails here. (Raised in the v0.8.3 multi-model review.)
+  test("end-to-end: attacker text never reaches the model `system` array, reminder not duplicated in user role", async () => {
+    const model = gptGatewayModel
+    const result = await SessionPrompt.insertReminders({
+      messages: userMessageWithMaliciousPart(),
+      agent: planAgent,
+      session: validSession,
+      model,
+    })
+
+    // Sink 1 — the system array (loop() spreads hoistedReminders into it).
+    const system = SessionPrompt.isAnthropicLikeModel(model) ? [] : result.trustedReminderParts.map((p) => p.text)
+    expect(system.join("\n")).not.toContain("ATTACKER")
+    expect(system.join("\n")).toContain("Plan Mode - System Reminder")
+
+    // Sink 2 — the user-role payload. toModelMessages drops ignored parts, so
+    // the hoisted reminder must NOT also appear in the user role (no duplicate
+    // delivery). The attacker's own text legitimately remains in the user role
+    // — it was never hoisted, which is the correct, safe outcome.
+    const modelMessages = await MessageV2.toModelMessages(result.messages, model)
+    const serialized = JSON.stringify(modelMessages)
+    expect(serialized).not.toContain("Plan Mode - System Reminder")
+  })
 })
 
 describe("isAnthropicLikeModel classification (behavioral)", () => {
   test("direct anthropic provider and claude api.id classify as Anthropic-like", () => {
     expect(SessionPrompt.isAnthropicLikeModel(makeModel({ apiId: "x", providerID: "anthropic" }))).toBe(true)
     expect(SessionPrompt.isAnthropicLikeModel(makeModel({ apiId: "claude-3-7-sonnet" }))).toBe(true)
-    expect(
-      SessionPrompt.isAnthropicLikeModel(makeModel({ apiId: "x", npm: "@ai-sdk/anthropic" })),
-    ).toBe(true)
+    expect(SessionPrompt.isAnthropicLikeModel(makeModel({ apiId: "x", npm: "@ai-sdk/anthropic" }))).toBe(true)
   })
 
   test("the altimate-default gateway (family openai) is NOT Anthropic-like — so its reminders get hoisted", () => {
@@ -733,10 +712,7 @@ describe("phrase classification adversarial", () => {
 
 describe("suggestion import safety", () => {
   test("post-connect-suggestions module is self-contained", async () => {
-    const pcs = await fs.readFile(
-      path.join(__dirname, "../../src/altimate/tools/post-connect-suggestions.ts"),
-      "utf-8",
-    )
+    const pcs = await fs.readFile(path.join(__dirname, "../../src/altimate/tools/post-connect-suggestions.ts"), "utf-8")
     // Should only import from telemetry (lightweight)
     const imports = pcs.match(/^import .+/gm) || []
     expect(imports.length).toBeLessThanOrEqual(2)

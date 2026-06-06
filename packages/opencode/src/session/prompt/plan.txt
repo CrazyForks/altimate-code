@@ -20,7 +20,7 @@ Ask the user clarifying questions or ask for their opinion when weighing tradeof
 
 ---
 
-// altimate_change start — mandatory exploration before drafting (+ trivial-task escape hatch)
+// altimate_change start — mandatory exploration before drafting
 ## Investigate before drafting (REQUIRED)
 
 Before you write any plan content — outline OR full plan — you MUST call at least one read-only investigation tool against the actual codebase. Acceptable first moves:

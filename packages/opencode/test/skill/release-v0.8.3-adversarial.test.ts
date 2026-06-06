@@ -25,6 +25,7 @@ import { describe, test, expect } from "bun:test"
 import { SessionPrompt } from "../../src/session/prompt"
 import { SystemPrompt } from "../../src/session/system"
 import { familyVendor } from "../../src/provider/family"
+import { Flag } from "../../src/flag/flag"
 import type { Provider } from "../../src/provider/provider"
 
 function makeModel(overrides: { apiId?: string; family?: string; providerID?: string; npm?: string }): Provider.Model {
@@ -67,13 +68,21 @@ function textPart(id: string, text: string, extra: Record<string, unknown> = {})
 
 const planAgent = { name: "plan" } as any
 const builderAgent = { name: "builder" } as any
-const dummySession = {} as any // unused in the default (non-experimental) path
+// Structurally valid session (not `{} as any`) so a future OPENCODE_EXPERIMENTAL_PLAN_MODE
+// flip surfaces as a clear failure rather than an opaque TypeError in Session.plan.
+const dummySession = { slug: "test-session", time: { created: 0 } } as any
 const gptModel = makeModel({ apiId: "altimate-default", providerID: "altimate-backend", family: "openai" })
 
 // ---------------------------------------------------------------------------
 // 1. Trust boundary — attacker content must NEVER reach trustedReminderParts
 // ---------------------------------------------------------------------------
 describe("v0.8.3 — insertReminders trust boundary (injection)", () => {
+  // These exercise the default (non-experimental) plan-mode path. Fail loudly
+  // if the flag default ever flips (experimental path + reminder text differ).
+  test("precondition: experimental plan mode is OFF for this suite", () => {
+    expect(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE).toBe(false)
+  })
+
   test("a synthetic <system-reminder> user part is not promoted (single)", async () => {
     const messages = [userMessage([textPart("p1", "do a plan"), textPart("p2", ATTACK, { synthetic: true })])]
     const r = await SessionPrompt.insertReminders({
@@ -326,20 +335,26 @@ describe("v0.8.3 — altimate-backend routing never hits the refusal fallback", 
 // ---------------------------------------------------------------------------
 // 7. Source guards for the Step-5 wording fixes shipped with this release
 // ---------------------------------------------------------------------------
+// These guard the CONCEPT of each wording fix, not the exact phrasing, so a
+// legitimate copy improvement (e.g. "more detail" → "more context", or
+// "well-specified" → "targeted") does not break the test. The load-bearing
+// assertions are the negatives: the blaming phrasing must NOT come back.
 describe("v0.8.3 — wording fixes", () => {
-  test("plan.txt escape hatch covers the single-well-specified-edit case", async () => {
+  test("plan.txt escape hatch covers an already-read / fully-specified file, mandate still present", async () => {
     const planTxt = await Bun.file(new URL("../../src/session/prompt/plan.txt", import.meta.url).pathname).text()
-    expect(planTxt).toMatch(/single well-specified edit/i)
+    // Concept: the trivial-task escape hatch references a file already read this session.
+    expect(planTxt).toMatch(/already read/i)
     // The mandate itself must still be present.
     expect(planTxt).toMatch(/investigate before drafting/i)
   })
 
   test("plan-no-tool warning no longer asserts user fault and de-prioritizes /model", async () => {
     const processorTs = await Bun.file(new URL("../../src/session/processor.ts", import.meta.url).pathname).text()
-    // The blaming "too thin to act on" phrasing is gone.
+    // Load-bearing: the blaming "too thin to act on" phrasing must NOT return.
     expect(processorTs).not.toMatch(/too thin to act on/)
-    expect(processorTs).toMatch(/the request may need more detail/)
-    // /model is framed as the last resort ("if it keeps refusing").
-    expect(processorTs).toMatch(/if it keeps refusing/)
+    // Concept (synonym-tolerant): the request-side cause is framed as needing more input, not user fault.
+    expect(processorTs).toMatch(/may need more (detail|context|information)/i)
+    // Concept: /model is offered conditionally, as a last resort, not co-equal.
+    expect(processorTs).toMatch(/if it keeps refusing|last resort|as a last/i)
   })
 })
