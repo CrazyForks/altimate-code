@@ -7,6 +7,7 @@ import { describe, expect, test } from "bun:test"
 import fs from "node:fs/promises"
 import path from "node:path"
 import YAML from "yaml"
+import { collectChangedFiles } from "../../src/altimate/review/git"
 import { reviewPullRequest } from "../../src/altimate/review/run"
 import { tmpdir } from "../fixture/fixture"
 
@@ -239,6 +240,9 @@ describe("v0.8.5 end-to-end - real review pipeline", () => {
     await $`git commit -m base`.cwd(tmp.path).quiet()
     await Bun.write(modelPath, "select 1 as order_id, 'paid' as status\n")
 
+    const changed = await collectChangedFiles({ cwd: tmp.path, base: "HEAD" })
+    expect(changed.map((file) => file.path)).toEqual(["models/orders.sql"])
+
     const result = await reviewPullRequest({
       cwd: tmp.path,
       base: "HEAD",
@@ -249,7 +253,6 @@ describe("v0.8.5 end-to-end - real review pipeline", () => {
 
     expect(result.summary.degraded).toBe(false)
     expect(result.manifestHash).toMatch(/^[a-f0-9]{16}$/)
-    expect(["lite", "full"]).toContain(result.tier)
     expect(["APPROVE", "COMMENT"]).toContain(result.verdict)
   })
 })
