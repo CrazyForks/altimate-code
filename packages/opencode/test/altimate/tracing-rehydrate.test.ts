@@ -61,7 +61,7 @@ describe("Trace.rehydrateFromFile + cache-miss rehydration", () => {
     // Trace instance for the SAME sessionID. This is the path that, pre-fix,
     // would have called startTrace and clobbered the file.
     const reconstructed = makeTrace(tmp.path)
-    const didRehydrate = reconstructed.rehydrateFromFile(sessionId)
+    const didRehydrate = await reconstructed.rehydrateFromFile(sessionId)
 
     expect(didRehydrate).toBe(true)
 
@@ -91,7 +91,7 @@ describe("Trace.rehydrateFromFile + cache-miss rehydration", () => {
   test("rehydrate returns false when no on-disk trace exists (fresh session)", async () => {
     await using tmp = await tmpdir()
     const trace = makeTrace(tmp.path)
-    const result = trace.rehydrateFromFile("ses_does_not_exist")
+    const result = await trace.rehydrateFromFile("ses_does_not_exist")
     expect(result).toBe(false)
   })
 
@@ -110,7 +110,7 @@ describe("Trace.rehydrateFromFile + cache-miss rehydration", () => {
     expect(typeof originalTraceId).toBe("string")
 
     const reconstructed = makeTrace(tmp.path)
-    expect(reconstructed.rehydrateFromFile(sessionId)).toBe(true)
+    expect(await reconstructed.rehydrateFromFile(sessionId)).toBe(true)
     reconstructed.logToolCall({ tool: "grep", state: { status: "completed", input: { p: "x" } } } as any)
     await reconstructed.flush()
     const afterFile = await readTraceFile(tmp.path, sessionId)
@@ -153,7 +153,7 @@ describe("Trace.rehydrateFromFile + cache-miss rehydration", () => {
     const trace = makeTrace(tmp.path)
     // Pass the RAW sessionId (with slashes/dots/colons). Pre-fix this would have
     // returned false because "ses_with/slash.and:colon" !== "ses_with_slash_and_colon".
-    expect(trace.rehydrateFromFile(sessionId)).toBe(true)
+    expect(await trace.rehydrateFromFile(sessionId)).toBe(true)
   })
 
   test("rehydrate returns false when on-disk trace is for a different session", async () => {
@@ -181,7 +181,7 @@ describe("Trace.rehydrateFromFile + cache-miss rehydration", () => {
       }),
     )
     const trace = makeTrace(tmp.path)
-    const result = trace.rehydrateFromFile("ses_target")
+    const result = await trace.rehydrateFromFile("ses_target")
     expect(result).toBe(false)
   })
 
@@ -237,7 +237,7 @@ describe("Trace.rehydrateFromFile + cache-miss rehydration", () => {
     expect(openGen?.endTime).toBeUndefined()
 
     const reconstructed = makeTrace(tmp.path)
-    expect(reconstructed.rehydrateFromFile(sessionId)).toBe(true)
+    expect(await reconstructed.rehydrateFromFile(sessionId)).toBe(true)
     // Trigger a snapshot so the rehydrated state lands on disk.
     reconstructed.logToolCall({ tool: "read", state: { status: "completed", input: { f: "a" } } } as any)
     await reconstructed.flush()
@@ -262,7 +262,7 @@ describe("Trace.rehydrateFromFile + cache-miss rehydration", () => {
     expect(endedRoot?.endTime).toBeDefined()
 
     const reconstructed = makeTrace(tmp.path)
-    const ok = reconstructed.rehydrateFromFile(sessionId)
+    const ok = await reconstructed.rehydrateFromFile(sessionId)
     expect(ok).toBe(true)
 
     // Trigger a snapshot via a real span push so the disk file gets re-written.

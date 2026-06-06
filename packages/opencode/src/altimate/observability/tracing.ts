@@ -506,13 +506,19 @@ export class Trace {
   //
   // Does NOT call snapshot — the file is already correct on disk; an
   // unnecessary write here would compete with concurrent flushSync paths.
-  rehydrateFromFile(sessionId: string): boolean {
+  //
+  // Async: read the file off the event-loop hot path so a worker-restart
+  // cache miss with a large existing trace doesn't head-of-line-block all
+  // session events. The actual hot path was bounded (cache-miss only) but
+  // the sync `readFileSync` could still pause the worker noticeably for a
+  // multi-MB trace.
+  async rehydrateFromFile(sessionId: string): Promise<boolean> {
     if (!this.snapshotDir) return false
     const safeId = sessionId.replace(/[/\\.:]/g, "_") || "unknown"
     const filePath = path.join(this.snapshotDir, `${safeId}.json`)
     let raw: string
     try {
-      raw = fsSync.readFileSync(filePath, "utf-8")
+      raw = await fs.readFile(filePath, "utf-8")
     } catch {
       return false
     }

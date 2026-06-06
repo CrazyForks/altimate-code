@@ -98,8 +98,11 @@ describe("trace-clearing-on-workspace-set regression", () => {
   // the next snapshot clobbers the rich file.
   test("getOrCreateTrace prefers rehydrateFromFile over startTrace on cache miss", async () => {
     const workerSrc = await fs.readFile(path.join(ROOT, "src/cli/cmd/tui/worker.ts"), "utf-8")
+    // `rehydrateFromFile` is async (off-loads disk I/O from the event-stream
+    // hot path per cubic P2 review on tracing.ts:515) so the call must be
+    // awaited inside getOrCreateTrace.
     expect(workerSrc).toMatch(
-      /if \(!trace\.rehydrateFromFile\(sessionID\)\)\s*\{\s*\n\s*trace\.startTrace\(sessionID, \{\}\)\s*\n\s*\}/,
+      /if \(!\(await trace\.rehydrateFromFile\(sessionID\)\)\)\s*\{\s*\n\s*trace\.startTrace\(sessionID, \{\}\)\s*\n\s*\}/,
     )
   })
 

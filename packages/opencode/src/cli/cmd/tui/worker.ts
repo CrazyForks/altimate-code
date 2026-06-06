@@ -80,7 +80,7 @@ async function loadTracingConfig() {
 // altimate_change end
 
 // altimate_change start — trace: get or create per-session trace
-function getOrCreateTrace(sessionID: string): Trace | null {
+async function getOrCreateTrace(sessionID: string): Promise<Trace | null> {
   if (!sessionID || !tracingEnabled) return null
   if (sessionTraces.has(sessionID)) return sessionTraces.get(sessionID)!
   try {
@@ -101,7 +101,8 @@ function getOrCreateTrace(sessionID: string): Trace | null {
     // push a fresh root span into empty `this.spans` and the immediate
     // snapshot would clobber the rich on-disk file. Defense in depth in
     // addition to keeping the cache alive across turns.
-    if (!trace.rehydrateFromFile(sessionID)) {
+    // Async to keep the event-stream loop unblocked on large existing traces.
+    if (!(await trace.rehydrateFromFile(sessionID))) {
       trace.startTrace(sessionID, {})
     }
     // altimate_change end
@@ -179,7 +180,9 @@ const startEventStream = (input: { directory: string; workspaceID?: string }) =>
             }
             if (resolvedSessionID) {
               // Create trace eagerly on user message (arrives before part events)
-              const trace = sessionTraces.get(resolvedSessionID) ?? (info.role === "user" ? getOrCreateTrace(resolvedSessionID) : null)
+              const trace =
+                sessionTraces.get(resolvedSessionID) ??
+                (info.role === "user" ? await getOrCreateTrace(resolvedSessionID) : null)
               if (info.role === "user") {
                 if (info.id) {
                   if (!sessionUserMsgIds.has(resolvedSessionID)) sessionUserMsgIds.set(resolvedSessionID, new Set())
@@ -191,7 +194,7 @@ const startEventStream = (input: { directory: string; workspaceID?: string }) =>
                 }
               }
               if (info.role === "assistant") {
-                const r = trace ?? getOrCreateTrace(resolvedSessionID)
+                const r = trace ?? (await getOrCreateTrace(resolvedSessionID))
                 r?.enrichFromAssistant({
                   modelID: info.modelID,
                   providerID: info.providerID,
@@ -207,7 +210,7 @@ const startEventStream = (input: { directory: string; workspaceID?: string }) =>
             const part = (event as any).properties?.part
             if (part) {
               // Create trace on first event for this session (lazy creation)
-              const trace = sessionTraces.get(part.sessionID) ?? getOrCreateTrace(part.sessionID)
+              const trace = sessionTraces.get(part.sessionID) ?? (await getOrCreateTrace(part.sessionID))
               if (trace) {
                 if (part.type === "step-start") trace.logStepStart(part)
                 if (part.type === "step-finish") trace.logStepFinish(part)
