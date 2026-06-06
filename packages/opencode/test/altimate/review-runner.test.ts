@@ -1,20 +1,13 @@
-import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
-import os from "node:os"
+import { describe, expect, test } from "bun:test"
+import { writeFileSync } from "node:fs"
 import path from "node:path"
 import { createDispatcherRunner } from "../../src/altimate/review/runner"
-
-const tempDirs: string[] = []
-
-afterEach(() => {
-  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true })
-})
+import { tmpdir } from "../fixture/fixture"
 
 describe("review manifest loading", () => {
   test("loads a valid manifest without initializing the native dispatcher", async () => {
-    const dir = mkdtempSync(path.join(os.tmpdir(), "altimate-review-manifest-"))
-    tempDirs.push(dir)
-    const manifestPath = path.join(dir, "manifest.json")
+    await using tmp = await tmpdir()
+    const manifestPath = path.join(tmp.path, "manifest.json")
     writeFileSync(
       manifestPath,
       JSON.stringify({
