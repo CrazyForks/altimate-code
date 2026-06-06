@@ -64,7 +64,11 @@ runs:
         if [[ "${ACTION_REF:-}" =~ ^v?([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
           VERSION="${BASH_REMATCH[1]}"
         else
-          VERSION=$(curl -sf https://api.github.com/repos/AltimateAI/altimate-code/releases/latest | grep -o '"tag_name": *"[^"]*"' | cut -d'"' -f4 || true)
+          VERSION=$(
+            curl -sf --connect-timeout 5 --max-time 15 \
+              https://api.github.com/repos/AltimateAI/altimate-code/releases/latest \
+              | grep -o '"tag_name": *"[^"]*"' | cut -d'"' -f4 || true
+          )
           VERSION="${VERSION#v}" # the installer's --version expects no leading 'v'
         fi
         echo "version=${VERSION:-latest}" >> $GITHUB_OUTPUT

@@ -79,6 +79,34 @@ describe("v0.8.5 adversarial - composite action", () => {
     expect(await fs.stat(curlMarker).then(() => true).catch(() => false)).toBe(false)
   })
 
+  test("the non-semver action ref fallback bounds the release lookup", async () => {
+    await using tmp = await tmpdir()
+    const bin = path.join(tmp.path, "bin")
+    const output = path.join(tmp.path, "github-output")
+    const argsPath = path.join(tmp.path, "curl-args")
+    await fs.mkdir(bin)
+    await Bun.write(
+      path.join(bin, "curl"),
+      `#!/usr/bin/env bash\nprintf '%s\\0' "$@" > "$CURL_ARGS"\nprintf '{"tag_name":"v0.8.5"}\\n'\n`,
+    )
+    await fs.chmod(path.join(bin, "curl"), 0o755)
+
+    const result = await runBash(await actionScript("Get altimate-code version"), {
+      ACTION_REF: "main",
+      CURL_ARGS: argsPath,
+      GITHUB_OUTPUT: output,
+      PATH: `${bin}:${process.env.PATH}`,
+    })
+
+    expect(result.exitCode, result.stderr).toBe(0)
+    expect(await fs.readFile(output, "utf8")).toBe("version=0.8.5\n")
+    const curlArgs = (await fs.readFile(argsPath, "utf8")).split("\0").filter(Boolean)
+    expect(curlArgs).toContain("--connect-timeout")
+    expect(curlArgs).toContain("5")
+    expect(curlArgs).toContain("--max-time")
+    expect(curlArgs).toContain("15")
+  })
+
   test("hostile refs and paths are forwarded as data, never evaluated by bash", async () => {
     await using tmp = await tmpdir()
     const bin = path.join(tmp.path, "bin")
