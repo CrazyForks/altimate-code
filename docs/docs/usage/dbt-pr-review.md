@@ -1,13 +1,11 @@
 # dbt PR Review
 
 [**See live review PRs**](https://github.com/AltimateAI/dbt-pr-review-demo/pulls)
-·
-[**Install the GitHub App**](https://github.com/apps/altimate-code-agent/installations/new)
 
 The public demo is a zero-secret DuckDB project with open PRs for broken joins,
 removed tests, PII exposure, `SELECT *`, unsafe incremental models, and a safe
-refactor. The GitHub App handles interactive repository tasks; the automatic
-review on every pull request is installed with the Action below.
+refactor. The automatic review on every pull request is installed with the
+Action below.
 
 AI code review specialized for dbt/SQL. `dbt-pr-review` produces a single,
 **signed** verdict on a pull request — `APPROVE`, `COMMENT`, or `REQUEST_CHANGES`

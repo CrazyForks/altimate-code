@@ -56,12 +56,11 @@ Run the following command in the terminal from your GitHub repo:
 altimate-code github install
 ```
 
-This will walk you through installing the GitHub app, creating the workflow, and setting up secrets.
+This will walk you through installing the GitHub app, creating the workflow, and setting up secrets. The GitHub App install URL is deployment-specific; set `ALTIMATE_CODE_GITHUB_APP_INSTALL_URL` before running this command.
 
 ### Manual Setup
 
-1. [Install the GitHub app](https://github.com/apps/altimate-code-agent/installations/new) and select the target repository.
-2. Add the following workflow file to `.github/workflows/altimate-code.yml` in your repo. Set the appropriate `model` and required API keys in `env`.
+1. Add the following workflow file to `.github/workflows/altimate-code.yml` in your repo. Set the appropriate `model` and required API keys in `env`.
 
    ```yml
    name: altimate-code
@@ -97,7 +96,7 @@ This will walk you through installing the GitHub app, creating the workflow, and
              use_github_token: true
    ```
 
-3. Store the API keys in secrets. In your organization or project **settings**, expand **Secrets and variables** on the left and select **Actions**. Add the required API keys.
+2. Store the API keys in secrets. In your organization or project **settings**, expand **Secrets and variables** on the left and select **Actions**. Add the required API keys.
 
 ## Support
 

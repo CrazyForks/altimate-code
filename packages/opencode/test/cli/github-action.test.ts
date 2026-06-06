@@ -3,8 +3,8 @@ import { extractResponseText, formatPromptTooLargeError, GITHUB_APP_INSTALL_URL 
 import type { MessageV2 } from "../../src/session/message-v2"
 import { SessionID, MessageID, PartID } from "../../src/session/schema"
 
-test("GitHub App install URL opens the repository-selection flow", () => {
-  expect(GITHUB_APP_INSTALL_URL).toBe("https://github.com/apps/altimate-code-agent/installations/new")
+test("GitHub App install URL is not hardcoded to a public slug", () => {
+  expect(GITHUB_APP_INSTALL_URL).toBe("")
 })
 
 // Helper to create minimal valid parts

@@ -141,7 +141,7 @@ type IssueQueryResponse = {
 const AGENT_USERNAME = "altimate-code-agent[bot]"
 const AGENT_REACTION = "eyes"
 const WORKFLOW_FILE = ".github/workflows/altimate-code.yml"
-export const GITHUB_APP_INSTALL_URL = "https://github.com/apps/altimate-code-agent/installations/new"
+export const GITHUB_APP_INSTALL_URL = process.env.ALTIMATE_CODE_GITHUB_APP_INSTALL_URL ?? ""
 // altimate_change end
 
 // Event categories for routing
@@ -335,6 +335,12 @@ export const GithubInstallCommand = cmd({
             // Open browser
             // altimate_change start — upstream_fix: GitHub App slug is altimate-code-agent
             const url = GITHUB_APP_INSTALL_URL
+            if (!url) {
+              s.stop(
+                "GitHub app installation URL is not configured. Set ALTIMATE_CODE_GITHUB_APP_INSTALL_URL to your GitHub App install URL.",
+              )
+              throw new UI.CancelledError()
+            }
             // altimate_change end
             const command =
               process.platform === "darwin"
