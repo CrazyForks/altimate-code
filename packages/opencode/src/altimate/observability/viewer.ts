@@ -12,7 +12,7 @@
  * Branded with Altimate Trace colors. Includes share/export features for virality.
  */
 
-import type { TraceFile } from "./tracing"
+import { USER_MESSAGE_INPUT_MAX_CHARS, type TraceFile } from "./tracing"
 
 export function renderTraceViewer(trace: TraceFile, options?: { live?: boolean; apiPath?: string }): string {
   const traceJSON = JSON.stringify(trace).replace(/<\//g, "<\\/")
@@ -1310,13 +1310,48 @@ function showDetail(span) {
 (function() {
   var el = document.getElementById('v-chat');
   var html = '';
-  if (t.metadata.prompt) {
-    html += '<div class="chat-msg user"><div class="chat-role">\\u25B6 You</div>';
-    html += '<div class="chat-bubble">' + e(t.metadata.prompt) + '</div></div>';
-  }
+  // Build a chronologically sorted list of conversation turns by interleaving
+  // user-message spans with generation spans. We render \`metadata.prompt\` at
+  // the top as a fallback whenever it carries a value not already represented
+  // by a user-message span — that covers three cases:
+  //   1. Pre-fix traces with no user-message spans (just the legacy prompt).
+  //   2. Mixed traces: an older session rehydrated with only metadata.prompt,
+  //      then continued under the new code which added user-message spans for
+  //      later turns. Without this, the legacy first turn would be dropped.
+  //   3. Brand-new traces where the first user-message span input equals
+  //      metadata.prompt — we skip the duplicate to avoid double-rendering.
+  var userMsgs = spans.filter(function(s){return s.kind==='user-message';});
   var gens = spans.filter(function(s){return s.kind==='generation';});
-  gens.forEach(function(gen) {
-    var tools = spans.filter(function(s){return s.parentSpanId===gen.spanId && s.kind==='tool';});
+  if (t.metadata.prompt) {
+    // \`logUserMessage\` truncates span input to USER_MESSAGE_INPUT_MAX_CHARS
+    // (see tracing.ts); \`metadata.prompt\` stores the full string. For prompts
+    // longer than the truncation length, strict equality would miss the dedupe
+    // and the same text would render twice. Match against the truncated form as
+    // well. The constant is interpolated at render time so the two sides can't
+    // drift.
+    var USER_MSG_TRUNCATE = ${USER_MESSAGE_INPUT_MAX_CHARS};
+    var promptStr = String(t.metadata.prompt);
+    var promptTruncated = promptStr.slice(0, USER_MSG_TRUNCATE);
+    var promptAlreadyInSpan = userMsgs.some(function(u){
+      return typeof u.input === 'string' && (u.input === promptStr || u.input === promptTruncated);
+    });
+    if (!promptAlreadyInSpan) {
+      html += '<div class="chat-msg user"><div class="chat-role">\\u25B6 You</div>';
+      html += '<div class="chat-bubble">' + e(promptStr) + '</div></div>';
+    }
+  }
+  var turns = userMsgs.concat(gens).sort(function(a, b) { return (a.startTime||0) - (b.startTime||0); });
+  turns.forEach(function(s) {
+    if (s.kind === 'user-message') {
+      var utxt = typeof s.input === 'string' ? s.input : (s.input != null ? JSON.stringify(s.input) : '');
+      if (!utxt) return;
+      html += '<div class="chat-msg user"><div class="chat-role">\\u25B6 You</div>';
+      html += '<div class="chat-bubble">' + e(utxt) + '</div></div>';
+      return;
+    }
+    // Generation: render its tool children first, then the agent response.
+    var gen = s;
+    var tools = spans.filter(function(c){return c.parentSpanId===gen.spanId && c.kind==='tool';});
     if (tools.length) {
       tools.forEach(function(tool) {
         html += '<div class="chat-tool' + (tool.status === 'error' ? ' err' : '') + '">';

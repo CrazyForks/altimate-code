@@ -80,7 +80,7 @@ async function loadTracingConfig() {
 // altimate_change end
 
 // altimate_change start — trace: get or create per-session trace
-function getOrCreateTrace(sessionID: string): Trace | null {
+async function getOrCreateTrace(sessionID: string): Promise<Trace | null> {
   if (!sessionID || !tracingEnabled) return null
   if (sessionTraces.has(sessionID)) return sessionTraces.get(sessionID)!
   try {
@@ -96,7 +96,16 @@ function getOrCreateTrace(sessionID: string): Trace | null {
     const trace = tracingExporters
       ? Trace.withExporters([...tracingExporters], { maxFiles: tracingMaxFiles })
       : Trace.create()
-    trace.startTrace(sessionID, {})
+    // altimate_change start — prefer disk-rehydration on cache miss for an
+    // existing session (worker restart, MAX_TRACES eviction). startTrace would
+    // push a fresh root span into empty `this.spans` and the immediate
+    // snapshot would clobber the rich on-disk file. Defense in depth in
+    // addition to keeping the cache alive across turns.
+    // Async to keep the event-stream loop unblocked on large existing traces.
+    if (!(await trace.rehydrateFromFile(sessionID))) {
+      trace.startTrace(sessionID, {})
+    }
+    // altimate_change end
     Trace.setActive(trace)
     sessionTraces.set(sessionID, trace)
     return trace
@@ -171,7 +180,9 @@ const startEventStream = (input: { directory: string; workspaceID?: string }) =>
             }
             if (resolvedSessionID) {
               // Create trace eagerly on user message (arrives before part events)
-              const trace = sessionTraces.get(resolvedSessionID) ?? (info.role === "user" ? getOrCreateTrace(resolvedSessionID) : null)
+              const trace =
+                sessionTraces.get(resolvedSessionID) ??
+                (info.role === "user" ? await getOrCreateTrace(resolvedSessionID) : null)
               if (info.role === "user") {
                 if (info.id) {
                   if (!sessionUserMsgIds.has(resolvedSessionID)) sessionUserMsgIds.set(resolvedSessionID, new Set())
@@ -183,7 +194,7 @@ const startEventStream = (input: { directory: string; workspaceID?: string }) =>
                 }
               }
               if (info.role === "assistant") {
-                const r = trace ?? getOrCreateTrace(resolvedSessionID)
+                const r = trace ?? (await getOrCreateTrace(resolvedSessionID))
                 r?.enrichFromAssistant({
                   modelID: info.modelID,
                   providerID: info.providerID,
@@ -199,20 +210,54 @@ const startEventStream = (input: { directory: string; workspaceID?: string }) =>
             const part = (event as any).properties?.part
             if (part) {
               // Create trace on first event for this session (lazy creation)
-              const trace = sessionTraces.get(part.sessionID) ?? getOrCreateTrace(part.sessionID)
+              const trace = sessionTraces.get(part.sessionID) ?? (await getOrCreateTrace(part.sessionID))
               if (trace) {
                 if (part.type === "step-start") trace.logStepStart(part)
                 if (part.type === "step-finish") trace.logStepFinish(part)
-                if (part.type === "text" && part.time?.end) {
-                  if (part.messageID && sessionUserMsgIds.get(part.sessionID)?.has(part.messageID)) {
-                    // This is user prompt text — capture as title/prompt
+                // altimate_change start — split the user-vs-assistant text routes.
+                // User text parts arrive without `time.end` set (it's a meaningful
+                // concept only for processing-end of assistant chunks), so the old
+                // `&& part.time?.end` gate dropped the prompt entirely. We trust
+                // `sessionUserMsgIds.has(messageID)` as the user-text signal and
+                // call `setPrompt(text)` only — never `setTitle` — to avoid racing
+                // the auto-generated title from `session.updated` (Path C).
+                if (part.type === "text") {
+                  // altimate_change start — skip synthetic / ignored text parts.
+                  // `Session.createUserMessage` (prompt.ts) attaches many `synthetic: true`
+                  // text parts to the user message — MCP resource banners, decoded file
+                  // contents, retry/reminder text, plan-mode reminders, agent-handoff
+                  // tags. They all share the user's `messageID` so they would otherwise
+                  // pass the `sessionUserMsgIds` check below and override `metadata.prompt`
+                  // with the LAST synthetic blob (typically file content) and render one
+                  // fake "▶ You" bubble per synthetic part in the chat tab. The synthetic
+                  // and ignored flags exist precisely to mark non-authored content; this
+                  // is exactly the place to consult them. We skip silently rather than
+                  // `continue`-ing the event-loop iteration because the outer loop still
+                  // needs to forward the event downstream via `Rpc.emit`.
+                  const isAuthoredText = !part.synthetic && !part.ignored
+                  // altimate_change end
+                  if (
+                    isAuthoredText &&
+                    part.messageID &&
+                    sessionUserMsgIds.get(part.sessionID)?.has(part.messageID)
+                  ) {
                     const text = String(part.text || "")
-                    if (text) trace.setTitle(text.slice(0, 80), text)
-                  } else {
-                    // This is assistant response text
+                    if (text) {
+                      trace.setPrompt(text)
+                      // altimate_change start — record each user message as a span
+                      // so the chat tab can render multi-turn conversations.
+                      // Without a span, the viewer can only display `metadata.prompt`
+                      // (singular) and every subsequent user message is silently
+                      // dropped from the conversation rendering.
+                      trace.logUserMessage(text)
+                      // altimate_change end
+                    }
+                  } else if (isAuthoredText && part.time?.end) {
+                    // Assistant response text (only counts when processing-end fires)
                     trace.logText(part)
                   }
                 }
+                // altimate_change end
                 if (part.type === "tool" && (part.state?.status === "completed" || part.state?.status === "error")) {
                   trace.logToolCall(part)
                 }
@@ -229,19 +274,21 @@ const startEventStream = (input: { directory: string; workspaceID?: string }) =>
               if (trace) trace.setTitle(String(info.title))
             }
           }
-          // Finalize trace when session reaches idle (completed)
-          if (event.type === "session.status") {
-            const sid = (event as any).properties?.sessionID
-            const status = (event as any).properties?.status?.type
-            if (status === "idle" && sid) {
-              const trace = sessionTraces.get(sid)
-              if (trace) {
-                void trace.endTrace().catch(() => {})
-                sessionTraces.delete(sid)
-                sessionUserMsgIds.delete(sid)
-              }
-            }
-          }
+          // altimate_change start — DO NOT finalize the trace on session.status=idle.
+          // `idle` fires after every turn (busy → idle transition), not at session end.
+          // Calling `endTrace` + `sessionTraces.delete` here treats each turn as the
+          // end of the session: the next event for the same session in a later turn
+          // hits a cache miss in getOrCreateTrace, constructs a fresh Trace.create()
+          // with empty `this.spans`, and the immediate `snapshot()` clobbers the
+          // rich on-disk `ses_<id>.json` with a single root-span file. Symptoms:
+          //   - waterfall view collapses to the system-prompt span after every turn
+          //   - "What was asked / No prompt recorded" because metadata.prompt was
+          //     captured on the destroyed instance, never on the replacement
+          // Sessions in altimate-code are long-lived across many turns; the Trace
+          // should live as long as the worker has the session in cache. Finalization
+          // happens on `shutdown` (worker.ts:312) and on MAX_TRACES eviction
+          // (worker.ts:87). No per-turn finalization is correct.
+          // altimate_change end
         } catch {
           // Trace must never interrupt event forwarding
         }
@@ -260,6 +307,16 @@ const startEventStream = (input: { directory: string; workspaceID?: string }) =>
     })
   })
 }
+
+// altimate_change start — track the last workspaceID used to start the event stream
+// so `setWorkspace` becomes idempotent on unchanged values. SolidJS effects in the
+// session route can fire on every `session()` signal change (including agent-finish);
+// without this guard, every fire propagates to `startEventStream` which clears
+// `sessionTraces`, which causes the next snapshot from a freshly-created Trace to
+// overwrite the rich on-disk trace with a near-empty one. Symptom: waterfall view
+// collapses to the system-prompt span after every turn.
+let currentWorkspaceID: string | undefined
+// altimate_change end
 
 startEventStream({ directory: process.cwd() })
 
@@ -306,6 +363,10 @@ export const rpc = {
     await Instance.disposeAll()
   },
   async setWorkspace(input: { workspaceID?: string }) {
+    // altimate_change start — idempotency guard; see currentWorkspaceID comment above
+    if (input.workspaceID === currentWorkspaceID) return
+    currentWorkspaceID = input.workspaceID
+    // altimate_change end
     startEventStream({ directory: process.cwd(), workspaceID: input.workspaceID })
   },
   async shutdown() {

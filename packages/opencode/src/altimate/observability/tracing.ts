@@ -42,7 +42,7 @@ export interface TraceSpan {
   spanId: string
   parentSpanId: string | null
   name: string
-  kind: "session" | "generation" | "tool" | "text" | "span"
+  kind: "session" | "generation" | "tool" | "text" | "span" | "user-message"
   startTime: number
   endTime?: number
   status: "ok" | "error"
@@ -345,6 +345,12 @@ function formatDurationShort(ms: number): string {
 }
 // altimate_change end
 
+// altimate_change start — shared truncation cap for `logUserMessage` span input.
+// Exported so the viewer's chat-tab dedupe can compare against the same boundary
+// (otherwise it'd silently drift if either side changes the magic number).
+export const USER_MESSAGE_INPUT_MAX_CHARS = 4000
+// altimate_change end
+
 export class Trace {
   // Global active trace — set when a session starts, cleared on end.
   private static _active: Trace | null = null
@@ -490,6 +496,109 @@ export class Trace {
     this.snapshot()
   }
 
+  // altimate_change start — rehydrate a Trace from an existing on-disk file.
+  // Used by `getOrCreateTrace` on cache miss for a session whose trace file
+  // already exists (worker restart, MAX_TRACES eviction). Without this, the
+  // fresh Trace.create() + startTrace() path would push a single root span
+  // into an empty `this.spans` and the immediate snapshot would clobber the
+  // rich on-disk trace. Returns true if a usable trace was loaded; false
+  // otherwise (the caller should fall back to startTrace).
+  //
+  // Does NOT call snapshot — the file is already correct on disk; an
+  // unnecessary write here would compete with concurrent flushSync paths.
+  //
+  // Async: read the file off the event-loop hot path so a worker-restart
+  // cache miss with a large existing trace doesn't head-of-line-block all
+  // session events. The actual hot path was bounded (cache-miss only) but
+  // the sync `readFileSync` could still pause the worker noticeably for a
+  // multi-MB trace.
+  async rehydrateFromFile(sessionId: string): Promise<boolean> {
+    if (!this.snapshotDir) return false
+    const safeId = sessionId.replace(/[/\\.:]/g, "_") || "unknown"
+    const filePath = path.join(this.snapshotDir, `${safeId}.json`)
+    let raw: string
+    try {
+      raw = await fs.readFile(filePath, "utf-8")
+    } catch {
+      return false
+    }
+    let trace: TraceFile
+    try {
+      trace = JSON.parse(raw) as TraceFile
+    } catch {
+      return false
+    }
+    // `buildTraceFile` writes the sanitized form of `sessionId` (see ~line 808
+    // `.replace(/[/\\.:]/g, "_")`), so compare the same way — otherwise valid
+    // trace files with `/`, `\`, `.`, `:` in the session id would be rejected
+    // and the caller would fall back to `startTrace`, clobbering them.
+    const normalizedSessionId = sessionId.replace(/[/\\.:]/g, "_") || "unknown"
+    if (
+      !trace ||
+      trace.sessionId !== normalizedSessionId ||
+      !Array.isArray(trace.spans) ||
+      trace.spans.length === 0
+    ) {
+      return false
+    }
+    const root = trace.spans.find((s) => s.parentSpanId === null && s.kind === "session")
+    if (!root) return false
+
+    this.sessionId = sessionId
+    // Restore the original traceId so post-rehydrate snapshots/exports keep
+    // the same trace identity (downstream OTLP/Jaeger-style consumers and the
+    // trace viewer URL both depend on it being stable across rehydration).
+    if (typeof trace.traceId === "string" && trace.traceId.length > 0) {
+      this.traceId = trace.traceId
+    }
+    this.spans = trace.spans.map((s) => ({ ...s }))
+    this.rootSpanId = root.spanId
+    this.metadata = { ...(trace.metadata ?? {}) }
+    this.startTime = root.startTime
+    if (trace.summary) {
+      this.totalTokens = trace.summary.totalTokens ?? 0
+      this.totalCost = trace.summary.totalCost ?? 0
+      this.toolCallCount = trace.summary.totalToolCalls ?? 0
+      this.generationCount = trace.summary.totalGenerations ?? 0
+      if (trace.summary.tokens) {
+        this.tokensBreakdown = {
+          input: trace.summary.tokens.input ?? 0,
+          output: trace.summary.tokens.output ?? 0,
+          reasoning: trace.summary.tokens.reasoning ?? 0,
+          cacheRead: trace.summary.tokens.cacheRead ?? 0,
+          cacheWrite: trace.summary.tokens.cacheWrite ?? 0,
+        }
+      }
+    }
+    // Mid-session rehydration: the root span's endTime (if any) was set by a
+    // prior endTrace; clear it so the trace doesn't render as "completed."
+    const r = this.spans.find((s) => s.spanId === this.rootSpanId)
+    if (r) {
+      delete (r as { endTime?: number }).endTime
+      r.status = "ok"
+    }
+    // Close any in-flight generation spans as interrupted. The transient state
+    // these spans depended on (`this.currentGenerationSpanId`, `generationText`,
+    // `generationToolCalls`, `pendingToolResults`) lives only in memory and
+    // can't be reconstructed from the on-disk file. If we leave open spans
+    // open, the next `step-finish` event for that turn drops at the
+    // `if (!this.currentGenerationSpanId) return` guard in `logStepFinish`
+    // and any later `logToolCall` falls back to attaching tool spans to
+    // `rootSpanId`, silently degrading the trace shape. Marking them
+    // interrupted preserves the partial data and makes the boundary visible.
+    const now = Date.now()
+    for (const s of this.spans) {
+      if (s.kind === "generation" && s.endTime === undefined) {
+        s.endTime = now
+        s.status = "error"
+        s.statusMessage = "interrupted (worker restart / cache eviction before step-finish)"
+      }
+    }
+    this.endTraceStarted = false
+    return true
+  }
+  // altimate_change end
+
   /**
    * Enrich the trace with model/provider info from the first assistant message.
    * Called when the message.updated event fires with assistant role.
@@ -514,6 +623,46 @@ export class Trace {
     if (title) this.metadata.title = title
     if (prompt) this.metadata.prompt = prompt
   }
+
+  // altimate_change start — set only the user prompt without mutating title.
+  // The bus emits an auto-generated session title (Path C, `session.updated`)
+  // separately from the user's actual prompt text (Path B, `message.part.updated`).
+  // Capturing the prompt via `setTitle(text, text)` would race the title-agent:
+  // if the user text part arrived after `session.updated`, the nice generated
+  // title ("Greeting") would regress to the raw user input ("hi"). Use this
+  // method for prompt-only capture.
+  setPrompt(prompt: string) {
+    if (prompt) this.metadata.prompt = prompt
+  }
+  // altimate_change end
+
+  // altimate_change start — record an individual user message as a span so the
+  // chat tab can render multi-turn conversations. Without this, the viewer's
+  // chat tab can only display `metadata.prompt` at the top — a single string —
+  // and every later user message is silently dropped from the conversation
+  // rendering. Tracked as `kind: "user-message"` so the viewer can interleave
+  // these with `kind: "generation"` spans by startTime.
+  logUserMessage(text: string) {
+    if (!this.rootSpanId) return
+    if (!text) return
+    try {
+      const now = Date.now()
+      this.spans.push({
+        spanId: randomUUIDv7(),
+        parentSpanId: this.rootSpanId,
+        name: "user-message",
+        kind: "user-message",
+        startTime: now,
+        endTime: now,
+        status: "ok",
+        input: text.length > USER_MESSAGE_INPUT_MAX_CHARS ? text.slice(0, USER_MESSAGE_INPUT_MAX_CHARS) : text,
+      })
+      this.snapshot()
+    } catch {
+      // best-effort
+    }
+  }
+  // altimate_change end
 
   /**
    * Open a generation span from a step-start event.
