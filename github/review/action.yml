@@ -57,9 +57,16 @@ runs:
     - name: Get altimate-code version
       id: version
       shell: bash
+      env:
+        ACTION_REF: ${{ github.action_ref }}
       run: |
-        VERSION=$(curl -sf https://api.github.com/repos/AltimateAI/altimate-code/releases/latest | grep -o '"tag_name": *"[^"]*"' | cut -d'"' -f4)
-        VERSION="${VERSION#v}" # the installer's --version expects no leading 'v'
+        set -euo pipefail
+        if [[ "${ACTION_REF:-}" =~ ^v?([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+          VERSION="${BASH_REMATCH[1]}"
+        else
+          VERSION=$(curl -sf https://api.github.com/repos/AltimateAI/altimate-code/releases/latest | grep -o '"tag_name": *"[^"]*"' | cut -d'"' -f4 || true)
+          VERSION="${VERSION#v}" # the installer's --version expects no leading 'v'
+        fi
         echo "version=${VERSION:-latest}" >> $GITHUB_OUTPUT
 
     - name: Cache altimate-code
@@ -107,6 +114,7 @@ runs:
             echo "::error::altimate_api_key is set but altimate_instance is empty — provide the tenant/instance name."
             exit 1
           fi
+          umask 077
           mkdir -p "$HOME/.altimate"
           jq -nc \
             --arg url "${IN_ALT_URL:-https://api.myaltimate.com}" \

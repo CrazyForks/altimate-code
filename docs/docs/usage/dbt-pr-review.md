@@ -181,7 +181,7 @@ jobs:
         with: { fetch-depth: 0 }
       # Produce target/manifest.json for the full verdict (adapter-specific).
       - run: pip install dbt-core dbt-bigquery && dbt deps && dbt compile
-      - uses: AltimateAI/altimate-code/github/review@v0.8.4
+      - uses: AltimateAI/altimate-code/github/review@v0.8.5
         with:
           mode: comment                       # `gate` to block merges
           manifest_path: target/manifest.json
@@ -279,7 +279,7 @@ In GitHub Actions, supply the connection from a secret — both sides of the dif
 run against the **same** warehouse (base-compiled vs head-compiled SQL):
 
 ```yaml
-      - uses: AltimateAI/altimate-code/github/review@v0.8.4
+      - uses: AltimateAI/altimate-code/github/review@v0.8.5
         with:
           mode: comment
           manifest_path: target/manifest.json
