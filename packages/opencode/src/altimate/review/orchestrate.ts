@@ -1003,8 +1003,10 @@ export async function runReview(input: OrchestrateInput): Promise<VerdictEnvelop
   // both SQL sides. This avoids duplicate engine calls and lets tiering see PII.
   const modelFiles = reviewable.filter((f) => f.kind === "model_sql" || f.kind === "python_model")
   const ctxByPath = new Map<string, ModelContext>()
-  const anyManifestFromRunner = await input.runner.manifestAvailable?.().catch(() => false)
-  let anyManifest = anyManifestFromRunner ?? false
+  let anyManifest = false
+  if (input.runner.manifestAvailable) {
+    anyManifest = await input.runner.manifestAvailable().catch(() => false)
+  }
   await Promise.all(
     modelFiles.map(async (file) => {
       const model = modelNameFromPath(file.path)
