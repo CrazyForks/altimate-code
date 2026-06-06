@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.4] - 2026-06-05
+
+A trace-durability patch. Open `/traces` mid-session and you'd see a rich waterfall — then the moment the agent finished its turn the view collapsed to a single "system-prompt" span, the Summary tab's *"What was asked"* showed *"No prompt recorded"*, and the Chat tab dropped every user turn but the last. The data was genuinely gone from disk, not just hidden in the viewer. This release stops the on-disk trace from being overwritten after each turn and makes the file authoritative across worker restarts. A five-persona pre-release review drove a follow-up wording fix so a reconstructed trace isn't misread as a failed run.
+
+### Fixed
+
+- **Session traces no longer lose their data after every agent turn — the waterfall, summary prompt, and chat tab all stay intact.** A `session.status === "idle"` handler in the shared TUI worker fired once *per turn* (not once per session), ending the `Trace` and evicting it from cache; the next event reconstructed a fresh `Trace` whose near-empty initial state overwrote the rich `ses_<id>.json` on disk with a one-span file. Symptoms: the **Waterfall** collapsed to a lone "system-prompt" span, the **Summary** tab's *"What was asked"* went to *"No prompt recorded"*, and the **Chat** tab kept only the last user turn. The destructive idle handler is removed (sessions are long-lived — finalization happens on shutdown and `MAX_TRACES` eviction only), trace reconstruction now **rehydrates from the on-disk file** before falling back to a fresh start, and each user prompt is recorded as its own `user-message` span so multi-turn sessions render every turn in order. Authored-text scoping keeps synthetic parts (MCP banners, decoded file contents, reminders) out of the prompt and chat surfaces. Distinct from the v0.8.1 trace-corruption fix (#865), which addressed intra-instance concurrency — this is the worker-level cache lifecycle. (#895)
+- **A trace reconstructed after a restart no longer reads as a failed run.** When the on-disk trace is rehydrated (worker restart or `MAX_TRACES` eviction), any generation span still in flight is closed and marked so its boundary stays visible in the waterfall. The status message now states plainly that altimate-code restarted before the step finished recording and that this is **not an agent failure** — so an on-call reader debugging from a trace isn't sent chasing a phantom incident. (#895)
+
 ## [0.8.3] - 2026-06-04
 
 A plan-mode reliability patch for the hosted gateway and other non-Anthropic models. Ask the `plan` agent to plan something benign — *"plan a feature to add a verify-output button"* — on `altimate-backend/altimate-default` (GPT-5.x) and it could refuse outright with *"I'm sorry, but I cannot assist with that request."* This release fixes the refusal at its source, hardens the fix against prompt-injection, and rewrites a warning that was misdiagnosing the symptom.
