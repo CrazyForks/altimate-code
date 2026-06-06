@@ -6,9 +6,8 @@ import { $ } from "bun"
 import { describe, expect, test } from "bun:test"
 import fs from "node:fs/promises"
 import path from "node:path"
+import { pathToFileURL } from "node:url"
 import YAML from "yaml"
-import { collectChangedFiles } from "../../src/altimate/review/git"
-import { reviewPullRequest } from "../../src/altimate/review/run"
 import { tmpdir } from "../fixture/fixture"
 
 const repoRoot = path.resolve(import.meta.dir, "../../../..")
@@ -240,18 +239,47 @@ describe("v0.8.5 end-to-end - real review pipeline", () => {
     await $`git commit -m base`.cwd(tmp.path).quiet()
     await Bun.write(modelPath, "select 1 as order_id, 'paid' as status\n")
 
-    const changed = await collectChangedFiles({ cwd: tmp.path, base: "HEAD" })
-    expect(changed.map((file) => file.path)).toEqual(["models/orders.sql"])
+    const runnerPath = path.join(tmp.path, "run-review-e2e.ts")
+    await Bun.write(
+      runnerPath,
+      `
+        import { collectChangedFiles } from ${JSON.stringify(pathToFileURL(path.join(repoRoot, "packages/opencode/src/altimate/review/git.ts")).href)}
+        import { reviewPullRequest } from ${JSON.stringify(pathToFileURL(path.join(repoRoot, "packages/opencode/src/altimate/review/run.ts")).href)}
 
-    const result = await reviewPullRequest({
-      cwd: tmp.path,
-      base: "HEAD",
-      manifestPath: "target/manifest.json",
-      mode: "comment",
-      noAi: true,
+        const cwd = process.argv[2]
+        const changed = await collectChangedFiles({ cwd, base: "HEAD" })
+        if (JSON.stringify(changed.map((file) => file.path)) !== JSON.stringify(["models/orders.sql"])) {
+          throw new Error("changed files mismatch: " + JSON.stringify(changed))
+        }
+        const result = await reviewPullRequest({
+          cwd,
+          base: "HEAD",
+          manifestPath: "target/manifest.json",
+          mode: "comment",
+          noAi: true,
+        })
+        console.log(JSON.stringify({
+          degraded: result.summary.degraded,
+          manifestHash: result.manifestHash,
+          verdict: result.verdict,
+        }))
+      `,
+    )
+    const proc = Bun.spawn(["bun", runnerPath, tmp.path], {
+      cwd: path.join(repoRoot, "packages/opencode"),
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...process.env },
     })
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ])
 
-    expect(result.summary.degraded).toBe(false)
+    expect(exitCode, stderr).toBe(0)
+    const result = JSON.parse(stdout)
+    expect(result.degraded).toBe(false)
     expect(result.manifestHash).toMatch(/^[a-f0-9]{16}$/)
     expect(["APPROVE", "COMMENT"]).toContain(result.verdict)
   })
