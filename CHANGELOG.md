@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.4] - Unreleased
+
+### Fixed
+
+- **The `github/review` composite action can be downloaded by GitHub Actions again.** The release tree contained three VS Code image symlinks whose `packages/identity` targets had been removed, causing GitHub's action downloader to reject the entire archive before the review step started. The identity assets are restored and a release-critical test now verifies every linked image resolves.
+- **A valid dbt manifest is no longer mislabeled as a lint-only run.** Manifest availability is now checked independently from changed-model lookup, so new models and other valid manifests receive the correct full-run status.
+
+### Added
+
+- **Direct GitHub onboarding and a live dbt review demo.** The GitHub App installer now opens GitHub's repository-selection screen directly, and the README/docs link to the public `dbt-pr-review-demo` pull requests.
+
 ## [0.8.3] - 2026-06-04
 
 A plan-mode reliability patch for the hosted gateway and other non-Anthropic models. Ask the `plan` agent to plan something benign — *"plan a feature to add a verify-output button"* — on `altimate-backend/altimate-default` (GPT-5.x) and it could refuse outright with *"I'm sorry, but I cannot assist with that request."* This release fixes the refusal at its source, hardens the fix against prompt-injection, and rewrites a warning that was misdiagnosing the symptom.
