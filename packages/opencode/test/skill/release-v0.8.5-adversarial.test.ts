@@ -227,9 +227,10 @@ describe("v0.8.5 adversarial - composite action", () => {
     expect((await fs.stat(path.join(extracted, "github/review/action.yml"))).size).toBeGreaterThan(0)
   })
 
-  test("docs point at the unreleased action patch, not the already-published broken tag", async () => {
+  test("docs point at the action patch, not the already-published broken tag", async () => {
     const changelog = await fs.readFile(path.join(repoRoot, "CHANGELOG.md"), "utf8")
-    const version = changelog.match(/^## \[(\d+\.\d+\.\d+)\] - Unreleased$/m)?.[1]
+    // Match whether the entry is still "Unreleased" or has been date-stamped at release.
+    const version = changelog.match(/^## \[(\d+\.\d+\.\d+)\] - (?:Unreleased|\d{4}-\d{2}-\d{2})$/m)?.[1]
     expect(version).toBe("0.8.5")
 
     for (const relative of ["docs/docs/usage/dbt-pr-review.md", "github/review/examples/altimate-ingestion.yml"]) {
