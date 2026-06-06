@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.5] - Unreleased
+
+### Fixed
+
+- **The `github/review` composite action can be downloaded by GitHub Actions again.** The release tree contained three VS Code image symlinks whose removed targets caused GitHub's action downloader to reject the entire archive before the review step started. The images are now self-contained files and a release-critical test prevents dangling links from returning.
+- **A valid dbt manifest is no longer mislabeled as a lint-only run.** Manifest availability is now checked independently from changed-model lookup, so new models and other valid manifests receive the correct full-run status.
+
+### Added
+
+- **Direct GitHub onboarding and a live dbt review demo.** The GitHub App installer now opens GitHub's repository-selection screen directly, and the README/docs link to the public `dbt-pr-review-demo` pull requests.
+
 ## [0.8.4] - 2026-06-05
 
 A trace-durability patch. Open `/traces` mid-session and you'd see a rich waterfall — then the moment the agent finished its turn the view collapsed to a single "system-prompt" span, the Summary tab's *"What was asked"* showed *"No prompt recorded"*, and the Chat tab dropped every user turn but the last. The data was genuinely gone from disk, not just hidden in the viewer. This release stops the on-disk trace from being overwritten after each turn and makes the file authoritative across worker restarts. A five-persona pre-release review drove a follow-up wording fix so a reconstructed trace isn't misread as a failed run.
