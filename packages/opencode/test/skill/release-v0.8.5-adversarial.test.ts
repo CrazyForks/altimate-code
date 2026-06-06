@@ -61,10 +61,7 @@ describe("v0.8.5 adversarial - composite action", () => {
     const output = path.join(tmp.path, "github-output")
     const curlMarker = path.join(tmp.path, "curl-called")
     await fs.mkdir(bin)
-    await Bun.write(
-      path.join(bin, "curl"),
-      `#!/usr/bin/env bash\ntouch "$CURL_MARKER"\nexit 99\n`,
-    )
+    await Bun.write(path.join(bin, "curl"), `#!/usr/bin/env bash\ntouch "$CURL_MARKER"\nexit 99\n`)
     await fs.chmod(path.join(bin, "curl"), 0o755)
 
     const result = await runBash(await actionScript("Get altimate-code version"), {
@@ -76,7 +73,12 @@ describe("v0.8.5 adversarial - composite action", () => {
 
     expect(result.exitCode).toBe(0)
     expect(await fs.readFile(output, "utf8")).toBe("version=0.8.5\n")
-    expect(await fs.stat(curlMarker).then(() => true).catch(() => false)).toBe(false)
+    expect(
+      await fs
+        .stat(curlMarker)
+        .then(() => true)
+        .catch(() => false),
+    ).toBe(false)
   })
 
   test("the non-semver action ref fallback bounds the release lookup", async () => {
@@ -113,10 +115,7 @@ describe("v0.8.5 adversarial - composite action", () => {
     const capture = path.join(tmp.path, "args")
     const sentinel = path.join(tmp.path, "injected")
     await fs.mkdir(bin)
-    await Bun.write(
-      path.join(bin, "altimate"),
-      `#!/usr/bin/env bash\nprintf '%s\\0' "$@" > "$CAPTURE"\n`,
-    )
+    await Bun.write(path.join(bin, "altimate"), `#!/usr/bin/env bash\nprintf '%s\\0' "$@" > "$CAPTURE"\n`)
     await fs.chmod(path.join(bin, "altimate"), 0o755)
 
     const manifest = `target/manifest $(touch ${sentinel}) .json`
@@ -138,7 +137,12 @@ describe("v0.8.5 adversarial - composite action", () => {
     })
 
     expect(result.exitCode).toBe(0)
-    expect(await fs.stat(sentinel).then(() => true).catch(() => false)).toBe(false)
+    expect(
+      await fs
+        .stat(sentinel)
+        .then(() => true)
+        .catch(() => false),
+    ).toBe(false)
     const args = (await fs.readFile(capture, "utf8")).split("\0").filter(Boolean)
     expect(args).toEqual([
       "review",
@@ -197,9 +201,12 @@ describe("v0.8.5 adversarial - composite action", () => {
     expect(result.exitCode).toBe(1)
     expect(result.stdout + result.stderr).not.toContain(secret)
     expect(result.stdout + result.stderr).toContain("altimate_instance is empty")
-    expect(await fs.stat(path.join(tmp.path, ".altimate/altimate.json")).then(() => true).catch(() => false)).toBe(
-      false,
-    )
+    expect(
+      await fs
+        .stat(path.join(tmp.path, ".altimate/altimate.json"))
+        .then(() => true)
+        .catch(() => false),
+    ).toBe(false)
   })
 
   test("the committed archive contains regular, non-empty action dependencies", async () => {
@@ -225,14 +232,101 @@ describe("v0.8.5 adversarial - composite action", () => {
     const version = changelog.match(/^## \[(\d+\.\d+\.\d+)\] - Unreleased$/m)?.[1]
     expect(version).toBe("0.8.5")
 
-    for (const relative of [
-      "docs/docs/usage/dbt-pr-review.md",
-      "github/review/examples/altimate-ingestion.yml",
-    ]) {
+    for (const relative of ["docs/docs/usage/dbt-pr-review.md", "github/review/examples/altimate-ingestion.yml"]) {
       const content = await fs.readFile(path.join(repoRoot, relative), "utf8")
       expect(content).toContain(`AltimateAI/altimate-code/github/review@v${version}`)
       expect(content).not.toContain("AltimateAI/altimate-code/github/review@v0.8.4")
     }
+  })
+
+  test("the release lookup authenticates the api when a github token is present", async () => {
+    await using tmp = await tmpdir()
+    const bin = path.join(tmp.path, "bin")
+    const output = path.join(tmp.path, "github-output")
+    const argsPath = path.join(tmp.path, "curl-args")
+    await fs.mkdir(bin)
+    await Bun.write(
+      path.join(bin, "curl"),
+      `#!/usr/bin/env bash\nprintf '%s\\0' "$@" > "$CURL_ARGS"\nprintf '{"tag_name":"v0.8.5"}\\n'\n`,
+    )
+    await fs.chmod(path.join(bin, "curl"), 0o755)
+
+    const result = await runBash(await actionScript("Get altimate-code version"), {
+      ACTION_REF: "main",
+      GITHUB_TOKEN: "ghs-test-token",
+      CURL_ARGS: argsPath,
+      GITHUB_OUTPUT: output,
+      PATH: `${bin}:${process.env.PATH}`,
+    })
+
+    expect(result.exitCode, result.stderr).toBe(0)
+    const curlArgs = (await fs.readFile(argsPath, "utf8")).split("\0").filter(Boolean)
+    expect(curlArgs).toContain("-H")
+    expect(curlArgs).toContain("Authorization: Bearer ghs-test-token")
+  })
+
+  test("the release lookup omits auth and still succeeds when no token is present", async () => {
+    await using tmp = await tmpdir()
+    const bin = path.join(tmp.path, "bin")
+    const output = path.join(tmp.path, "github-output")
+    const argsPath = path.join(tmp.path, "curl-args")
+    await fs.mkdir(bin)
+    await Bun.write(
+      path.join(bin, "curl"),
+      `#!/usr/bin/env bash\nprintf '%s\\0' "$@" > "$CURL_ARGS"\nprintf '{"tag_name":"v0.8.5"}\\n'\n`,
+    )
+    await fs.chmod(path.join(bin, "curl"), 0o755)
+
+    // An empty token must not crash under `set -u` (the ${AUTH[@]+...} idiom)
+    // and must not attach an Authorization header.
+    const result = await runBash(await actionScript("Get altimate-code version"), {
+      ACTION_REF: "main",
+      GITHUB_TOKEN: "",
+      CURL_ARGS: argsPath,
+      GITHUB_OUTPUT: output,
+      PATH: `${bin}:${process.env.PATH}`,
+    })
+
+    expect(result.exitCode, result.stderr).toBe(0)
+    expect(await fs.readFile(output, "utf8")).toBe("version=0.8.5\n")
+    const curlArgs = (await fs.readFile(argsPath, "utf8")).split("\0").filter(Boolean)
+    expect(curlArgs).not.toContain("-H")
+    expect(curlArgs.some((arg) => arg.startsWith("Authorization:"))).toBe(false)
+  })
+
+  test("the cache step is skipped for the floating latest version", async () => {
+    const action = YAML.parse(await fs.readFile(actionPath, "utf8"))
+    const cache = action.runs.steps.find((step: { name?: string }) => step.name === "Cache altimate-code")
+    expect(cache?.if).toBe("steps.version.outputs.version != 'latest'")
+  })
+
+  test("the hosted credential write keeps the api key out of the jq argv", async () => {
+    await using tmp = await tmpdir()
+    const bin = path.join(tmp.path, "bin")
+    const argsPath = path.join(tmp.path, "jq-args")
+    const secret = "argv-secret-must-not-appear"
+    await fs.mkdir(bin)
+    // Fake jq captures its argv (and writes nothing), so we can assert the
+    // secret is delivered via the environment, not the process arg list.
+    await Bun.write(path.join(bin, "jq"), `#!/usr/bin/env bash\nprintf '%s\\0' "$@" > "$JQ_ARGS"\n`)
+    await fs.chmod(path.join(bin, "jq"), 0o755)
+
+    const result = await runBash(await actionScript("Configure advisory reviewer model + credentials"), {
+      HOME: tmp.path,
+      GITHUB_ENV: path.join(tmp.path, "github-env"),
+      JQ_ARGS: argsPath,
+      IN_ALT_KEY: secret,
+      IN_ALT_INSTANCE: "demo",
+      IN_ALT_URL: "https://api.example.test",
+      IN_MODEL: "",
+      IN_MODEL_API_KEY: "",
+      PATH: `${bin}:${process.env.PATH}`,
+    })
+
+    expect(result.exitCode, result.stderr).toBe(0)
+    const jqArgs = (await fs.readFile(argsPath, "utf8")).split("\0").filter(Boolean)
+    expect(jqArgs.some((arg) => arg.includes(secret))).toBe(false)
+    expect(jqArgs).toContain("{altimateUrl:$url, altimateInstanceName:$inst, altimateApiKey:$ENV.IN_ALT_KEY}")
   })
 })
 

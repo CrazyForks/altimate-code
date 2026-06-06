@@ -12,9 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The `github/review` composite action can be downloaded by GitHub Actions again.** The release tree contained three VS Code image symlinks whose removed targets caused GitHub's action downloader to reject the entire archive before the review step started. The images are now self-contained files and a release-critical test prevents dangling links from returning.
 - **A valid dbt manifest is no longer mislabeled as a lint-only run.** Manifest availability is now checked independently from changed-model lookup, so new models and other valid manifests receive the correct full-run status.
 
+- **The release-version lookup is rate-limit resilient and never caches a floating `latest`.** The composite action now authenticates its GitHub release-API call with the workflow token (lifting the 60→1,000 req/hr unauthenticated limit) and skips the binary cache entirely when the version resolves to `latest`, so a single rate-limited or offline lookup can no longer pin a stale binary across all subsequent runs.
+
 ### Added
 
 - **Direct GitHub onboarding and a live dbt review demo.** The GitHub App installer now opens GitHub's repository-selection screen directly, and the README/docs link to the public `dbt-pr-review-demo` pull requests.
+
+### Security
+
+- **The hosted Altimate API key is no longer placed on the `jq` process arg list.** The credential write reads the key from the environment inside the `jq` program, keeping it out of `argv` (which is visible to other processes and printed verbatim when `ACTIONS_STEP_DEBUG` enables `set -x`).
 
 ## [0.8.4] - 2026-06-05
 
