@@ -52,10 +52,7 @@ describe("trace-clearing-on-workspace-set regression", () => {
   })
 
   test("session route's workspaceID effect uses `on()` so it only fires when workspaceID actually changes", async () => {
-    const routeSrc = await fs.readFile(
-      path.join(ROOT, "src/cli/cmd/tui/routes/session/index.tsx"),
-      "utf-8",
-    )
+    const routeSrc = await fs.readFile(path.join(ROOT, "src/cli/cmd/tui/routes/session/index.tsx"), "utf-8")
 
     // The previous shape (`createEffect(() => { if (session()?.workspaceID) ... })`)
     // re-runs on every session() signal change. The fixed shape uses `on()` with
@@ -85,11 +82,16 @@ describe("trace-clearing-on-workspace-set regression", () => {
   // replacement. The handler is now a no-op; finalization happens on worker
   // shutdown and MAX_TRACES eviction only.
   test("worker does NOT call endTrace+delete on session.status=idle", async () => {
+    // Idle handling lives in the shared TraceConsumer now; the destructive
+    // shape must not exist there (nor anywhere the worker delegates).
     const workerSrc = await fs.readFile(path.join(ROOT, "src/cli/cmd/tui/worker.ts"), "utf-8")
+    const consumerSrc = await fs.readFile(path.join(ROOT, "src/altimate/observability/trace-consumer.ts"), "utf-8")
 
-    // The destructive shape must not exist anywhere in the file.
-    expect(workerSrc).not.toMatch(/status === "idle"[\s\S]{0,200}sessionTraces\.delete/)
-    expect(workerSrc).not.toMatch(/status === "idle"[\s\S]{0,200}trace\.endTrace\(\)/)
+    // The destructive shape must not exist in either file.
+    for (const src of [workerSrc, consumerSrc]) {
+      expect(src).not.toMatch(/status === "idle"[\s\S]{0,200}sessionTraces\.delete/)
+      expect(src).not.toMatch(/status === "idle"[\s\S]{0,200}trace\.endTrace\(\)/)
+    }
   })
 
   // Defense-in-depth: `getOrCreateTrace` on cache miss must try to load an
@@ -97,7 +99,9 @@ describe("trace-clearing-on-workspace-set regression", () => {
   // worker restart or MAX_TRACES eviction recreates the trace empty and
   // the next snapshot clobbers the rich file.
   test("getOrCreateTrace prefers rehydrateFromFile over startTrace on cache miss", async () => {
-    const workerSrc = await fs.readFile(path.join(ROOT, "src/cli/cmd/tui/worker.ts"), "utf-8")
+    // The per-session trace logic was extracted into the shared TraceConsumer
+    // (so `altimate serve` traces too); the worker delegates to it.
+    const workerSrc = await fs.readFile(path.join(ROOT, "src/altimate/observability/trace-consumer.ts"), "utf-8")
     // `rehydrateFromFile` is async (off-loads disk I/O from the event-stream
     // hot path per cubic P2 review on tracing.ts:515) so the call must be
     // awaited inside getOrCreateTrace.
@@ -112,7 +116,7 @@ describe("trace-clearing-on-workspace-set regression", () => {
   // title-agent's auto-generated title from `session.updated` and overwrites
   // it (e.g. "Greeting" → "hi"). See codex review feedback this round.
   test("user text part is captured via setPrompt, drops time.end precondition, never touches title", async () => {
-    const workerSrc = await fs.readFile(path.join(ROOT, "src/cli/cmd/tui/worker.ts"), "utf-8")
+    const workerSrc = await fs.readFile(path.join(ROOT, "src/altimate/observability/trace-consumer.ts"), "utf-8")
 
     // The old shape gated on `part.time?.end` for the entire user/assistant
     // branch — that shape must not be present anymore, because user-input
@@ -129,7 +133,9 @@ describe("trace-clearing-on-workspace-set regression", () => {
 
     // The user-text branch must call setPrompt (not setTitle) so the auto-
     // generated session title from Path C isn't overwritten by raw user text.
-    expect(workerSrc).toMatch(/sessionUserMsgIds\.get\(part\.sessionID\)\?\.has\(part\.messageID\)[\s\S]{0,200}trace\.setPrompt/)
+    expect(workerSrc).toMatch(
+      /sessionUserMsgIds\.get\(part\.sessionID\)\?\.has\(part\.messageID\)[\s\S]{0,200}trace\.setPrompt/,
+    )
     // The user-text branch must NOT call setTitle.
     expect(workerSrc).not.toMatch(
       /sessionUserMsgIds\.get\(part\.sessionID\)\?\.has\(part\.messageID\)[\s\S]{0,200}trace\.setTitle\(text/,
@@ -145,12 +151,10 @@ describe("trace-clearing-on-workspace-set regression", () => {
   // a file blob) and the chat tab renders one fake "▶ You" bubble per synthetic
   // span — defeating the two display surfaces this PR fixes.
   test("user-text branch skips synthetic/ignored parts before calling setPrompt+logUserMessage", async () => {
-    const workerSrc = await fs.readFile(path.join(ROOT, "src/cli/cmd/tui/worker.ts"), "utf-8")
+    const workerSrc = await fs.readFile(path.join(ROOT, "src/altimate/observability/trace-consumer.ts"), "utf-8")
     // The synthetic+ignored gate must build the `isAuthoredText` predicate
     // from BOTH flags. Stronger than just searching for the literal anywhere.
-    expect(workerSrc).toMatch(
-      /const\s+isAuthoredText\s*=\s*!part\.synthetic\s*&&\s*!part\.ignored/,
-    )
+    expect(workerSrc).toMatch(/const\s+isAuthoredText\s*=\s*!part\.synthetic\s*&&\s*!part\.ignored/)
     // Both write paths must sit inside the user-text branch (gated on the
     // `sessionUserMsgIds...has(...)` membership check) AND inside an
     // `if (text)` body whose contents don't cross block boundaries.
@@ -165,10 +169,7 @@ describe("trace-clearing-on-workspace-set regression", () => {
   })
 
   test("Trace.setPrompt exists and only mutates metadata.prompt", async () => {
-    const tracingSrc = await fs.readFile(
-      path.join(ROOT, "src/altimate/observability/tracing.ts"),
-      "utf-8",
-    )
+    const tracingSrc = await fs.readFile(path.join(ROOT, "src/altimate/observability/tracing.ts"), "utf-8")
     // Method must exist with the documented signature.
     expect(tracingSrc).toMatch(/setPrompt\(prompt: string\)\s*\{[\s\S]{0,200}this\.metadata\.prompt = prompt/)
     // Must NOT touch metadata.title.

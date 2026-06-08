@@ -138,44 +138,47 @@ describe("#903 — capSpansForSerialization bounds long-lived traces", () => {
 })
 
 describe("#902 — getOrCreateTrace guards against resurrecting a Trace into a cleared cache", () => {
-  // worker.ts has module-scope side effects (it starts an event stream on
-  // import), so it can't be unit-tested in-process. Lock the guard's shape with
-  // a scope-bounded source contract, the same approach as
-  // worker-trace-clearing.test.ts.
+  // The getOrCreateTrace guard lives in the shared TraceConsumer now (so
+  // `altimate serve` traces too); the worker delegates to it. Lock the guard's
+  // shape with a scope-bounded source contract. The counter is a class member
+  // (`this.streamGeneration`) bumped in reset() — the consumer's equivalent of
+  // the worker's old startEventStream cache-clear.
   test("captures the stream generation before the rehydrate await and re-checks it after", async () => {
-    const workerSrc = await fs.readFile(
-      path.join(__dirname, "../../src/cli/cmd/tui/worker.ts"),
+    const consumerSrc = await fs.readFile(
+      path.join(__dirname, "../../src/altimate/observability/trace-consumer.ts"),
       "utf-8",
     )
 
     // Ownership is keyed on a monotonic counter, not AbortController identity.
-    expect(workerSrc).toMatch(/let streamGeneration = 0/)
+    expect(consumerSrc).toMatch(/streamGeneration = 0/)
     // The owning generation is captured at entry, before any await.
-    expect(workerSrc).toMatch(/const generationAtEntry = streamGeneration/)
-    // A new stream bumps the counter, invalidating in-flight calls.
-    expect(workerSrc).toMatch(/streamGeneration\+\+/)
+    expect(consumerSrc).toMatch(/const generationAtEntry = this\.streamGeneration/)
+    // A new stream (reset) bumps the counter, invalidating in-flight calls.
+    expect(consumerSrc).toMatch(/this\.streamGeneration\+\+/)
 
-    // After awaiting rehydrate, if a new stream replaced ours, the freshly built
-    // Trace is discarded (ended) instead of being inserted into the cleared map.
-    const guard = workerSrc.match(
-      /if \(streamGeneration !== generationAtEntry\)[\s\S]*?trace\.endTrace\(\)[\s\S]*?return sessionTraces\.get\(sessionID\) \?\? null/,
+    // After awaiting rehydrate, if a reset() replaced our stream, the freshly
+    // built Trace is discarded (ended) instead of being inserted into the
+    // cleared map.
+    const guard = consumerSrc.match(
+      /if \(this\.streamGeneration !== generationAtEntry\)[\s\S]*?trace\.endTrace\(\)[\s\S]*?return this\.sessionTraces\.get\(sessionID\) \?\? null/,
     )
     expect(guard).not.toBeNull()
 
     // The guard must sit AFTER the rehydrate await and BEFORE the cache insert,
     // otherwise it can't prevent the orphan write.
-    const awaitIdx = workerSrc.indexOf("await trace.rehydrateFromFile(sessionID)")
-    const guardIdx = workerSrc.indexOf("if (streamGeneration !== generationAtEntry)")
-    const setIdx = workerSrc.indexOf("sessionTraces.set(sessionID, trace)")
+    const awaitIdx = consumerSrc.indexOf("await trace.rehydrateFromFile(sessionID)")
+    const guardIdx = consumerSrc.indexOf("if (this.streamGeneration !== generationAtEntry)")
+    const setIdx = consumerSrc.indexOf("this.sessionTraces.set(sessionID, trace)")
     expect(awaitIdx).toBeGreaterThan(-1)
     expect(guardIdx).toBeGreaterThan(awaitIdx)
     expect(setIdx).toBeGreaterThan(guardIdx)
 
-    // The bump happens inside startEventStream so a workspace switch invalidates
-    // any suspended getOrCreateTrace.
-    const startIdx = workerSrc.indexOf("const startEventStream =")
-    const bumpIdx = workerSrc.indexOf("streamGeneration++")
-    expect(bumpIdx).toBeGreaterThan(startIdx)
+    // The bump happens inside reset() so a workspace switch (which calls reset)
+    // invalidates any suspended getOrCreateTrace.
+    const resetIdx = consumerSrc.indexOf("reset() {")
+    const bumpIdx = consumerSrc.indexOf("this.streamGeneration++")
+    expect(resetIdx).toBeGreaterThan(-1)
+    expect(bumpIdx).toBeGreaterThan(resetIdx)
   })
 })
 
