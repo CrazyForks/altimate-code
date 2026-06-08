@@ -309,11 +309,17 @@ export class TraceConsumer {
     this.sessionUserMsgIds.clear()
   }
 
-  /** End all in-flight traces and wait for them. Used on shutdown. */
+  /**
+   * End all in-flight traces and wait for them. Used on shutdown.
+   * Finalizes sessions concurrently rather than sequentially: each
+   * `endTrace()` can wait on an HttpExporter (5s timeout each), so a sequential
+   * loop over N sessions could take N×5s and blow past a container's shutdown
+   * grace period (e.g. k8s `terminationGracePeriodSeconds`) and be SIGKILL'd
+   * mid-write. Concurrent finalization bounds the wall-clock to the slowest
+   * single trace.
+   */
   async flush() {
-    for (const [, trace] of this.sessionTraces) {
-      await trace.endTrace().catch(() => {})
-    }
+    await Promise.allSettled([...this.sessionTraces.values()].map((trace) => trace.endTrace().catch(() => {})))
     this.sessionTraces.clear()
     this.sessionUserMsgIds.clear()
   }
@@ -410,7 +416,11 @@ export function subscribeTraceConsumer(
         }
       } catch (err) {
         if (!signal.aborted) {
-          Log.Default.warn("[tracing] trace event stream disconnected, reconnecting", {
+          // debug, not warn: this is the in-process event stream, reconnect is
+          // automatic and not user-actionable. Logging at warn on every backoff
+          // iteration (up to ~7 in the first 8s of an outage) would spike log
+          // aggregators for something the operator can't act on.
+          Log.Default.debug("[tracing] trace event stream ended, reconnecting", {
             error: err instanceof Error ? err.message : String(err),
           })
         }
