@@ -208,12 +208,16 @@ Validation:
 ### 2. Base Compiled Artifact Support In Demo CI
 
 Risk: safe refactors degrade to "could not prove equivalent" because the review
-has only head-side compiled SQL.
+has incomplete proof inputs: missing base compiled SQL or incomplete schema
+columns.
 
 Evidence:
 
 - `compiled.ts` already supports `target-base/compiled/<project>/<path>`.
 - The demo workflow currently runs only head-side `dbt compile`.
+- `demo/safe-refactor` became decidable after `dbt docs generate` produced
+  `target/catalog.json`, but core equivalence then falsely compared CTE alias
+  names inside the join filter.
 
 Do not flag:
 
@@ -223,8 +227,24 @@ Do not flag:
 Expected result:
 
 - The demo workflow compiles base into `target-base` before compiling head.
-- `demo/safe-refactor` no longer emits an unknown semantic-change warning due
-  solely to missing base compiled SQL.
+- The demo workflow produces `target/catalog.json` when a warehouse-backed dbt
+  project is available, so equivalence has complete columns.
+- `demo/safe-refactor` emits no findings with local core and DuckDB catalog
+  artifacts.
+
+Implemented result:
+
+- Core `L012 missing_table_alias` now ignores CTE references, removing the
+  `order_records/customer_records` alias noise while preserving real table alias
+  lint.
+- Core equivalence now resolves join predicate columns through CTE aliases to
+  base `table.column` provenance, so CTE alias renames are equivalent but a
+  changed join key remains material.
+- `altimate-code` now threads the detected dialect into
+  `altimate_core.equivalence` and `--no-ai` correctly disables the advisory lane.
+- Local DuckDB safe-refactor validation: `APPROVE`, zero findings.
+- Real-world corpus floor preserved: 15/15 bad cases caught, 0/5 false
+  positives.
 
 ### 3. PII Classification Precision Floor
 

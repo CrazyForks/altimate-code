@@ -320,7 +320,7 @@ export function registerAll(): void {
   register("altimate_core.equivalence", async (params) => {
     try {
       const schema = schemaOrEmpty(params.schema_path, params.schema_context)
-      const raw = await core.checkEquivalence(params.sql1, params.sql2, schema)
+      const raw = await core.checkEquivalence(params.sql1, params.sql2, schema, params.dialect)
       const data = toData(raw)
       return ok(true, data)
     } catch (e) {

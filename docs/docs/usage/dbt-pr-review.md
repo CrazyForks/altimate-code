@@ -332,8 +332,11 @@ reviewer does **not** re-implement Jinja — it consumes dbt's own compiled outp
    from `target/compiled/<project>/…` (HEAD) and `target-base/compiled/…` (BASE),
    produced by `dbt compile`. To enable full equivalence verdicts, compile both
    the base and head refs in CI (the base into `target-base/`, the Recce
-   convention). Without compiled SQL the engine lanes fall back to raw and stay
-   *undecidable* (never fabricated) — the `dbt-patterns` lane still runs.
+   convention). For proof-grade equivalence, also produce `target/catalog.json`
+   with `dbt docs generate`; the catalog carries complete warehouse columns that
+   `manifest.json` often lacks. Without compiled SQL or complete columns the
+   engine lanes stay *undecidable* (never fabricated) — the `dbt-patterns` lane
+   still runs.
 
 ## What it checks — deterministic rule catalog
 

@@ -58,7 +58,7 @@ export const ReviewCommand = cmd({
         manifestPath: args.manifest as string | undefined,
         mode: args.mode as ReviewMode | undefined,
         severityThreshold: args.severity as Severity | undefined,
-        noAi: args.ai === false,
+        noAi: args.noAi === true || args.ai === false,
       })
 
       if (args.output) await fs.writeFile(args.output as string, JSON.stringify(env, null, 2))
