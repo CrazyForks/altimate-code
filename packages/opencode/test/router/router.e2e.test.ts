@@ -10,6 +10,8 @@ import { Verdict } from "../../src/router/verdict"
 const KEY = process.env["OPENROUTER_API_KEY"] || ""
 const IMG = process.env["E2E_IMG"] || "" // provide a docker image with dbt-duckdb; no default
 const OR = "https://openrouter.ai/api/v1"
+// Opt-in, infra-dependent suite: skipped (not failed) without a key + image (e.g. CI).
+const SKIP = !KEY || !IMG
 
 const dirs: string[] = []
 function project(models: Record<string, string>): string {
@@ -60,8 +62,7 @@ async function realRunAgent(model: string, note: string | undefined, dir: string
 }
 
 beforeAll(() => {
-  if (!KEY) throw new Error("OPENROUTER_API_KEY required for router E2E")
-  if (!IMG) throw new Error("E2E_IMG not set — provide a docker image with dbt-duckdb")
+  if (SKIP) return
   if (Bun.spawnSync(["docker", "image", "inspect", IMG], { stdout: "ignore", stderr: "ignore" }).exitCode !== 0)
     throw new Error(`image ${IMG} missing`)
 })
@@ -69,7 +70,7 @@ afterAll(() => {
   for (const d of dirs) try { Bun.spawnSync(["sudo", "rm", "-rf", d]); rmSync(d, { recursive: true, force: true }) } catch {}
 })
 
-describe("Router × REAL OpenRouter + REAL dbt (no mocks)", () => {
+describe.skipIf(SKIP)("Router × REAL OpenRouter + REAL dbt (no mocks)", () => {
   test("solves at the cheap tier → no escalation (1 real call)", async () => {
     const dir = project({})
     const log: { model: string; note?: string }[] = []

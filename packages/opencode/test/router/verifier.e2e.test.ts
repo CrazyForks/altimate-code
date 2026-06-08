@@ -7,6 +7,8 @@ import { Verifier } from "../../src/router/verifier"
 // REAL dbt — no mocks. Runs `dbt build` inside a docker image that has dbt-duckdb.
 // Provide the image via E2E_IMG (no default — opt-in, infra-dependent test).
 const IMG = process.env["E2E_IMG"] || ""
+// Opt-in, infra-dependent suite: skipped (not failed) when no image is provided (e.g. CI).
+const SKIP = !IMG
 
 /** Real command runner: shells `dbt build` inside the image against a mounted project. */
 function dockerDbtRun(cmd: string, workdir: string): Promise<Verifier.RunResult> {
@@ -31,7 +33,7 @@ function project(models: Record<string, string>, schema?: string): string {
 }
 
 beforeAll(() => {
-  if (!IMG) throw new Error("E2E_IMG not set — provide a docker image with dbt-duckdb")
+  if (SKIP) return
   const ok = Bun.spawnSync(["docker", "image", "inspect", IMG], { stdout: "ignore", stderr: "ignore" })
   if (ok.exitCode !== 0) throw new Error(`E2E image ${IMG} not present`)
 })
@@ -39,7 +41,7 @@ afterAll(() => {
   for (const d of dirs) try { Bun.spawnSync(["sudo", "rm", "-rf", d]); rmSync(d, { recursive: true, force: true }) } catch {}
 })
 
-describe("Verifier × REAL dbt (no mocks)", () => {
+describe.skipIf(SKIP)("Verifier × REAL dbt (no mocks)", () => {
   test("clean project builds → verdict ok", async () => {
     const dir = project(
       { "ok_model.sql": "select 1 as id" },
