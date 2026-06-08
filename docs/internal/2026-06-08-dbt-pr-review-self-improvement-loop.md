@@ -267,6 +267,24 @@ Expected result:
 - `demo/safe-refactor` no longer reports `customer_name`.
 - `demo/new-pii-exposure` still reports `email`.
 
+Implemented result:
+
+- Diff-scoped core PII classification is the authoritative PR-review PII
+  comment when lineage/classification are available.
+- High-confidence non-low-risk PII introduced into `marts/` or `reporting/`
+  is critical and blockable from `altimate_core.classify_pii` evidence.
+- Low-risk `Name`/`Address` classifications require at least 90% confidence to
+  surface, so `first_name`/`customer_name`-style weak signals do not create
+  noisy comments.
+- Fallback `dbt-patterns`/`rule-catalog` PII twins are suppressed for files
+  where the diff-scoped core classifier ran; fallback remains available when
+  core lineage/classification is unavailable.
+- `demo/new-pii-exposure` now reports one critical core PII finding for
+  `email` plus the core equivalence warning, and still returns
+  `REQUEST_CHANGES`.
+- Real-world corpus floor preserved: 15/15 bad cases caught, 0/5 false
+  positives.
+
 ## Warehouse E2E Policy
 
 Use local DuckDB first for fast end-to-end checks, then add BigQuery runs when a

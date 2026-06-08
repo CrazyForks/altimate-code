@@ -1333,6 +1333,79 @@ describe("orchestrate", () => {
     expect(env.verdict).toBe("REQUEST_CHANGES")
   })
 
+  test("diff-scoped core PII is the single blocker for newly introduced mart email", async () => {
+    const files: ChangedFile[] = [{ path: "models/marts/dim_customers.sql", status: "modified", diff: "+    email\n" }]
+    const runner: ReviewRunner = {
+      ...fakeRunner({}),
+      async detectPii() {
+        return { columns: ["email"] }
+      },
+      async columnLineage(sql) {
+        return sql.includes("email")
+          ? [
+              { source: "customers.customer_name", target: "customer_name" },
+              { source: "customers.email", target: "email" },
+            ]
+          : [{ source: "customers.customer_name", target: "customer_name" }]
+      },
+      async classifyPii(columns) {
+        return columns.map((column) => ({
+          column,
+          classification: "Email",
+          confidence: 0.95,
+          masking: "'***MASKED***'",
+        }))
+      },
+    }
+    const env = await runReview({
+      changedFiles: files,
+      config: { ...DEFAULT_REVIEW_CONFIG },
+      rubric: DEFAULT_RUBRIC,
+      mode: "gate",
+      runner,
+      getContent: content("select customer_name, email from customers", "select customer_name from customers"),
+    })
+    const pii = env.findings.filter((f) => f.category === "pii_exposure")
+    expect(pii).toHaveLength(1)
+    expect(pii[0].severity).toBe("critical")
+    expect(pii[0].evidence?.tool).toBe("altimate_core.classify_pii")
+    expect(env.verdict).toBe("REQUEST_CHANGES")
+  })
+
+  test("low-confidence name PII does not surface or fall back to regex PII comments", async () => {
+    const files: ChangedFile[] = [{ path: "models/marts/dim_customers.sql", status: "modified", diff: "+    first_name\n" }]
+    const runner: ReviewRunner = {
+      ...fakeRunner({}),
+      async detectPii() {
+        return { columns: ["first_name"] }
+      },
+      async columnLineage(sql) {
+        return sql.includes("first_name")
+          ? [
+              { source: "customers.customer_id", target: "customer_id" },
+              { source: "customers.first_name", target: "first_name" },
+            ]
+          : [{ source: "customers.customer_id", target: "customer_id" }]
+      },
+      async classifyPii(columns) {
+        return columns.map((column) => ({
+          column,
+          classification: "Name",
+          confidence: 0.85,
+        }))
+      },
+    }
+    const env = await runReview({
+      changedFiles: files,
+      config: { ...DEFAULT_REVIEW_CONFIG },
+      rubric: DEFAULT_RUBRIC,
+      mode: "gate",
+      runner,
+      getContent: content("select customer_id, first_name from customers", "select customer_id from customers"),
+    })
+    expect(env.findings.some((f) => f.category === "pii_exposure")).toBe(false)
+  })
+
   test("clean change with no manifest → degraded, APPROVE/COMMENT, lint-only labeled", async () => {
     const files: ChangedFile[] = [{ path: "models/staging/stg_x.sql", status: "modified", diff: "+select 1\n" }]
     const runner: ReviewRunner = {
