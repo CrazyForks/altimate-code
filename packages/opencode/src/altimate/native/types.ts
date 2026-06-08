@@ -180,6 +180,14 @@ export interface DbtModelInfo {
   materialized?: string
   depends_on: string[]
   columns: ModelColumn[]
+  /** Source-relative file path (for resolving compiled SQL of downstream models). */
+  path?: string
+  /**
+   * Primary/unique key columns, resolved from contract constraints or — when no
+   * contract exists — an unambiguous `unique` / `unique_combination_of_columns`
+   * test. Powers fan-out detection (lint L037).
+   */
+  primary_key?: string[]
 }
 
 export interface DbtSourceInfo {
@@ -813,6 +821,9 @@ export interface AltimateCoreCheckParams {
   sql: string
   schema_path?: string
   schema_context?: Record<string, any>
+  /** Base (pre-change) SQL; when set, core scopes lint findings to those the
+   *  change INTRODUCED relative to the base (diff-scoping done in the engine). */
+  base_sql?: string
 }
 
 export interface AltimateCoreResult {
@@ -820,6 +831,20 @@ export interface AltimateCoreResult {
   data: Record<string, unknown>
   error?: string
 }
+
+// altimate_change start — dbt-pr-review IP params (prompt + parse live in core)
+export interface AltimateCoreReviewAiPromptParams {}
+export interface AltimateCoreReviewAiParseParams {
+  /** Raw LLM response text. */
+  text: string
+  /** Paths in the diff; findings referencing other files are dropped. */
+  valid_files?: string[]
+}
+export interface AltimateCoreReviewLexicalScanParams {
+  /** Added diff lines for one file (reserved-word aliases + dialect operators). */
+  added_lines: string[]
+}
+// altimate_change end
 
 // --- altimate-core Phase 1 (P0) ---
 
@@ -1189,6 +1214,34 @@ export const BridgeMethods = {
   "altimate_core.transpile": {} as { params: AltimateCoreTranspileParams; result: AltimateCoreResult },
   "altimate_core.explain": {} as { params: AltimateCoreExplainParams; result: AltimateCoreResult },
   "altimate_core.check": {} as { params: AltimateCoreCheckParams; result: AltimateCoreResult },
+  // altimate_change start — dbt-pr-review IP (prompt + parse) lives in core
+  "altimate_core.review_ai_prompt": {} as { params: AltimateCoreReviewAiPromptParams; result: AltimateCoreResult },
+  "altimate_core.review_ai_parse": {} as { params: AltimateCoreReviewAiParseParams; result: AltimateCoreResult },
+  "altimate_core.review_lexical_scan": {} as {
+    params: AltimateCoreReviewLexicalScanParams
+    result: AltimateCoreResult
+  },
+  "altimate_core.grain": {} as {
+    params: { sql: string }
+    result: AltimateCoreResult
+  },
+  "altimate_core.source_filters": {} as {
+    params: { sql: string }
+    result: AltimateCoreResult
+  },
+  "altimate_core.dbt_config_lint": {} as {
+    params: { sql: string }
+    result: AltimateCoreResult
+  },
+  "altimate_core.dbt_config_diff": {} as {
+    params: { base_sql: string; head_sql: string }
+    result: AltimateCoreResult
+  },
+  "altimate_core.structural_diff": {} as {
+    params: { base_sql: string; head_sql: string }
+    result: AltimateCoreResult
+  },
+  // altimate_change end
   // --- altimate-core Phase 1 (P0) ---
   "altimate_core.fix": {} as { params: AltimateCoreFixParams; result: AltimateCoreResult },
   "altimate_core.policy": {} as { params: AltimateCorePolicyParams; result: AltimateCoreResult },
