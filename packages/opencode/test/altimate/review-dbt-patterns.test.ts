@@ -159,6 +159,18 @@ describe("dbt-patterns detectors", () => {
     expect(f.some((x) => x.evidence?.tool === "rule-catalog" && (x.evidence?.result as any)?.rule === "yml-description-removed")).toBe(true)
   })
 
+  test("workflow YAML is not treated as schema.yml", () => {
+    const f = detectSchemaYmlPatterns(
+      {
+        path: ".github/workflows/dbt-pr-review.yml",
+        status: "modified",
+        diff: "-          - name: order_id\n-            description: One row per order",
+      },
+      DEFAULT_RUBRIC,
+    )
+    expect(f.length).toBe(0)
+  })
+
   test("benign additive column produces NO dbt-pattern finding (precision)", () => {
     const sql = `select id, upper(status) as status_upper from {{ ref('x') }}`
     const f = detectModelPatterns(
