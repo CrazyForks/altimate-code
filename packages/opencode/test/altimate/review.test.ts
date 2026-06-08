@@ -569,6 +569,130 @@ describe("orchestrate", () => {
     ).toBe(true)
   })
 
+  test("core SC010 join-key regression maps to critical join_risk and blocks", async () => {
+    const oldSql = `
+      select *
+      from orders
+      left join customers
+        on orders.customer_id = customers.customer_id
+    `
+    const newSql = `
+      select *
+      from orders
+      left join customers
+        on orders.order_id = customers.customer_id
+    `
+    let sawBase = ""
+    let sawHead = ""
+    const runner: ReviewRunner = {
+      ...fakeRunner({}),
+      async structuralDiff(baseSql, headSql) {
+        sawBase = baseSql
+        sawHead = headSql
+        return [
+          {
+            code: "SC010",
+            rule: "join_key_regression",
+            severity: "error",
+            message:
+              "A join key changed from matching the same identifier stem to `orders.order_id = customers.customer_id`.",
+          },
+        ]
+      },
+    }
+    const env = await runReview({
+      changedFiles: [
+        {
+          path: "models/marts/fct_customer_orders.sql",
+          status: "modified",
+          diff: "+on orders.order_id = customers.customer_id\n-on orders.customer_id = customers.customer_id\n",
+        },
+      ],
+      config: { ...DEFAULT_REVIEW_CONFIG, reviewers: ["semantic_change"], ai: false },
+      rubric: DEFAULT_RUBRIC,
+      mode: "gate",
+      runner,
+      getContent: async (_f, side) => (side === "new" ? newSql : oldSql),
+      getCompiled: async (_f, side) => (side === "new" ? newSql : oldSql),
+      generatedAt: "2026-06-08T00:00:00Z",
+    })
+    expect(sawBase).toBe(oldSql)
+    expect(sawHead).toBe(newSql)
+    const f = env.findings.find(
+      (x) => x.evidence?.tool === "altimate_core.structural_diff" && (x.evidence?.result as any)?.code === "SC010",
+    )
+    expect(f).toBeDefined()
+    expect(f!.severity).toBe("critical")
+    expect(f!.category).toBe("join_risk")
+    expect(env.verdict).toBe("REQUEST_CHANGES")
+  })
+
+  test("core structural diff quiet on CTE rename and bridge join countercases", async () => {
+    const runner: ReviewRunner = {
+      ...fakeRunner({}),
+      async structuralDiff() {
+        return []
+      },
+    }
+    const safeEnv = await runReview({
+      changedFiles: [
+        {
+          path: "models/marts/fct_customer_orders.sql",
+          status: "modified",
+          diff:
+            "+on order_records.customer_id = customer_records.customer_id\n" +
+            "-on orders.customer_id = customers.customer_id\n",
+        },
+      ],
+      config: { ...DEFAULT_REVIEW_CONFIG, reviewers: ["semantic_change"], ai: false },
+      rubric: DEFAULT_RUBRIC,
+      mode: "gate",
+      runner,
+      getContent: async (_f, side) =>
+        side === "new"
+          ? "select * from order_records left join customer_records on order_records.customer_id = customer_records.customer_id"
+          : "select * from orders left join customers on orders.customer_id = customers.customer_id",
+      getCompiled: async (_f, side) =>
+        side === "new"
+          ? "select * from order_records left join customer_records on order_records.customer_id = customer_records.customer_id"
+          : "select * from orders left join customers on orders.customer_id = customers.customer_id",
+      generatedAt: "2026-06-08T00:00:00Z",
+    })
+    expect(
+      safeEnv.findings.some(
+        (x) => x.evidence?.tool === "altimate_core.structural_diff" && (x.evidence?.result as any)?.code === "SC010",
+      ),
+    ).toBe(false)
+
+    const bridgeEnv = await runReview({
+      changedFiles: [
+        {
+          path: "models/marts/fct_order_items.sql",
+          status: "modified",
+          diff: "+on orders.order_id = order_items.order_id\n-on orders.customer_id = customers.customer_id\n",
+        },
+      ],
+      config: { ...DEFAULT_REVIEW_CONFIG, reviewers: ["semantic_change"], ai: false },
+      rubric: DEFAULT_RUBRIC,
+      mode: "gate",
+      runner,
+      getContent: async (_f, side) =>
+        side === "new"
+          ? "select * from orders left join order_items on orders.order_id = order_items.order_id"
+          : "select * from orders left join customers on orders.customer_id = customers.customer_id",
+      getCompiled: async (_f, side) =>
+        side === "new"
+          ? "select * from orders left join order_items on orders.order_id = order_items.order_id"
+          : "select * from orders left join customers on orders.customer_id = customers.customer_id",
+      generatedAt: "2026-06-08T00:00:00Z",
+    })
+    expect(
+      bridgeEnv.findings.some(
+        (x) => x.evidence?.tool === "altimate_core.structural_diff" && (x.evidence?.result as any)?.code === "SC010",
+      ),
+    ).toBe(false)
+  })
+
   test("core L033 portability → regex portability twin suppressed, idempotency concern survives", async () => {
     const sql = "select getdate() as loaded_at from {{ ref('a') }}"
     const files: ChangedFile[] = [{ path: "models/marts/m.sql", status: "modified", diff: "+    , getdate() as loaded_at\n" }]

@@ -813,6 +813,7 @@ const STRUCTURAL_CATEGORY: Record<string, ReviewCategory> = {
   coalesce_removed: "semantic_change",
   removed_predicate: "semantic_change",
   type_narrowing: "contract_violation",
+  join_key_regression: "join_risk",
 }
 
 async function structuralChangeLane(ctx: ModelContext, runner: ReviewRunner): Promise<Finding[]> {
@@ -828,7 +829,7 @@ async function structuralChangeLane(ctx: ModelContext, runner: ReviewRunner): Pr
   const out: Finding[] = []
   for (const f of raw) {
     const cat: ReviewCategory = STRUCTURAL_CATEGORY[f.rule] ?? "semantic_change"
-    const sev = clampSeverity(cat, "warning", "high")
+    const sev = clampSeverity(cat, f.severity === "error" ? "critical" : "warning", "high")
     out.push(
       makeFinding({
         severity: sev,
