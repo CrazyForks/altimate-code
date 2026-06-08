@@ -17,6 +17,9 @@ import { Filesystem } from "../util/filesystem"
 import { Instance } from "../project/instance"
 import { Snapshot } from "@/snapshot"
 import { assertExternalDirectory, assertSensitiveWrite } from "./external-directory"
+// altimate_change start — verify-and-escalate shadow capture (gated off by default; fail-safe)
+import { VerifyShadow } from "../altimate/verify-shadow"
+// altimate_change end
 
 const MAX_DIAGNOSTICS_PER_FILE = 20
 
@@ -120,6 +123,15 @@ export const EditTool = Tool.define("edit", {
       diff = trimDiff(
         createTwoFilesPatch(filePath, filePath, normalizeLineEndings(contentOld), normalizeLineEndings(contentNew)),
       )
+      // altimate_change start — verify shadow capture (gated off by default; fail-safe, no behavior change)
+      VerifyShadow.captureEdit({
+        file: filePath,
+        before: contentOld,
+        after: contentNew,
+        oldString: params.oldString,
+        newString: params.newString,
+      })
+      // altimate_change end
       FileTime.read(ctx.sessionID, filePath)
     })
 
