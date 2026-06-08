@@ -1,4 +1,5 @@
 import { describe, test, expect, afterEach } from "bun:test"
+import yargs from "yargs/yargs"
 import { resolveGitHubTarget } from "../../src/altimate/review/post-github"
 import { ReviewCommand } from "../../src/cli/cmd/review"
 import { buildReviewSchemaContext } from "../../src/altimate/review/schema-context"
@@ -18,6 +19,21 @@ describe("review CLI command", () => {
   test("is registered as `review`", () => {
     expect(ReviewCommand.command).toBe("review")
     expect(typeof ReviewCommand.handler).toBe("function")
+  })
+
+  test("supports documented --no-ai flag", async () => {
+    let seen: any
+    await yargs(["review", "--no-ai", "--json"])
+      .command({ ...ReviewCommand, handler: (args: any) => { seen = args } } as any)
+      .exitProcess(false)
+      .fail((msg, err) => {
+        throw err ?? new Error(msg)
+      })
+      .strict()
+      .parseAsync()
+
+    expect(seen.ai).toBe(false)
+    expect(seen.json).toBe(true)
   })
 })
 

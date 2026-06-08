@@ -42,10 +42,10 @@ export const ReviewCommand = cmd({
         default: false,
         describe: "post the review to the GitHub PR (uses GITHUB_TOKEN + the Actions event)",
       })
-      .option("no-ai", {
+      .option("ai", {
         type: "boolean",
-        default: false,
-        describe: "disable the advisory LLM reviewer lane (no model calls / cost)",
+        default: true,
+        describe: "enable the advisory LLM reviewer lane; use --no-ai to disable model calls / cost",
       })
       .option("cwd", { type: "string", describe: "project directory (default: current dir)" }),
   async handler(args) {
@@ -58,7 +58,7 @@ export const ReviewCommand = cmd({
         manifestPath: args.manifest as string | undefined,
         mode: args.mode as ReviewMode | undefined,
         severityThreshold: args.severity as Severity | undefined,
-        noAi: args.noAi === true || args.ai === false,
+        noAi: args.ai === false,
       })
 
       if (args.output) await fs.writeFile(args.output as string, JSON.stringify(env, null, 2))
