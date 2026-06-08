@@ -104,16 +104,16 @@ four new branches with deterministic support already present.
 | s018 | `demo/s018-clock-column` | implemented | Runtime clock added to mart output | sql_correctness | COMMENT | `rule-catalog:timezone-naive-now` | manifest | Shows non-reproducible output from run-time clock functions. |
 | s019 | `demo/s019-scalar-subquery-select` | implemented-needs-strengthening | Scalar subquery added to SELECT | semantic_change | COMMENT | `altimate_core.equivalence` | manifest, target-base | Shows output-shape semantic drift, but should be strengthened with a precise scalar-subquery rule before customer demo. |
 | s020 | `demo/s020-not-in-subquery` | implemented | NOT IN subquery added | sql_correctness | COMMENT | `altimate_core.check:not_in_nullable`, `rule-catalog:not-exists-suggested` | manifest | Shows the NULL-sensitive `NOT IN` failure mode. |
-| s021 | `demo/s021-window-partition-dropped` | deferred-core-needed | Window partition removed | semantic_change | COMMENT | core structural diff needed | manifest, target-base | Would catch ranking/dedup leakage across customers. |
-| s022 | `demo/s022-window-order-reversed` | deferred-core-needed | Latest-order window order reversed | semantic_change | COMMENT | core structural diff needed | manifest, target-base | Would catch choosing oldest record instead of latest. |
-| s023 | `demo/s023-limit-added` | planned | LIMIT added to mart | semantic_change | COMMENT | `altimate_core.structural_diff` limit support if surfaced | manifest, target-base | Shows accidental sampling in production logic. |
-| s024 | `demo/s024-date-filter-widened` | planned | Date filter widened | semantic_change | COMMENT | `altimate_core.equivalence` or core-needed predicate value change | manifest, target-base | Shows time-window drift in KPI definitions. |
-| s025 | `demo/s025-status-filter-changed` | planned | Completed orders changed to non-refunded orders | semantic_change | COMMENT | `altimate_core.equivalence` or core-needed predicate value change | manifest, target-base | Shows subtle business-definition drift. |
-| s026 | `demo/s026-incremental-unique-key-removed` | planned | Incremental unique key removed | materialization | COMMENT | `altimate_core.dbt_config` | manifest | Shows duplicate risk in incremental merges. |
-| s027 | `demo/s027-incremental-var-no-default` | planned | Incremental logic depends on var without default | materialization | COMMENT | `altimate_core.dbt_config` | manifest | Shows brittle CI/prod behavior from missing var defaults. |
-| s028 | `demo/s028-microbatch-lookback-zero` | planned | Microbatch lookback too small | materialization | COMMENT | `altimate_core.dbt_config` | manifest | Shows late-arriving data risk. |
-| s029 | `demo/s029-materialized-table-to-view` | planned | Mart materialization changed to view | materialization | COMMENT | `altimate_core.dbt_config` | manifest | Shows cost/latency implications of materialization drift. |
-| s030 | `demo/s030-contract-enforced-removed` | planned | Enforced contract removed | contract_violation | REQUEST_CHANGES | `rule-catalog:contract-enforced-removed` | manifest | Shows downstream schema guarantees being removed. |
+| s021 | `demo/s021-union-dedup-cost` | implemented | UNION dedup introduced | warehouse_cost | COMMENT | `rule-catalog:union-not-all`, `altimate_core.check:union_without_all` | manifest, target-base | Shows a hidden dedup/sort cost added to mart logic. |
+| s022 | `demo/s022-in-subquery-large` | implemented | IN subquery introduced | warehouse_cost | COMMENT | `rule-catalog:in-subquery-large` | manifest | Shows an optimizer-unfriendly semi-join pattern. |
+| s023 | `demo/s023-full-outer-join-filtered` | implemented | Filtered FULL OUTER JOIN introduced | join_risk | COMMENT | `altimate_core.check:full_outer_join` | manifest, target-base | Shows null-side handling risk from full outer joins. |
+| s024 | `demo/s024-weak-pii-hash` | implemented | Weak MD5 hash of email exposed | pii_exposure | COMMENT | `rule-catalog:weak-pii-hash` | manifest, target-base | Shows why simple hashes are not anonymization. |
+| s025 | `demo/s025-hardcoded-secret` | implemented | Hardcoded API key-like secret in SQL | pii_exposure | REQUEST_CHANGES | `rule-catalog:hardcoded-credential` | manifest, target-base | Blocks secret leakage into SQL, compiled artifacts, and logs. |
+| s026 | `demo/s026-new-phone-pii` | implemented | Phone number exposed in mart | pii_exposure | REQUEST_CHANGES | `altimate_core.classify_pii` | manifest, catalog, target-base | Shows sensitive contact-data propagation from source to mart. |
+| s027 | `demo/s027-new-ssn-pii` | implemented | SSN exposed in mart | pii_exposure | REQUEST_CHANGES | `altimate_core.classify_pii` | manifest, catalog, target-base | Shows high-risk identifier blocking. |
+| s028 | `demo/s028-test-severity-warn` | implemented | Test downgraded to severity warn | test_coverage | COMMENT | `rule-catalog:test-severity-warn`, `dbt-patterns:removed_tests` | manifest | Shows CI guardrails being weakened. |
+| s029 | `demo/s029-description-removed` | implemented | Model description removed | sql_quality | COMMENT | `rule-catalog:yml-description-removed` | manifest | Shows governance/docs drift for data consumers. |
+| s030 | `demo/s030-yml-column-removed` | implemented | Column removed from schema.yml metadata | contract_violation | COMMENT | `rule-catalog:yml-column-removed` | manifest | Shows schema metadata/contract drift while SQL still builds. |
 | s031 | `demo/s031-contract-column-removed` | planned | Contract column removed from YAML | contract_violation | COMMENT | `rule-catalog:yml-column-removed` | manifest | Shows docs/contract metadata drift. |
 | s032 | `demo/s032-contract-data-type-narrowed` | planned | Contract data type narrowed | contract_violation | COMMENT | `rule-catalog:yml-data-type-narrowed` | manifest | Shows schema-change risk even when SQL compiles. |
 | s033 | `demo/s033-accepted-values-removed` | planned | Status enum test removed | test_coverage | COMMENT | `rule-catalog:accepted-values-removed` | manifest | Shows unexpected enum values can reach metrics. |
@@ -153,6 +153,7 @@ These should become demo branches only after deterministic support exists:
 | existing | 6 | passed in prior checkpoint | Documented in `2026-06-08-dbt-pr-review-self-improvement-loop.md`. |
 | pilot | 10 | passed locally | `s001`-`s010` reached expected verdicts with fresh DuckDB state per branch. |
 | tranche 2 | 10 | passed locally | `s011`-`s020` reached observed expected verdicts; `s015` and `s019` need stronger precise evidence before final customer demo. |
+| tranche 3 | 10 | passed locally | `s021`-`s030` reached expected verdicts after strengthening weak candidates and wiring schema YAML catalog rules. |
 | full corpus | 50 | pending | Scale only after pilot remains low-noise. |
 
 ## Pilot Matrix Result
@@ -225,3 +226,33 @@ Tranche 2 follow-ups:
 - `s019` did not trigger the intended scalar-subquery rule because the current
   rule is too line-shape-sensitive for formatted SQL. Replace it with a better
   scenario or move the detector into core AST analysis before final acceptance.
+
+## Tranche 3 Matrix Result
+
+Run date: 2026-06-08.
+
+Validation setup matched prior tranche runs. Tranche 3 also added a deterministic
+orchestration fix: `schema.yml` review now evaluates the existing rule catalog
+in addition to the older removed-test detector, so metadata rules such as
+`test-severity-warn`, `yml-description-removed`, and `yml-column-removed`
+actually run.
+
+| id | branch | expected | actual | findings | deterministic evidence |
+|---|---|---:|---:|---:|---|
+| s021 | `demo/s021-union-dedup-cost` | COMMENT | COMMENT | 4 | `rule-catalog:union-not-all`, `altimate_core.check:union_without_all`, core structural/equivalence |
+| s022 | `demo/s022-in-subquery-large` | COMMENT | COMMENT | 2 | `rule-catalog:in-subquery-large`, core equivalence |
+| s023 | `demo/s023-full-outer-join-filtered` | COMMENT | COMMENT | 3 | `altimate_core.check:full_outer_join`, `altimate_core.structural_diff:join_type_change` |
+| s024 | `demo/s024-weak-pii-hash` | COMMENT | COMMENT | 3 | `rule-catalog:weak-pii-hash`, core structural/equivalence |
+| s025 | `demo/s025-hardcoded-secret` | REQUEST_CHANGES | REQUEST_CHANGES | 2 | `rule-catalog:hardcoded-credential`, core equivalence |
+| s026 | `demo/s026-new-phone-pii` | REQUEST_CHANGES | REQUEST_CHANGES | 6 | `altimate_core.classify_pii`, core equivalence, lineage impact |
+| s027 | `demo/s027-new-ssn-pii` | REQUEST_CHANGES | REQUEST_CHANGES | 6 | `altimate_core.classify_pii`, core equivalence, lineage impact |
+| s028 | `demo/s028-test-severity-warn` | COMMENT | COMMENT | 2 | `rule-catalog:test-severity-warn`, `dbt-patterns:removed_tests` |
+| s029 | `demo/s029-description-removed` | COMMENT | COMMENT | 1 | `rule-catalog:yml-description-removed` |
+| s030 | `demo/s030-yml-column-removed` | COMMENT | COMMENT | 2 | `rule-catalog:yml-column-removed`, `rule-catalog:yml-description-removed` |
+
+Tranche 3 follow-ups:
+
+- `s026` and `s027` also emit `rule-catalog:rs-varchar-default` because the new
+  staging columns cast to bare `varchar`. The customer-facing demo should lead
+  with `altimate_core.classify_pii`; the varchar warning is non-blocking
+  secondary evidence.

@@ -146,6 +146,19 @@ describe("dbt-patterns detectors", () => {
     expect(has(f, "test_coverage")).toBe(true)
   })
 
+  test("schema.yml: catalog rules run for metadata/test weakening", () => {
+    const f = detectSchemaYmlPatterns(
+      {
+        path: "models/marts/_models.yml",
+        status: "modified",
+        diff: "+              severity: warn\n-    description: One row per order",
+      },
+      DEFAULT_RUBRIC,
+    )
+    expect(f.some((x) => x.evidence?.tool === "rule-catalog" && (x.evidence?.result as any)?.rule === "test-severity-warn")).toBe(true)
+    expect(f.some((x) => x.evidence?.tool === "rule-catalog" && (x.evidence?.result as any)?.rule === "yml-description-removed")).toBe(true)
+  })
+
   test("benign additive column produces NO dbt-pattern finding (precision)", () => {
     const sql = `select id, upper(status) as status_upper from {{ ref('x') }}`
     const f = detectModelPatterns(

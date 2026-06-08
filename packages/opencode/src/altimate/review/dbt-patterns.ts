@@ -794,29 +794,33 @@ export function detectSchemaYmlPatterns(file: ChangedFile, rubric: Rubric): Find
   const kind = classifyDbtFile(file.path)
   if (kind !== "schema_yml" || file.status === "deleted") return []
   const { added, removed } = splitDiff(file.diff)
+  const out: Finding[] = []
   const removedTests = removed.filter((l) => /^\s*-\s*(unique|not_null|relationships)\b/i.test(l))
   // A test still present (just moved) shouldn't fire.
   const addedTests = new Set(added.map((l) => l.trim()))
   const genuinelyRemoved = removedTests.filter((l) => !addedTests.has(l.trim()))
-  if (!genuinelyRemoved.length) return []
-  const removedUnique = genuinelyRemoved.some((l) => /\bunique\b/i.test(l))
-  const f = makeFinding({
-    severity: removedUnique ? "warning" : "suggestion",
-    category: "test_coverage",
-    title: `${file.path.split("/").pop()}: removed ${genuinelyRemoved.length} data test(s)`,
-    body:
-      "This change deletes `unique`/`not_null`/`relationships` test(s) — the guardrails that catch fan-out, duplicate, " +
-      "and broken-FK regressions. Removing a `unique` test on a grain key is how silent duplicate bugs ship. " +
-      "Confirm the test is genuinely obsolete, not removed to make CI green.",
-    file: file.path,
-    confidence: "high",
-    evidence: {
-      tool: "dbt-patterns",
-      result: { rule: "removed_tests", removed: genuinelyRemoved.map((l) => l.trim()) },
-    },
-    ruleKey: "test_coverage:removed-tests",
-  })
-  return [{ ...f, severity: clampSeverity(f.category, f.severity, f.confidence) }].filter(
-    (x) => !exclusionReason(x, rubric),
-  )
+  if (genuinelyRemoved.length) {
+    const removedUnique = genuinelyRemoved.some((l) => /\bunique\b/i.test(l))
+    const f = makeFinding({
+      severity: removedUnique ? "warning" : "suggestion",
+      category: "test_coverage",
+      title: `${file.path.split("/").pop()}: removed ${genuinelyRemoved.length} data test(s)`,
+      body:
+        "This change deletes `unique`/`not_null`/`relationships` test(s) — the guardrails that catch fan-out, duplicate, " +
+        "and broken-FK regressions. Removing a `unique` test on a grain key is how silent duplicate bugs ship. " +
+        "Confirm the test is genuinely obsolete, not removed to make CI green.",
+      file: file.path,
+      confidence: "high",
+      evidence: {
+        tool: "dbt-patterns",
+        result: { rule: "removed_tests", removed: genuinelyRemoved.map((l) => l.trim()) },
+      },
+      ruleKey: "test_coverage:removed-tests",
+    })
+    out.push(f)
+  }
+  out.push(...evaluateCatalog(file, "", added, removed, rubric))
+  return out
+    .map((f) => ({ ...f, severity: clampSeverity(f.category, f.severity, f.confidence) }))
+    .filter((x) => !exclusionReason(x, rubric))
 }
