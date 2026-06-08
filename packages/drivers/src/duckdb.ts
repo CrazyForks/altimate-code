@@ -56,26 +56,29 @@ export async function connect(config: ConnectionConfig): Promise<Connector> {
         new Promise<any>((resolve, reject) => {
           let resolved = false
           let timeout: ReturnType<typeof setTimeout> | undefined
+          let instance: any
           const opts = accessMode ? { access_mode: accessMode } : undefined
-          const instance = new duckdb.Database(
-            dbPath,
-            opts,
-            (err: Error | null) => {
-              if (resolved) { if (instance && typeof instance.close === "function") instance.close(); return }
-              resolved = true
-              if (timeout) clearTimeout(timeout)
-              if (err) {
-                const msg = err.message || String(err)
-                if (msg.toLowerCase().includes("locked") || msg.includes("SQLITE_BUSY") || msg.includes("DUCKDB_LOCKED")) {
-                  reject(new Error("DUCKDB_LOCKED"))
-                } else {
-                  reject(err)
-                }
+          const onOpen = (err: Error | null) => {
+            if (resolved) {
+              if (instance && typeof instance.close === "function") instance.close()
+              return
+            }
+            resolved = true
+            if (timeout) clearTimeout(timeout)
+            if (err) {
+              const msg = err.message || String(err)
+              if (msg.toLowerCase().includes("locked") || msg.includes("SQLITE_BUSY") || msg.includes("DUCKDB_LOCKED")) {
+                reject(new Error("DUCKDB_LOCKED"))
               } else {
-                resolve(instance)
+                reject(err)
               }
-            },
-          )
+            } else {
+              resolve(instance)
+            }
+          }
+          instance = opts
+            ? new duckdb.Database(dbPath, opts, onOpen)
+            : new duckdb.Database(dbPath, onOpen)
           // Bun: native callback may not fire; fall back after 2s
           timeout = setTimeout(() => {
             if (!resolved) {

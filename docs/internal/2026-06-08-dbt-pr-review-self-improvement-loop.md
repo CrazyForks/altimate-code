@@ -285,6 +285,43 @@ Implemented result:
 - Real-world corpus floor preserved: 15/15 bad cases caught, 0/5 false
   positives.
 
+## Current Acceptance Checkpoint
+
+Demo matrix with local core, base artifacts in `target-base`, head artifacts in
+`target`, and AI disabled:
+
+| Branch | Expected | Actual | Deterministic evidence |
+|---|---:|---:|---|
+| `demo/safe-refactor` | `APPROVE` | `APPROVE` | no findings |
+| `demo/join-key-breakage` | `REQUEST_CHANGES` | `REQUEST_CHANGES` | `altimate_core.structural_diff:SC010`, core equivalence |
+| `demo/test-removal` | `COMMENT` | `COMMENT` | `dbt-patterns:removed_tests` |
+| `demo/new-pii-exposure` | `REQUEST_CHANGES` | `REQUEST_CHANGES` | `altimate_core.classify_pii`, core equivalence |
+| `demo/mart-select-star` | `COMMENT` | `COMMENT` | core equivalence warning |
+| `demo/incremental-without-guard` | `COMMENT` | `COMMENT` | core dbt config lint + deterministic catalog cost notes |
+
+DuckDB e2e proof:
+
+- Branch: `demo/join-key-breakage`.
+- `dbt build --profiles-dir . --target dev`: passed `PASS=14 WARN=0 ERROR=0`.
+- Reviewer: `REQUEST_CHANGES` with critical `join_risk` from
+  `altimate_core.structural_diff` rule `join_key_regression` (`SC010`).
+
+Warehouse data-diff e2e proof:
+
+- Test: `packages/opencode/test/altimate/data-diff-duckdb-e2e.test.ts`.
+- Connection: local DuckDB via `@altimateai/drivers/duckdb`.
+- Base/head relations: `base_orders` and `head_orders`.
+- Key columns: `order_id`; compared value column: `amount`.
+- Observed warehouse delta: one row only in head and one updated value.
+- Validation:
+  `ALTIMATE_RUN_WAREHOUSE_E2E=1 bun test --timeout 30000 test/altimate/data-diff-duckdb-e2e.test.ts`.
+- Default fast-loop behavior:
+  `bun test --timeout 30000 test/altimate/data-diff-duckdb-e2e.test.ts`
+  skips unless `ALTIMATE_RUN_WAREHOUSE_E2E=1` is set.
+- Implementation note: fixed the DuckDB connector to use the two-argument
+  constructor when no open options are required; Bun's native binding can miss
+  the callback when `undefined` is passed as the second argument.
+
 ## Warehouse E2E Policy
 
 Use local DuckDB first for fast end-to-end checks, then add BigQuery runs when a
