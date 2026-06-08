@@ -933,12 +933,18 @@ async function piiClassifyLane(ctx: ModelContext, runner: ReviewRunner, dialect:
   if (!newCols.length) return []
   const pii = await runner.classifyPii(newCols)
   const out: Finding[] = []
+  const highExposureLayer = /(^|\/)(marts|reporting)\//.test(file.path)
   for (const p of pii) {
-    if (p.confidence < 0.7 || !p.column) continue
+    const classification = String(p.classification ?? "")
+    const lowRiskClass = /^(name|address)$/i.test(classification)
+    const minConfidence = lowRiskClass ? 0.9 : 0.7
+    if (p.confidence < minConfidence || !p.column) continue
     const col = p.column.toLowerCase()
+    const highConfidence = p.confidence >= 0.9
+    const severity: Severity = highExposureLayer && highConfidence && !lowRiskClass ? "critical" : "warning"
     out.push(
       makeFinding({
-        severity: "warning",
+        severity: clampSeverity("pii_exposure", severity, highConfidence ? "high" : "medium"),
         category: "pii_exposure",
         title: `${model}: exposes ${p.classification} column \`${p.column}\``,
         body:
@@ -947,7 +953,7 @@ async function piiClassifyLane(ctx: ModelContext, runner: ReviewRunner, dialect:
           (p.masking ? `; suggested masking: \`${p.masking}\`.` : "."),
         file: file.path,
         model,
-        confidence: p.confidence >= 0.9 ? "high" : "medium",
+        confidence: highConfidence ? "high" : "medium",
         evidence: { tool: "altimate_core.classify_pii", result: p },
         ruleKey: `pii_exposure:${col}`,
       }),
@@ -1071,7 +1077,8 @@ export async function runReview(input: OrchestrateInput): Promise<VerdictEnvelop
       tasks.push(columnBreakageLane(ctx, input.runner, getCompiled, dialect))
     }
     if (lanes.has("test_coverage")) tasks.push(missingGrainTestLane(ctx, input.runner))
-    if (lanes.has("pii_exposure")) all.push(piiLane(ctx.file, ctx.pii))
+    const hasDiffScopedPii = !!input.runner.classifyPii && !!input.runner.columnLineage
+    if (lanes.has("pii_exposure") && !hasDiffScopedPii) all.push(piiLane(ctx.file, ctx.pii))
     // PII classification always runs (cheap name-pattern check, diff-scoped to
     // newly-introduced columns) — exposing PII is a hard-floor concern that
     // shouldn't depend on the cost tier enabling the pii_exposure lane.
@@ -1139,6 +1146,12 @@ export async function runReview(input: OrchestrateInput): Promise<VerdictEnvelop
   // regex still covers functions core didn't flag (dialect-suppressed / not in
   // core's set) plus reserved words / types / operators that L033 doesn't do.
   const flat = all.flat()
+  const diffScopedPiiFiles = new Set<string>()
+  if (input.runner.classifyPii && input.runner.columnLineage) {
+    for (const ctx of ctxByPath.values()) {
+      if (ctx.engineNewSql && ctx.file.status !== "deleted") diffScopedPiiFiles.add(ctx.file.path)
+    }
+  }
   // Per file, the concatenated rule names core's AST lint actually emitted —
   // so we suppress a regex twin only when core genuinely covered that concern.
   const coreRulesByFile = new Map<string, string>()
@@ -1161,13 +1174,22 @@ export async function runReview(input: OrchestrateInput): Promise<VerdictEnvelop
     }
   }
   const merged = flat.filter((f) => {
-    if (!coreRanFiles.has(f.file)) return true
     const tool = f.evidence?.tool
+    const fallbackRule = String((f.evidence?.result as any)?.rule ?? "").replace(/_/g, "-")
+    if (
+      (tool === "dbt-patterns" || tool === "rule-catalog") &&
+      diffScopedPiiFiles.has(f.file) &&
+      f.category === "pii_exposure" &&
+      (fallbackRule === "pii-into-mart" || fallbackRule === "select-pii-columns")
+    ) {
+      return false
+    }
+    if (!coreRanFiles.has(f.file)) return true
     if (tool !== "dbt-patterns" && tool !== "rule-catalog") return true
     // Structural twins: the check code survives on evidence.result.rule (ruleKey
     // is stripped by the zod schema). Suppress ONLY if core actually emitted the
     // equivalent rule for this file (else the issue would fall through).
-    const code = String((f.evidence?.result as any)?.rule ?? "").replace(/_/g, "-")
+    const code = fallbackRule
     const coreMatcher = CORE_AST_COVERED[code]
     if (coreMatcher && coreMatcher.test(coreRulesByFile.get(f.file) ?? "")) return false
     // Portability twins: drop a regex finding ONLY IF it is itself a portability
