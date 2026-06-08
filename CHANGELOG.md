@@ -5,10 +5,68 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [0.8.5] - 2026-06-06
+
+### Fixed
+
+- **The `github/review` composite action can be downloaded by GitHub Actions again.** The release tree contained three VS Code image symlinks whose removed targets caused GitHub's action downloader to reject the entire archive before the review step started. The images are now self-contained files and a release-critical test prevents dangling links from returning.
+- **A valid dbt manifest is no longer mislabeled as a lint-only run.** Manifest availability is now checked independently from changed-model lookup, so new models and other valid manifests receive the correct full-run status.
+- **The release-version lookup is rate-limit resilient and never caches a floating `latest`.** The composite action now authenticates its GitHub release-API call with the workflow token (lifting the 60→1,000 req/hr unauthenticated limit) and skips the binary cache entirely when the version resolves to `latest`, so a single rate-limited or offline lookup can no longer pin a stale binary across all subsequent runs.
+- **Session traces survive worker restarts, concurrency, and long sessions without corruption or false alarms.** Three reliability follow-ups to the v0.8.4 trace-durability fix: reconstructed in-flight spans are marked `interrupted` and render with an amber "⚠" instead of red (and are excluded from the session error count) so a restart isn't misread as a failure (#901); `getOrCreateTrace` no longer resurrects a `Trace` into a cache that a concurrent stream switch already cleared, preventing an orphan writer under a dead stream (#902); and the on-disk `ses_<id>.json` projection is bounded to `MAX_SERIALIZED_SPANS` (default 5000, override via `ALTIMATE_TRACE_MAX_SPANS`), keeping head + tail and eliding the middle so long sessions no longer grow the file without bound or pay O(n²) write cost (#903).
 
 ### Added
 
+- **Direct GitHub onboarding and a live dbt review demo.** The GitHub App installer now opens GitHub's repository-selection screen directly, and the README/docs link to the public `dbt-pr-review-demo` pull requests.
+
+### Security
+
+- **The hosted Altimate API key is no longer placed on the `jq` process arg list.** The credential write reads the key from the environment inside the `jq` program, keeping it out of `argv` (which is visible to other processes and printed verbatim when `ACTIONS_STEP_DEBUG` enables `set -x`).
+
+## [0.8.4] - 2026-06-05
+
+A trace-durability patch. Open `/traces` mid-session and you'd see a rich waterfall — then the moment the agent finished its turn the view collapsed to a single "system-prompt" span, the Summary tab's *"What was asked"* showed *"No prompt recorded"*, and the Chat tab dropped every user turn but the last. The data was genuinely gone from disk, not just hidden in the viewer. This release stops the on-disk trace from being overwritten after each turn and makes the file authoritative across worker restarts. A five-persona pre-release review drove a follow-up wording fix so a reconstructed trace isn't misread as a failed run.
+
+### Fixed
+
+- **Session traces no longer lose their data after every agent turn — the waterfall, summary prompt, and chat tab all stay intact.** A `session.status === "idle"` handler in the shared TUI worker fired once *per turn* (not once per session), ending the `Trace` and evicting it from cache; the next event reconstructed a fresh `Trace` whose near-empty initial state overwrote the rich `ses_<id>.json` on disk with a one-span file. Symptoms: the **Waterfall** collapsed to a lone "system-prompt" span, the **Summary** tab's *"What was asked"* went to *"No prompt recorded"*, and the **Chat** tab kept only the last user turn. The destructive idle handler is removed (sessions are long-lived — finalization happens on shutdown and `MAX_TRACES` eviction only), trace reconstruction now **rehydrates from the on-disk file** before falling back to a fresh start, and each user prompt is recorded as its own `user-message` span so multi-turn sessions render every turn in order. Authored-text scoping keeps synthetic parts (MCP banners, decoded file contents, reminders) out of the prompt and chat surfaces. Distinct from the v0.8.1 trace-corruption fix (#865), which addressed intra-instance concurrency — this is the worker-level cache lifecycle. (#895)
+- **A trace reconstructed after a restart no longer reads as a failed run.** When the on-disk trace is rehydrated (worker restart or `MAX_TRACES` eviction), any generation span still in flight is closed and marked so its boundary stays visible in the waterfall. The status message now states plainly that altimate-code restarted before the step finished recording and that this is **not an agent failure** — so an on-call reader debugging from a trace isn't sent chasing a phantom incident. (#895)
+
+## [0.8.3] - 2026-06-04
+
+A plan-mode reliability patch for the hosted gateway and other non-Anthropic models. Ask the `plan` agent to plan something benign — *"plan a feature to add a verify-output button"* — on `altimate-backend/altimate-default` (GPT-5.x) and it could refuse outright with *"I'm sorry, but I cannot assist with that request."* This release fixes the refusal at its source, hardens the fix against prompt-injection, and rewrites a warning that was misdiagnosing the symptom.
+
+### Fixed
+
+- **Plan mode no longer refuses benign requests on `altimate-default` and other non-Anthropic models.** The root cause was *how* altimate-code delivers its own plan instructions: a `<system-reminder>`-wrapped block attached as user-role text. Claude is trained to read that tag as authoritative system guidance, but GPT-5.x, Gemini, and other non-Anthropic models pattern-matched the same block — carrying `STRICTLY FORBIDDEN` / `ZERO exceptions` / `MUST` language — as a **prompt-injection attempt** and declined, returning *"I'm sorry, but I cannot assist with that request."* for ordinary developer tasks. altimate-code now **hoists those self-injected reminders into proper `role:"system"` messages** for non-Anthropic models, so they arrive as instructions rather than suspect user input; Anthropic models are unchanged. The hoist is scoped by **provenance** to altimate-code's own reminder parts — user-supplied files, MCP-resource bodies, and `data:`-URL content can never gain system-role priority, even when they begin with `<system-reminder>`. Gateway models are routed by `model.family` (via a shared `familyVendor` classifier) so a Claude- or Gemini-backed gateway model lands on the right base prompt instead of an Anthropic-style fallback. (#887, #888)
+- **The "plan agent used no tools" warning is accurate — and no longer false-fires.** Previously the warning blamed the model's *tool-use capability* (misleading — these models are fully tool-capable) and could fire on the final text-only step of a **successful** multi-step plan session, making a working session look broken. The trip-wire now scans the conversation history for prior tool calls, so a session that already explored the codebase isn't flagged. When it does fire, the copy describes the observed symptom only ("stopped without calling any tools"), lists the likely causes, and offers concrete recoveries — ask it to investigate first, rephrase, or, if it keeps refusing, `/model` to a tier more eager to explore. The plan agent is also now instructed to **read or search the codebase before drafting** any plan, with an explicit escape hatch for trivial, fully-specified changes. See [Plan mode](https://docs.altimate.sh/data-engineering/agent-modes/#plan) and [Troubleshooting](https://docs.altimate.sh/reference/troubleshooting/). (#888)
+
+## [0.8.2] - 2026-06-03
+
+A small correctness patch. The dbt PR reviewer's deterministic engine never required an altimate API key — but two tool descriptions said it did, which could push the reviewer into lint-only mode and send users chasing a key they don't need. This release corrects that and documents what "lint-only" actually means.
+
+### Fixed
+
+- **`dbt_pr_review` no longer implies it needs an altimate API key.** The native `altimate-core` engine behind the reviewer (column-lineage blast radius, query equivalence, PII classification, A–F grade) runs **fully offline** via the bundled napi binary — there is no `altimate_core.init` and no API-key gate in that path. Two tool descriptions (`altimate_core_column_lineage`, `altimate_core_track_lineage`) still carried a stale Python-bridge-era line claiming *"Requires `altimate_core.init()` with API key"*, so a stuck **lint-only** run was mis-diagnosed as missing auth. The descriptions now state the tools run offline with no key. **Lint-only actually means the dbt `manifest.json` didn't resolve** (wrong path, stale manifest, or wrong working directory) — the [dbt PR Review docs](https://docs.altimate.sh/usage/dbt-pr-review/) now spell out how to fix it. The only thing that ever needs a key is the optional advisory LLM lane, which can never block a verdict. (#882)
+
+## [0.8.1] - 2026-06-02
+
+A reliability + correctness patch on top of 0.8.0. Highlights: **8 new Snowflake Cortex models** (with a config escape-hatch so you never wait for a release again), a **trace-corruption fix** for long-running sessions, and a **behavior change to the dbt PR reviewer** — it now always posts a GitHub *comment* and never a formal *approval*.
+
+### Added
+
+- **Snowflake Cortex — 8 new selectable models.** Closes the drift between altimate-code's hardcoded Cortex model list and Snowflake's current regional-availability matrix: adds `claude-opus-4-7`, `openai-gpt-5.1`, `openai-gpt-5.2`, `llama4-scout`, `llama3.3-70b`, `snowflake-llama-3.1-405b`, `mixtral-8x7b`, and `gemini-3.1-pro` (Claude + OpenAI tool-capable; the rest chat-only, the conservative default until tool calling is verified on Cortex). When Cortex adds a model before the next release, you can now add it yourself under `provider["snowflake-cortex"].models` in `altimate-code.json` and it merges into the picker — no fork, no waiting. See [Snowflake Cortex provider docs](https://docs.altimate.sh/configure/providers/). (#866)
+
+### Fixed
+
+- **dbt PR reviewer never posts a formal GitHub *Approve* — behavior change.** The reviewer's `APPROVE` verdict now posts a GitHub **COMMENT** review event (the "approved — no findings" outcome is in the comment body), never a formal *Approve*. A review bot must not be able to satisfy branch protection / required reviews and let a PR merge without human sign-off (observed on a real PR where the bot had auto-approved). The no-formal-approval invariant is now enforced at compile time. **Migration:** to block merges, gate on the verdict **check** (`--mode gate`), not on requiring this bot as a reviewer — if your branch protection previously *required the altimate bot's approval*, remove that requirement or those merges will stay blocked. (#870, #872)
+- **Trace corruption in long-running sessions.** Two concurrency bugs in the observability tracer are fixed: bursty turns (an LLM step firing many tool calls back-to-back) could drop the tail of a burst from the trace file when the process exited in the debounce gap (M2), and a crash during a large trace export could be overwritten by the in-flight export and show a stale terminal status instead of `crashed` (M3). Trace files now reliably reflect what actually happened, scoped per session in the shared TUI worker. (#865)
+
+Headlined by **dbt PR Review** — a Cloudflare-style, dbt/SQL-specialized code reviewer that emits a single **signed** verdict (`APPROVE` / `COMMENT` / `REQUEST_CHANGES`) where every *blocking* finding is backed by a deterministic `altimate-core` engine call over parsed SQL ASTs, not a model's opinion. An optional LLM lane adds advisory context but can never block. This release also adds a **native Trino driver**, the opt-in **completion-gate validators**, and reliability/cost fixes. A five-persona pre-release review drove a security hardening pass on the new `reviewer` agent (see Security).
+
+### Added
+
+- **dbt PR Review — signed, deterministic verdicts on dbt pull requests.** New `altimate review` CLI command and a composite GitHub Action (`github/review`). The deterministic engine (column-lineage / DAG blast radius, query equivalence on before/after model SQL, PII classification, A–F grade + anti-pattern lint) is the **only** layer that can block; an optional LLM reviewer is clamped to ≤ warning and excluded from the gate, so a `REQUEST_CHANGES` is always provable and replayable. Runs in CI with **zero warehouse access** (consumes `dbt compile` artifacts), and the verdict is HMAC-signable and tamper-evident. `comment` mode never blocks; `gate` mode fails the check on `REQUEST_CHANGES`. The advisory model/credentials are configured on the Action (hosted `altimate_api_key`, or bring-your-own `model` + `model_api_key`); omit them to run deterministic-only. See [dbt PR Review docs](https://docs.altimate.sh/usage/dbt-pr-review/) and the copy-paste workflow in `github/review/examples/`. Depends on `@altimateai/altimate-core` ≥ 0.4.0. (#856)
+- **Native Trino driver.** First-class Trino support over HTTP(S) with catalog/schema introspection and None / Basic / Bearer-token auth. **Migration note:** the dbt `trino` adapter previously mapped to the PostgreSQL driver; it now uses the native driver. Existing profiles are auto-aliased (`database` → `catalog`, `token` → `access_token`) and otherwise compatible. `trino-client` is an optional dependency — install it (`npm install trino-client`) to use Trino. (#795)
 - **Completion-gate validator framework.** A new opt-in harness-side check
   that runs after the LLM declares `finish === "stop"`. Two built-in
   validators for dbt projects: `dbt-tests-pass` (runs `altimate-dbt test`
@@ -24,6 +82,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   See [Validators docs](https://docs.altimate.sh/data-engineering/validators/)
   for the full reference, performance characteristics, and the phased
   rollout plan. (#849)
+
+### Fixed
+
+- **`cancel()` race / idle-on-clean-exit.** A cancel arriving during normal loop teardown could leave a session without a `session.status:idle` event, leaving callers waiting on idle stuck. Idle is now emitted correctly on both the abort and clean-exit paths. (#845)
+- **Prompt caching on the `altimate-backend` provider.** Enabled the `cache_control` trigger for the hosted provider so the litellm Anthropic fallback caches repeated prompt prefixes — cheaper and faster repeat turns (no-op on providers that ignore the marker). (#850)
+
+### Security
+
+- **`reviewer` agent hardened to deny bash.** The v0.8.0 pre-release review found that the new `reviewer` agent — advertised as "read-only" — had a bash allowlist (`git log *`, `cat *`, `ls *`) that was bypassable: shell redirects rode *inside* a matched command (`git log -p > ~/.ssh/authorized_keys` was allowed) and `cat *` could read arbitrary files (e.g. `~/.altimate/altimate.json`) and exfiltrate them through the PR comment the agent posts. Bash is now **denied** for the reviewer (it uses the structured `read`/`grep`/`glob` tools + the verdict engine, which does its own diffing); the agent description was corrected; and the reviewer prompt now treats PR content as untrusted input. The CI Action path was never affected — its LLM lane runs with no tools. (#856)
 
 ## [0.7.3] - 2026-05-24
 
