@@ -94,16 +94,16 @@ four new branches with deterministic support already present.
 
 | id | branch | status | title | category | expected | evidence | artifact_needs | demo_script |
 |---|---|---|---|---|---|---|---|---|
-| s011 | `demo/s011-left-join-to-inner` | planned | LEFT JOIN changed to INNER JOIN | join_risk | COMMENT | `altimate_core.structural_diff` join kind change if present, otherwise core-needed | manifest, target-base | Highlights row-loss risk from changing join optionality. |
+| s011 | `demo/s011-left-join-to-inner` | implemented | LEFT JOIN changed to INNER JOIN | semantic_change | COMMENT | `altimate_core.structural_diff:join_type_change` | manifest, target-base | Highlights row-loss risk from changing join optionality. |
 | s012 | `demo/s012-join-using-ambiguity` | planned | JOIN USING hides merged key behavior | join_risk | COMMENT | `rule-catalog:using-join` | manifest | Shows ambiguity from merged join columns. |
 | s013 | `demo/s013-right-join-readability` | planned | RIGHT JOIN introduced | sql_quality | COMMENT | `rule-catalog:right-join` | manifest | Shows a readability/maintainability warning with low blocking risk. |
-| s014 | `demo/s014-cross-join` | planned | Accidental cross join | join_risk | REQUEST_CHANGES | `dbt-patterns:cross-join` or core lint | manifest | Shows a high-confidence fanout catch. |
-| s015 | `demo/s015-multiple-detail-left-joins` | planned | Multiple detail LEFT JOINs create fanout risk | join_risk | COMMENT | `rule-catalog:multiple-left-joins` | manifest | Shows an advisory fanout review before row counts explode. |
-| s016 | `demo/s016-group-by-grain-change` | planned | GROUP BY grain changed | semantic_change | COMMENT | `altimate_core.structural_diff:group_by_change` | manifest, target-base | Shows grain-level semantic drift in an aggregate mart. |
-| s017 | `demo/s017-distinct-added` | planned | DISTINCT added to hide duplicates | semantic_change | COMMENT | `altimate_core.structural_diff:distinct_added` | manifest, target-base | Shows dedup masking rather than fixing upstream grain. |
-| s018 | `demo/s018-distinct-removed` | planned | DISTINCT removed from deduped output | semantic_change | COMMENT | `altimate_core.structural_diff:distinct_removed` | manifest, target-base | Shows duplicate-risk regression. |
-| s019 | `demo/s019-coalesce-removed` | planned | Null guard removed from revenue | semantic_change | COMMENT | `altimate_core.structural_diff:coalesce_removed` | manifest, target-base | Shows null propagation risk in financial metrics. |
-| s020 | `demo/s020-surrogate-key-change` | planned | Surrogate key inputs changed | dedup | COMMENT | `altimate_core.structural_diff:surrogate_key_change` | manifest, target-base | Shows dedup identity drift. |
+| s014 | `demo/s014-cross-join-filtered` | implemented | Filtered CROSS JOIN introduced | join_risk | REQUEST_CHANGES | `dbt-patterns:cross_join` | manifest | Shows a high-confidence fanout/cost catch even when a WHERE filter preserves current rows. |
+| s015 | `demo/s015-multiple-left-joins` | implemented-needs-strengthening | Multiple LEFT JOINs create fanout risk | semantic_change | COMMENT | `altimate_core.equivalence` | manifest, target-base | Shows a fanout-shaped change, but should be strengthened with a precise fanout rule before customer demo. |
+| s016 | `demo/s016-distinct-added` | implemented | DISTINCT added to hide duplicates | semantic_change | COMMENT | `altimate_core.structural_diff:distinct_added` | manifest, target-base | Shows dedup masking rather than fixing upstream grain. |
+| s017 | `demo/s017-limit-added` | implemented | LIMIT added to a mart | sql_correctness | REQUEST_CHANGES | `dbt-patterns:limit-in-model`, `altimate_core.structural_diff:limit_added` | manifest, target-base | Shows accidental sampling in production logic. |
+| s018 | `demo/s018-clock-column` | implemented | Runtime clock added to mart output | sql_correctness | COMMENT | `rule-catalog:timezone-naive-now` | manifest | Shows non-reproducible output from run-time clock functions. |
+| s019 | `demo/s019-scalar-subquery-select` | implemented-needs-strengthening | Scalar subquery added to SELECT | semantic_change | COMMENT | `altimate_core.equivalence` | manifest, target-base | Shows output-shape semantic drift, but should be strengthened with a precise scalar-subquery rule before customer demo. |
+| s020 | `demo/s020-not-in-subquery` | implemented | NOT IN subquery added | sql_correctness | COMMENT | `altimate_core.check:not_in_nullable`, `rule-catalog:not-exists-suggested` | manifest | Shows the NULL-sensitive `NOT IN` failure mode. |
 | s021 | `demo/s021-window-partition-dropped` | deferred-core-needed | Window partition removed | semantic_change | COMMENT | core structural diff needed | manifest, target-base | Would catch ranking/dedup leakage across customers. |
 | s022 | `demo/s022-window-order-reversed` | deferred-core-needed | Latest-order window order reversed | semantic_change | COMMENT | core structural diff needed | manifest, target-base | Would catch choosing oldest record instead of latest. |
 | s023 | `demo/s023-limit-added` | planned | LIMIT added to mart | semantic_change | COMMENT | `altimate_core.structural_diff` limit support if surfaced | manifest, target-base | Shows accidental sampling in production logic. |
@@ -152,6 +152,7 @@ These should become demo branches only after deterministic support exists:
 |---|---:|---|---|
 | existing | 6 | passed in prior checkpoint | Documented in `2026-06-08-dbt-pr-review-self-improvement-loop.md`. |
 | pilot | 10 | passed locally | `s001`-`s010` reached expected verdicts with fresh DuckDB state per branch. |
+| tranche 2 | 10 | passed locally | `s011`-`s020` reached observed expected verdicts; `s015` and `s019` need stronger precise evidence before final customer demo. |
 | full corpus | 50 | pending | Scale only after pilot remains low-noise. |
 
 ## Pilot Matrix Result
@@ -194,3 +195,33 @@ Pilot follow-ups:
   configured test removes the simple test line in the diff. This is still
   deterministic and accurate, but a future structured YAML rule could produce a
   more precise `test_disabled` label.
+
+## Tranche 2 Matrix Result
+
+Run date: 2026-06-08.
+
+Validation setup matched the pilot matrix: fresh DuckDB file per branch, `dbt
+build`, `dbt compile`, `dbt docs generate`, local `altimate-code`, local linked
+`altimate-core`, and explicit `--no-ai`.
+
+| id | branch | expected | actual | findings | deterministic evidence |
+|---|---|---:|---:|---:|---|
+| s011 | `demo/s011-left-join-to-inner` | COMMENT | COMMENT | 2 | core equivalence, `altimate_core.structural_diff:join_type_change` |
+| s012 | `demo/s012-join-using-ambiguity` | COMMENT | COMMENT | 3 | `rule-catalog:using-join`, core equivalence |
+| s013 | `demo/s013-right-join-readability` | COMMENT | COMMENT | 3 | `rule-catalog:right-join`, `altimate_core.structural_diff:join_type_change` |
+| s014 | `demo/s014-cross-join-filtered` | REQUEST_CHANGES | REQUEST_CHANGES | 2 | `dbt-patterns:cross_join`, core equivalence |
+| s015 | `demo/s015-multiple-left-joins` | COMMENT | COMMENT | 1 | core equivalence |
+| s016 | `demo/s016-distinct-added` | COMMENT | COMMENT | 3 | `altimate_core.structural_diff:distinct_added`, `altimate_core.check:select_distinct_smell` |
+| s017 | `demo/s017-limit-added` | REQUEST_CHANGES | REQUEST_CHANGES | 4 | `dbt-patterns:limit-in-model`, `altimate_core.structural_diff:limit_added`, `rule-catalog:limit-no-order` |
+| s018 | `demo/s018-clock-column` | COMMENT | COMMENT | 2 | `rule-catalog:timezone-naive-now`, core equivalence |
+| s019 | `demo/s019-scalar-subquery-select` | COMMENT | COMMENT | 1 | core equivalence |
+| s020 | `demo/s020-not-in-subquery` | COMMENT | COMMENT | 3 | `altimate_core.check:not_in_nullable`, `rule-catalog:not-exists-suggested`, core equivalence |
+
+Tranche 2 follow-ups:
+
+- `s015` did not trigger the intended precise multiple-left-join/fanout rule and
+  should be replaced or backed by a stronger deterministic fanout lane before
+  final customer-demo acceptance.
+- `s019` did not trigger the intended scalar-subquery rule because the current
+  rule is too line-shape-sensitive for formatted SQL. Replace it with a better
+  scenario or move the detector into core AST analysis before final acceptance.
