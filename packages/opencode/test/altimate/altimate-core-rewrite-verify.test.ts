@@ -40,10 +40,12 @@ const SCHEMA = { customers: { customer_id: "INTEGER", first_name: "VARCHAR" } }
 const ORIGINAL = "SELECT customer_id FROM (SELECT * FROM customers) s WHERE customer_id = 1"
 const REWRITE = "SELECT customer_id FROM customers WHERE customer_id = 1"
 
+// Exercise altimate_core_rewrite in VERIFY mode (verify_equivalence: true) — the
+// verified-optimization path folded into the rewrite tool.
 async function runTool(args: any) {
-  const { AltimateVerifiedOptimizeTool } = await import("../../src/altimate/tools/altimate-verified-optimize")
-  const tool = await AltimateVerifiedOptimizeTool.init()
-  return tool.execute(args, stubCtx())
+  const { AltimateCoreRewriteTool } = await import("../../src/altimate/tools/altimate-core-rewrite")
+  const tool = await AltimateCoreRewriteTool.init()
+  return tool.execute({ ...args, verify_equivalence: true }, stubCtx())
 }
 
 // Register a rewrite handler that returns one candidate rewrite, and an
@@ -52,7 +54,11 @@ function mockRewriteAndEquivalence(rewrittenSql: string | undefined, equivalence
   Dispatcher.register("altimate_core.rewrite" as any, async () => ({
     success: true,
     data: rewrittenSql
-      ? { original_sql: ORIGINAL, rewritten_sql: rewrittenSql, suggestions: [{ rule: "FLATTEN_SUBQUERY", rewritten_sql: rewrittenSql }] }
+      ? {
+          original_sql: ORIGINAL,
+          rewritten_sql: rewrittenSql,
+          suggestions: [{ rule: "FLATTEN_SUBQUERY", rewritten_sql: rewrittenSql }],
+        }
       : { original_sql: ORIGINAL, suggestions: [] },
   }))
   Dispatcher.register("altimate_core.equivalence" as any, async () => ({ success: true, data: equivalence }))
@@ -151,6 +157,28 @@ describe("verified-optimize — gate logic (mocked engine)", () => {
     expect(r.metadata.verified_count).toBe(1)
     expect(r.metadata.unverified_count).toBe(1)
   })
+
+  test("partial success: one succeeds, one throws, remaining checked -> returns all results", async () => {
+    const r2 = "SELECT customer_id FROM customers WHERE customer_id = 2"
+    const r3 = "SELECT customer_id FROM customers WHERE customer_id = 3"
+    Dispatcher.register("altimate_core.rewrite" as any, async () => ({
+      success: true,
+      data: { suggestions: [{ rewritten_sql: REWRITE }, { rewritten_sql: r2 }, { rewritten_sql: r3 }] },
+    }))
+    let callCount = 0
+    Dispatcher.register("altimate_core.equivalence" as any, async () => {
+      callCount++
+      if (callCount === 1) return { success: true, data: { equivalent: true } }
+      if (callCount === 2) throw new Error("equiv boom")
+      return { success: true, data: { equivalent: false } }
+    })
+    const r = await runTool({ sql: ORIGINAL, schema_context: SCHEMA })
+    expect(r.metadata.verified_count).toBe(1)
+    expect(r.metadata.unverified_count).toBe(2)
+    expect(r.metadata.success).toBe(true)
+    expect(String(r.output)).toContain(REWRITE)
+    expect(String(r.output)).toContain("equiv boom")
+  })
 })
 
 describe("verified-optimize — ADVERSARIAL: gate only trusts strict equivalent===true", () => {
@@ -183,6 +211,22 @@ describe("verified-optimize — ADVERSARIAL: gate only trusts strict equivalent=
     expect(r.metadata.verified_count).toBe(0)
     expect(typeof r.output).toBe("string")
   })
+
+  test("missing 'equivalent' field -> UNVERIFIED with clear error", async () => {
+    mockRewriteAndEquivalence(REWRITE, { differences: [] })
+    const r = await runTool({ sql: ORIGINAL, schema_context: SCHEMA })
+    expect(r.metadata.verified_count).toBe(0)
+    expect(r.metadata.unverified_count).toBe(1)
+    expect(String(r.output)).toContain("missing 'equivalent' field")
+  })
+
+  test("non-boolean 'equivalent' value -> UNVERIFIED with type error", async () => {
+    mockRewriteAndEquivalence(REWRITE, { equivalent: "yes" })
+    const r = await runTool({ sql: ORIGINAL, schema_context: SCHEMA })
+    expect(r.metadata.verified_count).toBe(0)
+    expect(r.metadata.unverified_count).toBe(1)
+    expect(String(r.output)).toContain("non-boolean 'equivalent' value")
+  })
 })
 
 // --- real engine integration (skips if altimate-core native binary absent) ----
@@ -214,6 +258,6 @@ describeIf("verified-optimize — real altimate-core integration", () => {
     // Counts must be non-negative and the title must reflect them.
     expect(r.metadata.verified_count).toBeGreaterThanOrEqual(0)
     expect(r.metadata.unverified_count).toBeGreaterThanOrEqual(0)
-    expect(r.title).toContain("Verified Optimize") // robust to the no-rewrites path
+    expect(r.title).toContain("Rewrite") // "Rewrite (verified): …" or "Rewrite: no rewrites"
   })
 })

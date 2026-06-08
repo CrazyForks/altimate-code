@@ -107,7 +107,6 @@ import { AltimateCoreFingerprintTool } from "../altimate/tools/altimate-core-fin
 import { AltimateCoreIntrospectionSqlTool } from "../altimate/tools/altimate-core-introspection-sql"
 import { AltimateCoreParseDbtTool } from "../altimate/tools/altimate-core-parse-dbt"
 import { AltimateCoreRewriteTool } from "../altimate/tools/altimate-core-rewrite"
-import { AltimateVerifiedOptimizeTool } from "../altimate/tools/altimate-verified-optimize"
 import { ToolLookupTool } from "../altimate/tools/tool-lookup"
 import { ProjectScanTool } from "../altimate/tools/project-scan"
 import { DatamateManagerTool } from "../altimate/tools/datamate"
@@ -271,7 +270,6 @@ export namespace ToolRegistry {
       SchemaTagsListTool,
       SqlRewriteTool,
       AltimateCoreRewriteTool,
-      AltimateVerifiedOptimizeTool,
       SchemaDiffTool,
       AltimateCoreValidateTool,
       AltimateCoreCheckTool,
