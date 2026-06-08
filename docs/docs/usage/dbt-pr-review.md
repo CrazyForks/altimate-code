@@ -1,5 +1,14 @@
 # dbt PR Review
 
+[**See live review PRs**](https://github.com/AltimateAI/dbt-pr-review-demo/pulls)
+·
+[**Install the GitHub App**](https://github.com/apps/altimate-code-agent/installations/new)
+
+The public demo is a zero-secret DuckDB project with open PRs for broken joins,
+removed tests, PII exposure, `SELECT *`, unsafe incremental models, and a safe
+refactor. The GitHub App handles interactive repository tasks; the automatic
+review on every pull request is installed with the Action below.
+
 AI code review specialized for dbt/SQL. `dbt-pr-review` produces a single,
 **signed** verdict on a pull request — `APPROVE`, `COMMENT`, or `REQUEST_CHANGES`
 — where every **blocking** finding is backed by a deterministic engine call, not
@@ -9,6 +18,19 @@ a model's opinion:
 - **query equivalence** — whether a "refactor" provably returns the same rows
 - **PII classification** — columns that newly expose sensitive data
 - **A–F grade + anti-patterns** — readability, correctness, warehouse-cost issues
+
+!!! warning "The bot posts a COMMENT review — never a formal GitHub *Approve*"
+    `APPROVE` is the **semantic** verdict shown in the comment body ("✅ Approved
+    — no findings"). On GitHub the bot always posts a **COMMENT** review event,
+    **never** a formal *Approve*: a review bot must not be able to satisfy branch
+    protection / required reviews and let a PR merge without human sign-off.
+    `REQUEST_CHANGES` posts a blocking review in `gate` mode (softened to a
+    comment in `comment` mode).
+
+    **To block merges, gate on the verdict _check_ (`--mode gate`), not on
+    requiring this bot as a reviewer.** If your branch protection previously
+    *required the altimate bot's review approval*, remove that requirement — the
+    bot no longer issues one, so those merges would otherwise stay blocked.
 
 On top of that deterministic core, an **LLM reviewer** adds the contextual
 judgment a static analyzer cannot — intent vs. the PR description, misleading
@@ -97,10 +119,50 @@ Options:
 > clearly labeled, never mistaken for a full verdict. Run `dbt compile` first for
 > the full verdict.
 
+!!! question "Stuck in lint-only mode? It is **not** an API-key problem."
+    The deterministic engine (lineage, equivalence, PII, grade) runs fully
+    offline via the bundled native binary — **no altimate API key or account is
+    required** for any part of the verdict. A key is only ever needed for the
+    *optional* advisory LLM lane (see [below](#model--credentials-for-the-advisory-lane)),
+    and that lane can never block a verdict.
+
+    Lint-only means the **manifest didn't resolve**, not that auth failed. Check:
+
+    - **Path.** The default is `target/manifest.json` *relative to the project
+      root you run from*. If your manifest lives elsewhere, pass it explicitly:
+      `dbt_pr_review({ manifest_path: "target/manifest.json" })` (or `--manifest`
+      on the CLI), or set `manifestPath:` in `.altimate/review.yml`.
+    - **Freshness.** A stale manifest that predates the changed models can't
+      resolve them. Run `dbt compile` (or `dbt build`) to regenerate it before reviewing.
+    - **Working directory.** Run the review from the dbt project root so the
+      relative manifest path resolves.
+
+!!! note "Current limitations"
+    - **BigQuery equivalence** on some compiled SQL (3-part backtick relations)
+      is currently *undecidable* — the reviewer reports a warning ("could not
+      prove equivalent") rather than an `APPROVE`-on-proof. It never reports a
+      false equivalence; it just can't prove some BigQuery refactors yet.
+    - With no manifest, the SQL dialect defaults to `snowflake`. For a
+      non-Snowflake project, pass a compiled `manifest.json` (its `adapter_type`
+      is auto-detected) or set `dialect:` in `.altimate/review.yml`.
+
+!!! tip "Reviewer vs validators"
+    `dbt-pr-review` reviews a **PR diff** and emits a verdict. The
+    [completion-gate validators](../data-engineering/validators.md) are a
+    different surface — they gate the **agent's own build loop** so it can't
+    declare "done" on failing dbt tests or schema drift.
+
 ## GitHub Action
 
 Add the review to any repo with a workflow that compiles the project, then runs
 the review action:
+
+!!! danger "Run on `pull_request`, not `pull_request_target`"
+    The bot derives the target PR from the Actions event payload. Trigger it on
+    `pull_request` so fork PRs run with a **read-only** token. Do **not** use
+    `pull_request_target` with a checkout of the PR head — that hands a write-
+    scoped token to untrusted PR code (and to the PR's dbt Jinja/macros at
+    compile time).
 
 ```yaml
 name: dbt PR Review
@@ -119,7 +181,7 @@ jobs:
         with: { fetch-depth: 0 }
       # Produce target/manifest.json for the full verdict (adapter-specific).
       - run: pip install dbt-core dbt-bigquery && dbt deps && dbt compile
-      - uses: AltimateAI/altimate-code/github/review@v1
+      - uses: AltimateAI/altimate-code/github/review@v0.8.5
         with:
           mode: comment                       # `gate` to block merges
           manifest_path: target/manifest.json
@@ -217,7 +279,7 @@ In GitHub Actions, supply the connection from a secret — both sides of the dif
 run against the **same** warehouse (base-compiled vs head-compiled SQL):
 
 ```yaml
-      - uses: AltimateAI/altimate-code/github/review@v1
+      - uses: AltimateAI/altimate-code/github/review@v0.8.5
         with:
           mode: comment
           manifest_path: target/manifest.json

@@ -167,7 +167,7 @@ Remove an existing warehouse connection.
 
 ## warehouse_discover
 
-Discover database containers running in Docker. Detects PostgreSQL, MySQL/MariaDB, SQL Server, Trino, ClickHouse, and MongoDB containers with their connection details.
+Discover database containers running in Docker. Detects PostgreSQL, MySQL/MariaDB, SQL Server, Trino, and ClickHouse containers with their connection details.
 
 ```
 > warehouse_discover

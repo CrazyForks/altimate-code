@@ -42,6 +42,11 @@ jobs:
       #
       # Warehouse creds are consumed HERE (by dbt), via env_var() in profiles.yml.
       # They are NOT needed by the review step.
+      #
+      # SECURITY: `dbt compile` executes the PR's Jinja/macros against the
+      # warehouse (e.g. a malicious macro calling run_query()). Use a
+      # LEAST-PRIVILEGE, read-only warehouse role for these credentials so a
+      # hostile PR can't read or mutate production data at compile time.
       - name: dbt deps + compile
         env:
           DBT_PROFILES_DIR: ${{ github.workspace }}
@@ -59,7 +64,7 @@ jobs:
       - name: altimate dbt PR review
         # Pin to the altimate-code release that ships `altimate review`
         # (the first release cut after the dbt-pr-review feature merges).
-        uses: AltimateAI/altimate-code/github/review@v0.8.0
+        uses: AltimateAI/altimate-code/github/review@v0.8.5
         with:
           mode: comment # start non-blocking; switch to `gate` once trusted
           manifest_path: target/manifest.json

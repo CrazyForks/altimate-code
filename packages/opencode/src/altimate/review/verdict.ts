@@ -21,9 +21,22 @@ export const ReviewMode = z.enum([
 ])
 export type ReviewMode = z.infer<typeof ReviewMode>
 
-/** Maps a Verdict to a VCS review event. */
-export const VCS_EVENT: Record<Verdict, "APPROVE" | "COMMENT" | "REQUEST_CHANGES"> = {
-  APPROVE: "APPROVE",
+/** Maps a Verdict to a VCS review event.
+ *
+ * An `APPROVE` verdict posts a **COMMENT** review event, NOT a GitHub "APPROVE".
+ * The reviewer is a bot: it must never submit a formal approval that could
+ * satisfy branch protection / required reviews and let a PR merge without human
+ * sign-off (matching CodeRabbit/Greptile/etc., which comment but never approve).
+ * The "approved — no findings" outcome is conveyed in the comment body instead.
+ * `REQUEST_CHANGES` still maps through (in `gate` mode it blocks; `comment` mode
+ * softens it to COMMENT via {@link applyMode}).
+ *
+ * The value type deliberately EXCLUDES `"APPROVE"`: the no-formal-approval
+ * invariant is enforced at compile time, so no future edit can map a verdict
+ * back to a GitHub APPROVE without breaking the build. (The narrower union is
+ * still assignable to Octokit's `createReview` event param.) */
+export const VCS_EVENT: Record<Verdict, "COMMENT" | "REQUEST_CHANGES"> = {
+  APPROVE: "COMMENT",
   COMMENT: "COMMENT",
   REQUEST_CHANGES: "REQUEST_CHANGES",
 }
@@ -57,6 +70,8 @@ export function computeIdealVerdict(findings: Finding[], rubric: Rubric = DEFAUL
 /** Apply mode-gating: in `comment` mode, REQUEST_CHANGES is softened to COMMENT. */
 export function applyMode(verdict: Verdict, mode: ReviewMode): Verdict {
   if (mode === "comment" && verdict === "REQUEST_CHANGES") return "COMMENT"
+  // APPROVE and COMMENT pass through unchanged in both modes — the no-formal-
+  // approval guarantee for APPROVE lives solely in the VCS_EVENT map, not here.
   return verdict
 }
 

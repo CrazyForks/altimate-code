@@ -5,7 +5,7 @@ import { isRecord, normalizeError } from "./response-normalization"
 
 export const AltimateCoreColumnLineageTool = Tool.define("altimate_core_column_lineage", {
   description:
-    "Trace schema-aware column lineage. Maps how columns flow through a query from source tables to output. Requires altimate_core.init() with API key. Provide schema_context or schema_path for accurate table/column resolution.",
+    "Trace schema-aware column lineage. Maps how columns flow through a query from source tables to output. Runs fully offline via the native engine — no API key or account required. Provide schema_context or schema_path for accurate table/column resolution.",
   parameters: z.object({
     sql: z.string().describe("SQL query to trace lineage for"),
     dialect: z.string().optional().describe("SQL dialect (e.g. snowflake, bigquery)"),
