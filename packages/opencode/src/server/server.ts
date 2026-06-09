@@ -29,6 +29,10 @@ import { ProjectRoutes } from "./routes/project"
 import { SessionRoutes } from "./routes/session"
 import { PtyRoutes } from "./routes/pty"
 import { McpRoutes } from "./routes/mcp"
+// altimate_change start — reload-datamate endpoint
+import { MCP } from "../mcp"
+import { syncDatamateUrlFromVscodeMcp } from "../cli/cmd/serve"
+// altimate_change end
 import { FileRoutes } from "./routes/file"
 import { ConfigRoutes } from "./routes/config"
 import { ExperimentalRoutes } from "./routes/experimental"
@@ -561,6 +565,50 @@ export namespace Server {
           })
         },
       )
+      // altimate_change start — POST /altimate/mcp/reload-datamate
+      // Updates the datamate MCP server URL from .vscode/mcp.json and reconnects the
+      // live MCP client so the new URL takes effect immediately without a server restart.
+      .post("/altimate/mcp/reload-datamate", async (c) => {
+        try {
+          const directory = Instance.directory
+          // altimate_change start
+          log.info("reload-datamate: syncing URL from .vscode/mcp.json", { directory })
+          // altimate_change end
+          // Sync URL from .vscode/mcp.json → project config; returns updated server names.
+          const updatedNames = await syncDatamateUrlFromVscodeMcp(directory)
+          const updated = updatedNames.length > 0
+
+          if (updated) {
+            // altimate_change start
+            log.info("reload-datamate: URL updated, reconnecting MCP servers", { updatedNames })
+            // altimate_change end
+            // Reconnect each updated server that is currently live so the new URL takes effect.
+            const currentStatus = await MCP.status()
+            for (const name of updatedNames) {
+              if (currentStatus[name]?.status === "connected") {
+                // altimate_change start
+                log.info("reload-datamate: reconnecting", { name })
+                // altimate_change end
+                await MCP.disconnect(name)
+                await MCP.connect(name)
+              }
+            }
+          } else {
+            // altimate_change start
+            log.info("reload-datamate: no URL changes detected")
+            // altimate_change end
+          }
+
+          return c.json({ ok: true, updated })
+        } catch (err) {
+          const error = err instanceof Error ? err.message : String(err)
+          // altimate_change start
+          log.error("reload-datamate: failed", { error })
+          // altimate_change end
+          return c.json({ ok: false, error })
+        }
+      })
+      // altimate_change end
       .all("/*", async (c) => {
         const path = c.req.path
 

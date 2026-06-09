@@ -35,6 +35,22 @@ function safeDetail(server: { type: string } & Record<string, any>): string {
   return `(${server.type})`
 }
 
+// altimate_change start — strip session-specific env vars before persisting
+// discovered servers. ALTIMATE_EXTENSION_RPC is a Unix socket path that is
+// unique to the current VS Code extension host process. Writing it to disk
+// causes altimate-code on a future session (or a different VS Code window) to
+// spawn datamate processes that connect to the wrong bridge or a dead socket.
+// Stripping it forces runtime discovery via ~/.altimate/extension-rpc/ sidecars,
+// which always resolves the correct live bridge by matching process.cwd() against
+// each bridge's recorded workspaceFolders.
+function stripSessionEnv(cfg: import("../../config/config").Config.Mcp): import("../../config/config").Config.Mcp {
+  if (cfg.type !== "local" || !cfg.environment) return cfg
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { ALTIMATE_EXTENSION_RPC: _rpc, ...rest } = cfg.environment
+  return { ...cfg, environment: Object.keys(rest).length > 0 ? rest : undefined }
+}
+// altimate_change end
+
 export const McpDiscoverTool = Tool.define("mcp_discover", {
   description:
     "Discover MCP servers from external AI tool configs (VS Code, Cursor, Claude Code, Copilot, Gemini) and optionally add them to altimate-code config permanently.",
@@ -110,7 +126,9 @@ export const McpDiscoverTool = Tool.define("mcp_discover", {
     )
 
     for (const name of toAdd) {
-      await addMcpToConfig(name, discovered[name], configPath)
+      // altimate_change start — strip session-specific ALTIMATE_EXTENSION_RPC
+      await addMcpToConfig(name, stripSessionEnv(discovered[name]), configPath)
+      // altimate_change end
     }
 
     lines.push(`\nAdded ${toAdd.length} server(s) to ${configPath}: ${toAdd.join(", ")}`)

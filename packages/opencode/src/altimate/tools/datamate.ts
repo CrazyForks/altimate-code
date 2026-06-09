@@ -1,4 +1,6 @@
 import z from "zod"
+import { readFile } from "fs/promises"
+import path from "path"
 import { Tool } from "../../tool/tool"
 import { AltimateApi } from "../api/client"
 import { MCP } from "../../mcp"
@@ -11,6 +13,9 @@ import {
 } from "../../mcp/config"
 import { Instance } from "../../project/instance"
 import { Global } from "../../global"
+import { Log } from "../../util/log"
+
+const log = Log.create({ service: "datamate" })
 
 /** Project root for config resolution — falls back to cwd when no git repo is detected. */
 function projectRoot() {
@@ -24,6 +29,46 @@ export function slugify(name: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "")
 }
+
+// altimate_change start — read transport type from .vscode/mcp.json
+// Returns { type: "remote", url } if the datamate entry is an HTTP server,
+// { type: "local" } if it is a stdio server, or null if the file is missing
+// or no datamate entry is found. The caller uses this to pick the right
+// mcpConfig shape and falls back to the cloud config when null is returned.
+async function readVscodeMcpTransport(
+  projectRootDir: string,
+): Promise<{ type: "remote"; url: string } | { type: "local" } | null> {
+  try {
+    const mcpJsonPath = path.join(projectRootDir, ".vscode", "mcp.json")
+    const text = await readFile(mcpJsonPath, "utf-8")
+    const parsed = JSON.parse(text) as Record<string, unknown>
+
+    // .vscode/mcp.json uses either "servers" (VS Code 1.99+) or "mcpServers" key
+    const serversMap =
+      (parsed["servers"] as Record<string, Record<string, unknown>> | undefined) ??
+      (parsed["mcpServers"] as Record<string, Record<string, unknown>> | undefined) ??
+      {}
+
+    for (const [key, entry] of Object.entries(serversMap)) {
+      const args = Array.isArray(entry["args"]) ? (entry["args"] as string[]) : []
+      const isDatamate =
+        key === "datamate" ||
+        args.some((a) => a.includes("start-stdio") || a.includes("datamate-cli"))
+
+      if (!isDatamate) continue
+
+      if (typeof entry["url"] === "string") {
+        return { type: "remote", url: entry["url"] }
+      }
+      return { type: "local" }
+    }
+    return null
+  } catch {
+    // File missing or unparseable — caller falls back to cloud config
+    return null
+  }
+}
+// altimate_change end
 
 export const DatamateManagerTool = Tool.define("datamate_manager", {
   description:
@@ -39,7 +84,9 @@ export const DatamateManagerTool = Tool.define("datamate_manager", {
     "'list-config' shows all datamate entries saved in config files (project and global). " +
     "Config files: project config is at <project-root>/altimate-code.json, " +
     "global config is at ~/.config/altimate-code/altimate-code.json. " +
-    "Datamate server names are prefixed with 'datamate-'. " +
+    "When a VS Code extension datamate entry exists (.vscode/mcp.json has 'datamate' key), " +
+    "'add' always uses the server name 'datamate' — tools are then prefixed 'datamate_'. " +
+    "In standalone mode, server names follow 'datamate-<name>' pattern. " +
     "Do NOT use glob/grep/read to find config files — use 'list-config' instead.",
   parameters: z.object({
     operation: z.enum(["list", "list-integrations", "add", "create", "edit", "delete", "status", "remove", "list-config"]),
@@ -154,6 +201,10 @@ async function handleListIntegrations() {
   }
 }
 
+// altimate_change start — server name used by the VS Code extension in .vscode/mcp.json
+const EXTENSION_DATAMATE_SERVER = "datamate"
+// altimate_change end
+
 async function handleAdd(args: { datamate_id?: string; name?: string; scope?: "project" | "global" }) {
   if (!args.datamate_id) {
     return {
@@ -163,17 +214,76 @@ async function handleAdd(args: { datamate_id?: string; name?: string; scope?: "p
     }
   }
   try {
-    const creds = await AltimateApi.getCredentials()
     const datamate = await AltimateApi.getDatamate(args.datamate_id)
-    const serverName = args.name ?? `datamate-${slugify(datamate.name)}`
-    const mcpConfig = AltimateApi.buildMcpConfig(creds, args.datamate_id)
+    const transport = await readVscodeMcpTransport(projectRoot())
 
-    // Always save to config first so it persists for future sessions
+    // altimate_change start — single-gateway mode when extension is present
+    // If .vscode/mcp.json has a "datamate" entry (written by the VS Code extension),
+    // always use "datamate" as the server name regardless of which specific datamate
+    // the user selected. This prevents duplicate tool sets — the extension's gateway
+    // already serves all datamate tools through a single MCP connection.
+    // In standalone/CLI mode (no .vscode/mcp.json datamate entry), fall back to the
+    // original per-datamate naming with cloud URL.
+    const serverName = transport !== null
+      ? EXTENSION_DATAMATE_SERVER
+      : (args.name ?? `datamate-${slugify(datamate.name)}`)
+
+    const creds = transport ? undefined : await AltimateApi.getCredentials()
+    const mcpConfig =
+      transport?.type === "remote"
+        ? { type: "remote" as const, url: transport.url }
+        : transport?.type === "local"
+          // Extension stdio: no --datamate id needed — active teammate is resolved
+          // by the extension over the ALTIMATE_EXTENSION_RPC socket at runtime.
+          ? { type: "local" as const, command: ["datamate", "start-stdio"] }
+          : AltimateApi.buildMcpConfig(creds!, args.datamate_id)
+
     const isGlobal = args.scope === "global"
     const configPath = await resolveConfigPath(isGlobal ? Global.Path.config : projectRoot(), isGlobal)
-    await addMcpToConfig(serverName, mcpConfig, configPath)
 
-    await MCP.add(serverName, mcpConfig)
+    if (transport !== null) {
+      // Extension mode: check if "datamate" is already wired up
+      const existingNames = await listMcpInConfig(configPath)
+      const staleEntries = existingNames.filter(
+        (n) => n !== EXTENSION_DATAMATE_SERVER && n.startsWith("datamate-"),
+      )
+      if (staleEntries.length > 0) {
+        log.info("handleAdd: stale per-datamate entries detected alongside extension gateway", {
+          staleEntries,
+        })
+      }
+
+      if (existingNames.includes(EXTENSION_DATAMATE_SERVER)) {
+        // Already in config — just ensure it is connected in this session
+        const allStatus = await MCP.status()
+        if (allStatus[EXTENSION_DATAMATE_SERVER]?.status === "connected") {
+          const mcpTools = await MCP.tools()
+          const toolCount = Object.keys(mcpTools).filter((k) =>
+            k.startsWith(EXTENSION_DATAMATE_SERVER + "_"),
+          ).length
+          const staleNote =
+            staleEntries.length > 0
+              ? `\n\nNote: stale per-datamate entries found in config: ${staleEntries.join(", ")} — use operation 'remove' to clean them up.`
+              : ""
+          return {
+            title: `Datamate '${datamate.name}': already connected via '${EXTENSION_DATAMATE_SERVER}'`,
+            metadata: { serverName: EXTENSION_DATAMATE_SERVER, datamateId: args.datamate_id, toolCount },
+            output: `Datamate tools are already available via the '${EXTENSION_DATAMATE_SERVER}' MCP server (${toolCount} tools active).${staleNote}`,
+          }
+        }
+        // In config but not connected — reconnect
+        await MCP.add(EXTENSION_DATAMATE_SERVER, mcpConfig)
+      } else {
+        // Not in config yet — write then connect
+        await addMcpToConfig(EXTENSION_DATAMATE_SERVER, { ...mcpConfig, enabled: true }, configPath)
+        await MCP.add(EXTENSION_DATAMATE_SERVER, mcpConfig)
+      }
+    } else {
+      // Standalone/CLI mode — original behaviour: per-datamate name + cloud URL
+      await addMcpToConfig(serverName, { ...mcpConfig, enabled: true }, configPath)
+      await MCP.add(serverName, mcpConfig)
+    }
+    // altimate_change end
 
     // Check connection status
     const allStatus = await MCP.status()
@@ -197,7 +307,7 @@ async function handleAdd(args: { datamate_id?: string; name?: string; scope?: "p
     return {
       title: `Datamate '${datamate.name}': connected as '${serverName}'`,
       metadata: { serverName, datamateId: args.datamate_id, toolCount, configPath },
-      output: `Connected datamate '${datamate.name}' (ID: ${args.datamate_id}) as MCP server '${serverName}'.\n\n${toolCount} tools are now available from this datamate. They will be usable in the next message.\n\nConfiguration saved to ${configPath} for future sessions.`,
+      output: `Connected datamate '${datamate.name}' (ID: ${args.datamate_id}) as MCP server '${serverName}'.\n\n${toolCount} tools are now available. They will be usable in the next message.\n\nConfiguration saved to ${configPath} for future sessions.`,
     }
   } catch (e) {
     return {

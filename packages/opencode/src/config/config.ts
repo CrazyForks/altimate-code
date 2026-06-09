@@ -622,6 +622,9 @@ export namespace Config {
         .positive()
         .optional()
         .describe("Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified."),
+      // altimate_change start — sync timestamp written by syncDatamateUrlFromVscodeMcp
+      updatedAt: z.string().optional().describe("ISO timestamp of last URL sync; used to detect reconnect need."),
+      // altimate_change end
     })
     .strict()
     .meta({
@@ -661,6 +664,9 @@ export namespace Config {
         .positive()
         .optional()
         .describe("Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified."),
+      // altimate_change start — sync timestamp written by syncDatamateUrlFromVscodeMcp
+      updatedAt: z.string().optional().describe("ISO timestamp of last URL sync; used to detect reconnect need."),
+      // altimate_change end
     })
     .strict()
     .meta({

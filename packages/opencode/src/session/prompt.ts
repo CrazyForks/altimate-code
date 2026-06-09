@@ -416,7 +416,30 @@ export namespace SessionPrompt {
     process.once("beforeExit", emergencySessionEnd)
     process.once("exit", emergencySessionEnd)
     // altimate_change end
+    // altimate_change start — refresh MCP tools on ToolsChanged event
+    // When a datamate MCP server reconnects (transport change, window restart),
+    // MCP.ToolsChanged is published. MCP.tools() already uses a per-client cache
+    // that is invalidated by the notification handler that publishes this event,
+    // so the next resolveTools() call (once per LLM turn) naturally picks up fresh
+    // tools without any extra work here. This subscription makes the session layer
+    // explicitly aware of the reconnect and logs it so it is traceable in prod.
+    let toolsNeedRefresh = false
+    const unsubscribeToolsChanged = Bus.subscribe(MCP.ToolsChanged, (event) => {
+      log.info("MCP.ToolsChanged received — tools will refresh on next turn", {
+        server: event.properties.server,
+        sessionID,
+      })
+      toolsNeedRefresh = true
+    })
+    using _unsubToolsChanged = defer(unsubscribeToolsChanged)
+    // altimate_change end
     while (true) {
+      // altimate_change start — log when a ToolsChanged event was received since last turn
+      if (toolsNeedRefresh) {
+        log.info("refreshing MCP tools after ToolsChanged event", { sessionID })
+        toolsNeedRefresh = false
+      }
+      // altimate_change end
       // altimate_change start — SessionStatus.set became async in v1.4.0; await so busy state flushes before LLM call
       await SessionStatus.set(sessionID, { type: "busy" })
       // altimate_change end
@@ -2062,16 +2085,6 @@ export namespace SessionPrompt {
   // check would miss the gateway-emitted specific names (#888 J1). The api.id
   // checks are lowercased and tightened to a `claude-` / `anthropic-` /
   // `anthropic/...` shape so a model named `foo-claude-bench` doesn't false-match.
-  //
-  // NOTE: `family` is a free-form, config-settable string on the model schema —
-  // a connection that declares `family: "claude-*"` on a non-Anthropic gateway
-  // will classify as Anthropic-like and SKIP the hoist, which reintroduces the
-  // #887 refusal on that backend. This is a routing-trust input, not an
-  // escalation vector (whoever sets the model config already controls the
-  // prompt), but operators adding gateway models should set `family` correctly.
-  //
-  // Exported for testing — the hoist/classification contract is exercised
-  // behaviorally in test/session/plan-layer-e2e.test.ts.
   export function isAnthropicLikeModel(model: Provider.Model): boolean {
     if (model.providerID === "anthropic") return true
     if (model.providerID === "google-vertex-anthropic") return true
@@ -2093,9 +2106,6 @@ export namespace SessionPrompt {
   // file content as synthetic text), so it is not safe to infer trust from `synthetic`
   // alone. See #888 review feedback.
   type InsertRemindersResult = { messages: MessageV2.WithParts[]; trustedReminderParts: MessageV2.TextPart[] }
-  // Exported for testing — the trust boundary (only self-injected reminders land
-  // in `trustedReminderParts`, never user/file/resource content) is verified
-  // behaviorally in test/session/plan-layer-e2e.test.ts.
   export async function insertReminders(input: {
     messages: MessageV2.WithParts[]
     agent: Agent.Info
