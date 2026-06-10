@@ -1526,10 +1526,12 @@ export namespace SessionPrompt {
           // skip execution and feed the reason back so the model can retry, while
           // still emitting tool.execute.after so observability sees the blocked call.
           if (Critic.enabled()) {
-            const verdict = await Critic.gate(item.id, args as Record<string, any>, Critic.basicSafetyVerifier)
+            const verdict = await Critic.gate(item.id, args as Record<string, unknown>, Critic.basicSafetyVerifier)
             if (!verdict.allow) {
               const blocked = {
                 title: `Blocked: ${item.id}`,
+                // `as any`: tool metadata is an open Record per the tool-result
+                // contract; this matches the surrounding tool-wrapper casts.
                 metadata: { critic: { blocked: true, reason: verdict.feedback } } as any,
                 output: verdict.feedback ?? "Blocked by altimate verifier.",
                 attachments: [] as never[],

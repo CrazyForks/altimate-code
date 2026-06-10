@@ -40,7 +40,7 @@ export namespace Critic {
 
   /** The judgment interface. Default impl allows all (open). Product plugs a richer verifier. */
   export interface Verifier {
-    verify(toolName: string, args: Record<string, any>): Verdict | Promise<Verdict>
+    verify(toolName: string, args: Record<string, unknown>): Verdict | Promise<Verdict>
   }
 
   export const ALLOW_ALL: Verifier = { verify: () => ({ ok: true }) }
@@ -238,7 +238,7 @@ export namespace Critic {
 
   export async function gate(
     toolName: string,
-    args: Record<string, any>,
+    args: Record<string, unknown>,
     verifier: Verifier = ALLOW_ALL,
     gated: string[] = DEFAULT_GATED,
     timeoutMs: number = VERIFIER_TIMEOUT_MS,
