@@ -962,6 +962,15 @@ async function piiClassifyLane(ctx: ModelContext, runner: ReviewRunner, dialect:
   return out
 }
 
+async function introducedOutputColumns(ctx: ModelContext, runner: ReviewRunner, dialect: string): Promise<Set<string> | undefined> {
+  if (!runner.columnLineage || !ctx.engineNewSql || ctx.file.status === "deleted") return undefined
+  const headCols = [...new Set((await runner.columnLineage(ctx.engineNewSql, dialect)).map((e) => e.target).filter(Boolean))]
+  if (!headCols.length) return new Set()
+  if (!ctx.engineOldSql) return new Set(headCols.map((c) => c.toLowerCase()))
+  const baseCols = new Set((await runner.columnLineage(ctx.engineOldSql, dialect)).map((e) => e.target.toLowerCase()))
+  return new Set(headCols.filter((c) => !baseCols.has(c.toLowerCase())).map((c) => c.toLowerCase()))
+}
+
 function piiLane(file: ChangedFile & { kind: string }, columns: string[]): Finding[] {
   if (file.status === "deleted" || !columns.length) return []
   const model = modelNameFromPath(file.path)
@@ -1077,8 +1086,16 @@ export async function runReview(input: OrchestrateInput): Promise<VerdictEnvelop
       tasks.push(columnBreakageLane(ctx, input.runner, getCompiled, dialect))
     }
     if (lanes.has("test_coverage")) tasks.push(missingGrainTestLane(ctx, input.runner))
-    const hasDiffScopedPii = !!input.runner.classifyPii && !!input.runner.columnLineage
-    if (lanes.has("pii_exposure") && !hasDiffScopedPii) all.push(piiLane(ctx.file, ctx.pii))
+    const diffScopedPiiCols =
+      input.runner.classifyPii && input.runner.columnLineage
+        ? await introducedOutputColumns(ctx, input.runner, dialect)
+        : undefined
+    if (lanes.has("pii_exposure")) {
+      const fallbackPii = diffScopedPiiCols
+        ? ctx.pii.filter((col) => !diffScopedPiiCols.has(col.toLowerCase()))
+        : ctx.pii
+      all.push(piiLane(ctx.file, fallbackPii))
+    }
     // PII classification always runs (cheap name-pattern check, diff-scoped to
     // newly-introduced columns) — exposing PII is a hard-floor concern that
     // shouldn't depend on the cost tier enabling the pii_exposure lane.

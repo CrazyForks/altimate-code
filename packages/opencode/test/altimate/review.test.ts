@@ -1372,6 +1372,44 @@ describe("orchestrate", () => {
     expect(env.verdict).toBe("REQUEST_CHANGES")
   })
 
+  test("broad PII detector remains fallback for existing output columns", async () => {
+    const files: ChangedFile[] = [{ path: "models/marts/dim_customers.sql", status: "modified", diff: "+    lower(email) as email\n" }]
+    const runner: ReviewRunner = {
+      ...fakeRunner({}),
+      async detectPii() {
+        return { columns: ["email"] }
+      },
+      async columnLineage(sql) {
+        return sql.includes("email")
+          ? [
+              { source: "customers.customer_id", target: "customer_id" },
+              { source: "customers.email", target: "email" },
+            ]
+          : [{ source: "customers.customer_id", target: "customer_id" }]
+      },
+      async classifyPii(columns) {
+        return columns.map((column) => ({
+          column,
+          classification: "Email",
+          confidence: 0.95,
+          masking: "'***MASKED***'",
+        }))
+      },
+    }
+    const env = await runReview({
+      changedFiles: files,
+      config: { ...DEFAULT_REVIEW_CONFIG },
+      rubric: DEFAULT_RUBRIC,
+      mode: "gate",
+      runner,
+      getContent: content("select customer_id, lower(email) as email from customers", "select customer_id, email from customers"),
+    })
+    const pii = env.findings.filter((f) => f.category === "pii_exposure")
+    expect(pii).toHaveLength(1)
+    expect(pii[0].evidence?.tool).toBe("schema.detect_pii")
+    expect(env.verdict).toBe("REQUEST_CHANGES")
+  })
+
   test("low-confidence name PII does not surface or fall back to regex PII comments", async () => {
     const files: ChangedFile[] = [{ path: "models/marts/dim_customers.sql", status: "modified", diff: "+    first_name\n" }]
     const runner: ReviewRunner = {

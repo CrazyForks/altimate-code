@@ -12,6 +12,10 @@ import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test"
 // DuckDB: wrapDuckDBError + lock retry
 // ---------------------------------------------------------------------------
 describe("DuckDB driver", () => {
+  function openCallback(optsOrCb: any, cb?: (err: Error | null) => void): (err: Error | null) => void {
+    return typeof optsOrCb === "function" ? optsOrCb : cb!
+  }
+
   // Test wrapDuckDBError logic inline (it's a closure, so we test via connect behavior)
   describe("wrapDuckDBError", () => {
     test("wraps SQLITE_BUSY errors with user-friendly message", async () => {
@@ -28,8 +32,8 @@ describe("DuckDB driver", () => {
       mock.module("duckdb", () => ({
         default: {
           Database: class {
-            constructor(_path: string, _opts: any, cb: (err: Error | null) => void) {
-              setTimeout(() => cb(null), 0)
+            constructor(_path: string, optsOrCb: any, cb?: (err: Error | null) => void) {
+              setTimeout(() => openCallback(optsOrCb, cb)(null), 0)
             }
             connect() {
               return mockDb.connect()
@@ -62,8 +66,8 @@ describe("DuckDB driver", () => {
       mock.module("duckdb", () => ({
         default: {
           Database: class {
-            constructor(_path: string, _opts: any, cb: (err: Error | null) => void) {
-              setTimeout(() => cb(null), 0)
+            constructor(_path: string, optsOrCb: any, cb?: (err: Error | null) => void) {
+              setTimeout(() => openCallback(optsOrCb, cb)(null), 0)
             }
             connect() {
               return {
@@ -97,8 +101,8 @@ describe("DuckDB driver", () => {
       mock.module("duckdb", () => ({
         default: {
           Database: class {
-            constructor(_path: string, _opts: any, cb: (err: Error | null) => void) {
-              setTimeout(() => cb(null), 0)
+            constructor(_path: string, optsOrCb: any, cb?: (err: Error | null) => void) {
+              setTimeout(() => openCallback(optsOrCb, cb)(null), 0)
             }
             connect() {
               return {
@@ -135,14 +139,16 @@ describe("DuckDB driver", () => {
       mock.module("duckdb", () => ({
         default: {
           Database: class {
-            constructor(_path: string, opts: any, cb: (err: Error | null) => void) {
+            constructor(_path: string, optsOrCb: any, cb?: (err: Error | null) => void) {
+              const opts = typeof optsOrCb === "function" ? undefined : optsOrCb
+              const done = openCallback(optsOrCb, cb)
               connectAttempts++
               if (connectAttempts === 1 && !opts?.access_mode) {
                 // First attempt fails with lock error
-                setTimeout(() => cb(new Error("DUCKDB_LOCKED: file is locked")), 0)
+                setTimeout(() => done(new Error("DUCKDB_LOCKED: file is locked")), 0)
               } else {
                 // READ_ONLY retry succeeds
-                setTimeout(() => cb(null), 0)
+                setTimeout(() => done(null), 0)
               }
             }
             connect() {
@@ -171,8 +177,8 @@ describe("DuckDB driver", () => {
       mock.module("duckdb", () => ({
         default: {
           Database: class {
-            constructor(_path: string, _opts: any, cb: (err: Error | null) => void) {
-              setTimeout(() => cb(new Error("DUCKDB_LOCKED")), 0)
+            constructor(_path: string, optsOrCb: any, cb?: (err: Error | null) => void) {
+              setTimeout(() => openCallback(optsOrCb, cb)(new Error("DUCKDB_LOCKED")), 0)
             }
             connect() {
               return {}
@@ -194,6 +200,34 @@ describe("DuckDB driver", () => {
         // In-memory DB should not retry, just throw the original error
         expect(e.message).toBe("DUCKDB_LOCKED")
       }
+    })
+
+    test("handles native open callback invoked synchronously", async () => {
+      mock.module("duckdb", () => ({
+        default: {
+          Database: class {
+            constructor(_path: string, optsOrCb: any, cb?: (err: Error | null) => void) {
+              openCallback(optsOrCb, cb)(null)
+            }
+            connect() {
+              return {
+                all: (_sql: string, cb: (err: Error | null, rows: any[]) => void) => {
+                  cb(null, [{ ok: 1 }])
+                },
+              }
+            }
+            close(cb: any) {
+              if (cb) cb(null)
+            }
+          },
+        },
+      }))
+
+      const { connect } = await import("../src/duckdb")
+      const connector = await connect({ type: "duckdb", path: ":memory:" })
+      await connector.connect()
+      expect(await connector.execute("SELECT 1")).toMatchObject({ columns: ["ok"], rows: [[1]], row_count: 1 })
+      await connector.close()
     })
   })
 })

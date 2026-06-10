@@ -57,8 +57,13 @@ export async function connect(config: ConnectionConfig): Promise<Connector> {
           let resolved = false
           let timeout: ReturnType<typeof setTimeout> | undefined
           let instance: any
+          let pendingOpen: Error | null | undefined
           const opts = accessMode ? { access_mode: accessMode } : undefined
           const onOpen = (err: Error | null) => {
+            if (!instance) {
+              pendingOpen = err
+              return
+            }
             if (resolved) {
               if (instance && typeof instance.close === "function") instance.close()
               return
@@ -79,6 +84,7 @@ export async function connect(config: ConnectionConfig): Promise<Connector> {
           instance = opts
             ? new duckdb.Database(dbPath, opts, onOpen)
             : new duckdb.Database(dbPath, onOpen)
+          if (pendingOpen !== undefined) onOpen(pendingOpen)
           // Bun: native callback may not fire; fall back after 2s
           timeout = setTimeout(() => {
             if (!resolved) {

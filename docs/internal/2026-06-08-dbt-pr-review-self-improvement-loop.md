@@ -35,8 +35,8 @@ Quantified acceptance target:
   warehouse-observed impact, not advisory AI or heuristic equivalence.
 
 Operating rules:
-- Always start by pulling latest main of
-  /Users/anandgupta/codebase/altimate-core-internal with fast-forward only.
+- Always start by pulling latest main of the sibling `altimate-core-internal`
+  checkout with fast-forward only.
 - Prefer implementing deterministic SQL/dbt analysis in altimate-core, not
   altimate-code. Avoid regex/custom parsing in altimate-code when core
   AST/parser support can own it.
@@ -52,8 +52,8 @@ Operating rules:
      only at acceptance checkpoints.
   6. Keep only if it improves real review value with no new false positives;
      otherwise revert/reject or make advisory-only.
-- Use /Users/anandgupta/codebase/altimate-code/demo/dbt-pr-review-demo for demo
-  branch e2e.
+- Use the `demo/dbt-pr-review-demo` checkout under the altimate-code workspace
+  for demo branch e2e.
 - Compile base dbt artifacts into target-base and head artifacts into target
   before review when structural/equivalence lanes need base-vs-head compiled SQL.
 - Use local DuckDB first; use BigQuery where warehouse behavior matters and

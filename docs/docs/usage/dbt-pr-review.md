@@ -334,9 +334,9 @@ reviewer does **not** re-implement Jinja — it consumes dbt's own compiled outp
    the base and head refs in CI (the base into `target-base/`, the Recce
    convention). For proof-grade equivalence, also produce `target/catalog.json`
    with `dbt docs generate`; the catalog carries complete warehouse columns that
-   `manifest.json` often lacks. Without compiled SQL or complete columns the
-   engine lanes stay *undecidable* (never fabricated) — the `dbt-patterns` lane
-   still runs.
+   `manifest.json` often lacks. Without compiled SQL or complete columns,
+   schema-dependent engine lanes such as equivalence and PII stay *undecidable*
+   (never fabricated) — the `dbt-patterns` lane still runs.
 
 ## What it checks — deterministic rule catalog
 
