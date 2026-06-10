@@ -916,22 +916,38 @@ async function siblingConsistencyLane(ctxs: ModelContext[], runner: ReviewRunner
  * only NEW PII (a column whose name appears in the added diff), so it never nags
  * about pre-existing PII columns the PR didn't touch.
  */
-async function piiClassifyLane(ctx: ModelContext, runner: ReviewRunner, dialect: string): Promise<Finding[]> {
-  if (!runner.classifyPii) return []
+async function piiClassifyLane(
+  ctx: ModelContext,
+  runner: ReviewRunner,
+  dialect: string,
+): Promise<{ findings: Finding[]; introducedColumns: Set<string>; completed: boolean }> {
+  const empty = { findings: [], introducedColumns: new Set<string>(), completed: false }
+  if (!runner.classifyPii) return empty
   const { file, engineNewSql } = ctx
-  if (!engineNewSql || file.status === "deleted") return []
+  if (!engineNewSql || file.status === "deleted") return empty
   const model = modelNameFromPath(file.path)
-  if (!runner.columnLineage) return []
+  if (!runner.columnLineage) return empty
   // Output columns the change INTRODUCED = head targets − base targets (precise;
   // a pre-existing column merely mentioned in the diff is NOT counted).
-  const headCols = [...new Set((await runner.columnLineage(engineNewSql, dialect)).map((e) => e.target).filter(Boolean))]
-  if (!headCols.length) return []
-  const baseCols = ctx.engineOldSql
-    ? new Set((await runner.columnLineage(ctx.engineOldSql, dialect)).map((e) => e.target.toLowerCase()))
-    : undefined
-  const newCols = baseCols ? headCols.filter((c) => !baseCols.has(c.toLowerCase())) : headCols
-  if (!newCols.length) return []
-  const pii = await runner.classifyPii(newCols)
+  let newCols: string[]
+  try {
+    const headCols = [...new Set((await runner.columnLineage(engineNewSql, dialect)).map((e) => e.target).filter(Boolean))]
+    if (!headCols.length) return { ...empty, completed: true }
+    const baseCols = ctx.engineOldSql
+      ? new Set((await runner.columnLineage(ctx.engineOldSql, dialect)).map((e) => e.target.toLowerCase()))
+      : undefined
+    newCols = baseCols ? headCols.filter((c) => !baseCols.has(c.toLowerCase())) : headCols
+  } catch {
+    return empty
+  }
+  const introducedColumns = new Set(newCols.map((c) => c.toLowerCase()))
+  if (!newCols.length) return { findings: [], introducedColumns, completed: true }
+  let pii
+  try {
+    pii = await runner.classifyPii(newCols)
+  } catch {
+    return empty
+  }
   const out: Finding[] = []
   const highExposureLayer = /(^|\/)(marts|reporting)\//.test(file.path)
   for (const p of pii) {
@@ -959,16 +975,7 @@ async function piiClassifyLane(ctx: ModelContext, runner: ReviewRunner, dialect:
       }),
     )
   }
-  return out
-}
-
-async function introducedOutputColumns(ctx: ModelContext, runner: ReviewRunner, dialect: string): Promise<Set<string> | undefined> {
-  if (!runner.columnLineage || !ctx.engineNewSql || ctx.file.status === "deleted") return undefined
-  const headCols = [...new Set((await runner.columnLineage(ctx.engineNewSql, dialect)).map((e) => e.target).filter(Boolean))]
-  if (!headCols.length) return new Set()
-  if (!ctx.engineOldSql) return new Set(headCols.map((c) => c.toLowerCase()))
-  const baseCols = new Set((await runner.columnLineage(ctx.engineOldSql, dialect)).map((e) => e.target.toLowerCase()))
-  return new Set(headCols.filter((c) => !baseCols.has(c.toLowerCase())).map((c) => c.toLowerCase()))
+  return { findings: out, introducedColumns, completed: true }
 }
 
 function piiLane(file: ChangedFile & { kind: string }, columns: string[]): Finding[] {
@@ -1061,6 +1068,7 @@ export async function runReview(input: OrchestrateInput): Promise<VerdictEnvelop
   const lanes = new Set(input.config.reviewers.length ? input.config.reviewers : TIER_LANES[tier])
 
   const all: Finding[][] = []
+  const diffScopedPiiFiles = new Set<string>()
   for (const ctx of ctxByPath.values()) {
     const tasks: Promise<Finding[]>[] = []
     // Engine lanes consume COMPILED SQL (rendered by dbt) when available.
@@ -1086,20 +1094,19 @@ export async function runReview(input: OrchestrateInput): Promise<VerdictEnvelop
       tasks.push(columnBreakageLane(ctx, input.runner, getCompiled, dialect))
     }
     if (lanes.has("test_coverage")) tasks.push(missingGrainTestLane(ctx, input.runner))
-    const diffScopedPiiCols =
-      input.runner.classifyPii && input.runner.columnLineage
-        ? await introducedOutputColumns(ctx, input.runner, dialect)
-        : undefined
+    // PII classification always runs (cheap name-pattern check, diff-scoped to
+    // newly-introduced columns) — exposing PII is a hard-floor concern that
+    // shouldn't depend on the cost tier enabling the pii_exposure lane. If core
+    // lineage/classification fails, keep the broad deterministic fallback.
+    const diffScopedPii = await piiClassifyLane(ctx, input.runner, dialect)
+    if (diffScopedPii.completed) diffScopedPiiFiles.add(ctx.file.path)
     if (lanes.has("pii_exposure")) {
-      const fallbackPii = diffScopedPiiCols
-        ? ctx.pii.filter((col) => !diffScopedPiiCols.has(col.toLowerCase()))
+      const fallbackPii = diffScopedPii.completed
+        ? ctx.pii.filter((col) => !diffScopedPii.introducedColumns.has(col.toLowerCase()))
         : ctx.pii
       all.push(piiLane(ctx.file, fallbackPii))
     }
-    // PII classification always runs (cheap name-pattern check, diff-scoped to
-    // newly-introduced columns) — exposing PII is a hard-floor concern that
-    // shouldn't depend on the cost tier enabling the pii_exposure lane.
-    tasks.push(piiClassifyLane(ctx, input.runner, dialect))
+    all.push(diffScopedPii.findings)
     // Deterministic dbt anti-pattern detectors run on RAW SQL + diff (need Jinja).
     if (lanes.has("dbt_patterns")) {
       all.push(detectModelPatterns(ctx.file, ctx.newSql, input.rubric))
@@ -1163,12 +1170,9 @@ export async function runReview(input: OrchestrateInput): Promise<VerdictEnvelop
   // regex still covers functions core didn't flag (dialect-suppressed / not in
   // core's set) plus reserved words / types / operators that L033 doesn't do.
   const flat = all.flat()
-  const diffScopedPiiFiles = new Set<string>()
-  if (input.runner.classifyPii && input.runner.columnLineage) {
-    for (const ctx of ctxByPath.values()) {
-      if (ctx.engineNewSql && ctx.file.status !== "deleted") diffScopedPiiFiles.add(ctx.file.path)
-    }
-  }
+  const schemaPiiFiles = new Set(
+    flat.filter((f) => f.category === "pii_exposure" && f.evidence?.tool === "schema.detect_pii").map((f) => f.file),
+  )
   // Per file, the concatenated rule names core's AST lint actually emitted —
   // so we suppress a regex twin only when core genuinely covered that concern.
   const coreRulesByFile = new Map<string, string>()
@@ -1195,7 +1199,7 @@ export async function runReview(input: OrchestrateInput): Promise<VerdictEnvelop
     const fallbackRule = String((f.evidence?.result as any)?.rule ?? "").replace(/_/g, "-")
     if (
       (tool === "dbt-patterns" || tool === "rule-catalog") &&
-      diffScopedPiiFiles.has(f.file) &&
+      (diffScopedPiiFiles.has(f.file) || schemaPiiFiles.has(f.file)) &&
       f.category === "pii_exposure" &&
       (fallbackRule === "pii-into-mart" || fallbackRule === "select-pii-columns")
     ) {

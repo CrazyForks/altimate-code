@@ -229,6 +229,61 @@ describe("DuckDB driver", () => {
       expect(await connector.execute("SELECT 1")).toMatchObject({ columns: ["ok"], rows: [[1]], row_count: 1 })
       await connector.close()
     })
+
+    test("retries read-only when native open synchronously reports a file lock", async () => {
+      let connectAttempts = 0
+      mock.module("duckdb", () => ({
+        default: {
+          Database: class {
+            constructor(_path: string, optsOrCb: any, cb?: (err: Error | null) => void) {
+              const opts = typeof optsOrCb === "function" ? undefined : optsOrCb
+              const done = openCallback(optsOrCb, cb)
+              connectAttempts++
+              done(connectAttempts === 1 && !opts?.access_mode ? new Error("DUCKDB_LOCKED: file is locked") : null)
+            }
+            connect() {
+              return {
+                all: (_sql: string, cb: (err: Error | null, rows: any[]) => void) => {
+                  cb(null, [{ ok: 1 }])
+                },
+              }
+            }
+            close(cb: any) {
+              if (cb) cb(null)
+            }
+          },
+        },
+      }))
+
+      const { connect } = await import("../src/duckdb")
+      const connector = await connect({ type: "duckdb", path: "/tmp/sync-lock.duckdb" })
+      await connector.connect()
+      expect(connectAttempts).toBe(2)
+      expect(await connector.execute("SELECT 1")).toMatchObject({ columns: ["ok"], rows: [[1]], row_count: 1 })
+      await connector.close()
+    })
+
+    test("propagates synchronous non-lock open errors without connecting undefined db", async () => {
+      mock.module("duckdb", () => ({
+        default: {
+          Database: class {
+            constructor(_path: string, optsOrCb: any, cb?: (err: Error | null) => void) {
+              openCallback(optsOrCb, cb)(new Error("catalog is corrupt"))
+            }
+            connect() {
+              throw new Error("should not connect")
+            }
+            close(cb: any) {
+              if (cb) cb(null)
+            }
+          },
+        },
+      }))
+
+      const { connect } = await import("../src/duckdb")
+      const connector = await connect({ type: "duckdb", path: "/tmp/corrupt.duckdb" })
+      await expect(connector.connect()).rejects.toThrow("catalog is corrupt")
+    })
   })
 })
 

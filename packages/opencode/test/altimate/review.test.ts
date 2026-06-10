@@ -1410,6 +1410,107 @@ describe("orchestrate", () => {
     expect(env.verdict).toBe("REQUEST_CHANGES")
   })
 
+  test("PII fallback survives core lineage failure instead of aborting review", async () => {
+    const files: ChangedFile[] = [{ path: "models/marts/dim_customers.sql", status: "modified", diff: "+    email\n" }]
+    const runner: ReviewRunner = {
+      ...fakeRunner({}),
+      async detectPii() {
+        return { columns: ["email"] }
+      },
+      async columnLineage() {
+        throw new Error("lineage parser crashed")
+      },
+      async classifyPii(columns) {
+        return columns.map((column) => ({
+          column,
+          classification: "Email",
+          confidence: 0.95,
+        }))
+      },
+    }
+    const env = await runReview({
+      changedFiles: files,
+      config: { ...DEFAULT_REVIEW_CONFIG },
+      rubric: DEFAULT_RUBRIC,
+      mode: "gate",
+      runner,
+      getContent: content("select customer_id, email from customers", "select customer_id from customers"),
+    })
+    const pii = env.findings.filter((f) => f.category === "pii_exposure")
+    expect(pii).toHaveLength(1)
+    expect(pii[0].evidence?.tool).toBe("schema.detect_pii")
+    expect(env.verdict).toBe("REQUEST_CHANGES")
+  })
+
+  test("PII fallback survives core classification failure instead of hiding risk", async () => {
+    const files: ChangedFile[] = [{ path: "models/marts/dim_customers.sql", status: "modified", diff: "+    email\n" }]
+    const runner: ReviewRunner = {
+      ...fakeRunner({}),
+      async detectPii() {
+        return { columns: ["email"] }
+      },
+      async columnLineage(sql) {
+        return sql.includes("email")
+          ? [
+              { source: "customers.customer_id", target: "customer_id" },
+              { source: "customers.email", target: "email" },
+            ]
+          : [{ source: "customers.customer_id", target: "customer_id" }]
+      },
+      async classifyPii() {
+        throw new Error("classifier unavailable")
+      },
+    }
+    const env = await runReview({
+      changedFiles: files,
+      config: { ...DEFAULT_REVIEW_CONFIG },
+      rubric: DEFAULT_RUBRIC,
+      mode: "gate",
+      runner,
+      getContent: content("select customer_id, email from customers", "select customer_id from customers"),
+    })
+    const pii = env.findings.filter((f) => f.category === "pii_exposure")
+    expect(pii).toHaveLength(1)
+    expect(pii[0].evidence?.tool).toBe("schema.detect_pii")
+    expect(env.verdict).toBe("REQUEST_CHANGES")
+  })
+
+  test("case-variant PII detector output does not duplicate core diff-scoped finding", async () => {
+    const files: ChangedFile[] = [{ path: "models/marts/dim_customers.sql", status: "modified", diff: "+    Email as EMAIL\n" }]
+    const runner: ReviewRunner = {
+      ...fakeRunner({}),
+      async detectPii() {
+        return { columns: ["EMAIL", "email"] }
+      },
+      async columnLineage(sql) {
+        return sql.toLowerCase().includes("email")
+          ? [
+              { source: "customers.customer_id", target: "customer_id" },
+              { source: "customers.email", target: "EMAIL" },
+            ]
+          : [{ source: "customers.customer_id", target: "customer_id" }]
+      },
+      async classifyPii(columns) {
+        return columns.map((column) => ({
+          column,
+          classification: "Email",
+          confidence: 0.95,
+        }))
+      },
+    }
+    const env = await runReview({
+      changedFiles: files,
+      config: { ...DEFAULT_REVIEW_CONFIG },
+      rubric: DEFAULT_RUBRIC,
+      mode: "gate",
+      runner,
+      getContent: content("select customer_id, Email as EMAIL from customers", "select customer_id from customers"),
+    })
+    const pii = env.findings.filter((f) => f.category === "pii_exposure")
+    expect(pii).toHaveLength(1)
+    expect(pii[0].evidence?.tool).toBe("altimate_core.classify_pii")
+  })
+
   test("low-confidence name PII does not surface or fall back to regex PII comments", async () => {
     const files: ChangedFile[] = [{ path: "models/marts/dim_customers.sql", status: "modified", diff: "+    first_name\n" }]
     const runner: ReviewRunner = {
