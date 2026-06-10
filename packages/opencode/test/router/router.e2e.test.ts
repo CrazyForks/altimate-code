@@ -67,7 +67,8 @@ beforeAll(() => {
     throw new Error(`image ${IMG} missing`)
 })
 afterAll(() => {
-  for (const d of dirs) try { Bun.spawnSync(["sudo", "rm", "-rf", d]); rmSync(d, { recursive: true, force: true }) } catch {}
+  // Temp dirs are mkdtemp dirs owned by this user — rmSync suffices; no sudo.
+  for (const d of dirs) try { rmSync(d, { recursive: true, force: true }) } catch {}
 })
 
 describe.skipIf(SKIP)("Router × REAL OpenRouter + REAL dbt (no mocks)", () => {

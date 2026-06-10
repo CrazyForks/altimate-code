@@ -38,7 +38,8 @@ beforeAll(() => {
   if (ok.exitCode !== 0) throw new Error(`E2E image ${IMG} not present`)
 })
 afterAll(() => {
-  for (const d of dirs) try { Bun.spawnSync(["sudo", "rm", "-rf", d]); rmSync(d, { recursive: true, force: true }) } catch {}
+  // Temp dirs are mkdtemp dirs owned by this user — rmSync suffices; no sudo.
+  for (const d of dirs) try { rmSync(d, { recursive: true, force: true }) } catch {}
 })
 
 describe.skipIf(SKIP)("Verifier × REAL dbt (no mocks)", () => {
