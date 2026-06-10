@@ -25,8 +25,12 @@ export const AltimateCoreRewriteTool = Tool.define("altimate_core_rewrite", {
         schema_context: args.schema_context,
       })) as { success?: boolean; error?: string; data?: Record<string, any> } | null
       const data = (result?.data ?? {}) as Record<string, any>
-      const error = result?.error ?? data.error
-      if (error) {
+      // Treat an explicit `success === false` as a failure even when the error
+      // string is empty/absent — otherwise an `{ success: false, error: "" }`
+      // payload would fall through to the success path and misreport results.
+      const failed = result?.success === false || !!(result?.error ?? data.error)
+      if (failed) {
+        const error = result?.error ?? data.error ?? "rewrite failed"
         return {
           title: "Rewrite: ERROR",
           metadata: { success: false, rewrite_count: 0, verified_count: 0, unverified_count: 0, error },
@@ -71,7 +75,12 @@ async function verifyRewrites(
   data: Record<string, any>,
 ) {
   const hasSchema = !!(args.schema_path || (args.schema_context && Object.keys(args.schema_context).length > 0))
-  const norm = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase()
+  // Normalize whitespace only for dedup / no-op detection — do NOT case-fold:
+  // lowercasing would collapse rewrites that differ only by a case-sensitive
+  // string literal or quoted identifier (distinct queries) into one, dropping a
+  // valid candidate before it's verified. Equivalence itself is checked by the
+  // engine, not by this string compare.
+  const norm = (s: string) => s.replace(/\s+/g, " ").trim()
 
   // Collect candidate rewrites (whole-query + per-suggestion), drop blanks/no-ops/dupes.
   const suggestions: any[] = data.suggestions ?? data.rewrites ?? []

@@ -130,6 +130,31 @@ describe("verified-optimize — gate logic (mocked engine)", () => {
     expect(String(r.output)).toContain("engine down")
   })
 
+  test("success:false with EMPTY error -> still treated as failure (no fall-through)", async () => {
+    // Regression: a `{ success: false, error: "" }` payload must not fall through
+    // to the success path and misreport rewrites.
+    Dispatcher.register("altimate_core.rewrite" as any, async () => ({ success: false, error: "" }))
+    const r = await runTool({ sql: ORIGINAL, schema_context: SCHEMA })
+    expect(r.metadata.success).toBe(false)
+    expect(r.metadata.verified_count).toBe(0)
+    expect(String(r.output)).toContain("Failed to generate rewrites")
+  })
+
+  test("dedup preserves case-sensitive literals (does NOT case-fold)", async () => {
+    // Two rewrites differing only by a string-literal case are DISTINCT and must
+    // both be verified — not collapsed into one by case-folding.
+    const rwA = "SELECT id FROM t WHERE name = 'A'"
+    const rwB = "SELECT id FROM t WHERE name = 'a'"
+    Dispatcher.register("altimate_core.rewrite" as any, async () => ({
+      success: true,
+      data: { suggestions: [{ rewritten_sql: rwA }, { rewritten_sql: rwB }] },
+    }))
+    Dispatcher.register("altimate_core.equivalence" as any, async () => ({ success: true, data: { equivalent: true } }))
+    const r = await runTool({ sql: "SELECT id FROM t", schema_context: SCHEMA })
+    // Both candidates survive dedup and get verified (2, not 1).
+    expect(r.metadata.verified_count).toBe(2)
+  })
+
   test("duplicate candidates are de-duplicated", async () => {
     Dispatcher.register("altimate_core.rewrite" as any, async () => ({
       success: true,
