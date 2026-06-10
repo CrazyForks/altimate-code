@@ -197,6 +197,9 @@ export namespace LLM {
       const list = Object.entries(tools).map(([name, t]) => ({ name, description: (t as any)?.description }))
       const keep = Retrieval.select(query, list, { keep: referencedTools })
       for (const name of Object.keys(tools)) {
+        // Never delete "invalid": it's the AI-SDK fallback tool the runtime relies
+        // on for malformed tool calls, not a user-facing tool, so it's exempt from
+        // retrieval rather than being listed in Retrieval.CORE.
         if (name !== "invalid" && !keep.has(name)) delete tools[name]
       }
     }

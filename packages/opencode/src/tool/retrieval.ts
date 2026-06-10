@@ -13,9 +13,16 @@
  */
 
 export namespace Retrieval {
-  /** Always-available agent essentials — never retrieved out. */
+  /**
+   * Always-available agent essentials — never retrieved out.
+   * NOTE: every entry must be a REAL registered tool id (see tool/registry.ts).
+   * A name that isn't registered is silently skipped by `select` (the `all.has`
+   * guard), so it's harmless but dead — keep this list honest. There is no
+   * directory-listing tool registered (file discovery is `glob` / `bash ls`),
+   * so no "list"/"ls" entry here.
+   */
   export const CORE = [
-    "bash", "read", "write", "edit", "glob", "grep", "list",
+    "bash", "read", "write", "edit", "glob", "grep",
     "task", "todowrite", "skill",
   ]
 
@@ -25,7 +32,12 @@ export namespace Retrieval {
   }
 
   export interface Options {
-    /** target number of tools to expose (incl. core). */
+    /**
+     * Target size of the exposed set. NOT a hard cap: core essentials + any
+     * forced `keep` (in-flight tools) are ALWAYS retained even if together they
+     * exceed `topk` — dropping a referenced/core tool would corrupt the turn.
+     * `topk` bounds how many extra lexically-ranked tools are added on top.
+     */
     topk?: number
     /** names that MUST stay (e.g. tools referenced by in-flight tool calls). */
     keep?: Iterable<string>
@@ -43,7 +55,9 @@ export namespace Retrieval {
     const words = new Set(query.toLowerCase().match(/[a-z0-9_]+/g) ?? [])
     const hay = (t.name + " " + (t.description ?? "")).toLowerCase()
     let s = 0
-    for (const w of words) if (w.length > 3 && hay.includes(w)) s += 1
+    // length >= 3 so high-signal domain terms count (sql, dbt, pii, ddl, api, ssh);
+    // stopwords this short rarely appear in a tool name/description so add little noise.
+    for (const w of words) if (w.length >= 3 && hay.includes(w)) s += 1
     // small boost for a direct name mention
     if (words.has(t.name.toLowerCase())) s += 3
     return s
