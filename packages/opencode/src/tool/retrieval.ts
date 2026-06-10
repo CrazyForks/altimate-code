@@ -15,7 +15,7 @@
 export namespace Retrieval {
   /** Always-available agent essentials — never retrieved out. */
   export const CORE = [
-    "bash", "read", "write", "edit", "glob", "grep", "ls",
+    "bash", "read", "write", "edit", "glob", "grep", "list",
     "task", "todowrite", "skill",
   ]
 
@@ -38,7 +38,9 @@ export namespace Retrieval {
   }
 
   function score(query: string, t: Tool): number {
-    const words = new Set(query.toLowerCase().match(/[a-z_]+/g) ?? [])
+    // Tokenize on alphanumerics + underscore so digits survive (e.g. "v2", "s3")
+    // and hyphenated names split into matchable parts (e.g. "dbt-schema-verify").
+    const words = new Set(query.toLowerCase().match(/[a-z0-9_]+/g) ?? [])
     const hay = (t.name + " " + (t.description ?? "")).toLowerCase()
     let s = 0
     for (const w of words) if (w.length > 3 && hay.includes(w)) s += 1
