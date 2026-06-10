@@ -56,6 +56,15 @@ describe("Critic.gate", () => {
     expect(Critic.isGated("bash", ["sql_execute"])).toBe(false)
     expect(Critic.isGated("sql_execute", ["sql_execute"])).toBe(true)
   })
+
+  test("DEFAULT_GATED uses real registered tool ids (no phantoms)", () => {
+    // Regression: gated list had "patch" (real id is apply_patch) and "dbt_run"
+    // (no such tool — dbt runs via bash), so those edits silently bypassed the gate.
+    expect(Critic.DEFAULT_GATED).toContain("apply_patch")
+    expect(Critic.DEFAULT_GATED).not.toContain("patch")
+    expect(Critic.DEFAULT_GATED).not.toContain("dbt_run")
+    expect(Critic.isGated("apply_patch")).toBe(true)
+  })
 })
 
 describe("Critic.detectDangerousBash — blocks catastrophic commands", () => {
@@ -95,6 +104,10 @@ describe("Critic.detectDangerousBash — blocks catastrophic commands", () => {
     // regression — long-form / glob chmod of root (was a false negative)
     ["chmod --recursive 777 /", "long-form recursive chmod of root"],
     ["chmod -R 777 /*", "recursive chmod of root glob"],
+    // regression — inline env-var assignment before the command (was a bypass)
+    ["FOO=1 rm -rf /", "single env assignment prefix"],
+    ["IFS=x LC_ALL=C rm -rf /", "multiple env assignment prefixes"],
+    ["env FOO=1 rm -rf /", "env builtin + assignment"],
   ]
   for (const [cmd, label] of dangerous) {
     test(`blocks: ${label} — ${cmd}`, () => {

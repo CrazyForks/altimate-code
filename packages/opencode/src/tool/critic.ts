@@ -22,14 +22,16 @@
 
 export namespace Critic {
   /**
-   * Side-effecting tools worth gating. Reads (glob/grep/read) are never gated.
+   * Side-effecting tools worth gating, by their REAL registered tool ids (see
+   * tool/registry.ts). Reads (glob/grep/read) are never gated. dbt builds/runs
+   * are not a distinct tool — they execute via `bash`, which is gated.
    * NOTE: the gate is wired into the native ToolRegistry execute wrapper only;
    * MCP-provided tools run through a separate wrapper and are NOT gated. The
    * shipped `basicSafetyVerifier` is bash-only (a native tool), so this is a
-   * no-op gap today — but a product injecting a verifier for `sql_execute`/
-   * `dbt_run` must confirm those are native, not MCP, tools.
+   * no-op gap today — but a product injecting a verifier for `sql_execute`
+   * must confirm it's a native, not MCP, tool.
    */
-  export const DEFAULT_GATED = ["bash", "write", "edit", "sql_execute", "dbt_run", "patch"]
+  export const DEFAULT_GATED = ["bash", "write", "edit", "sql_execute", "apply_patch"]
 
   export interface Verdict {
     ok: boolean
@@ -124,6 +126,9 @@ export namespace Critic {
       if (sep.has(t)) return true
       if (t.startsWith("-")) continue // a flag (e.g. `sudo -E`, `bash -c`)
       if (TRANSPARENT_PREFIX.has(t)) continue
+      // Inline env-var assignment preceding the command (e.g. `FOO=1 rm -rf /`,
+      // `IFS=x rm ...`) — these don't change which command runs, so keep walking.
+      if (/^[a-z_][a-z0-9_]*=/i.test(t)) continue
       return false // a real preceding word -> rm is an argument, not the command
     }
     return true // reached the start through only flags/prefixes
@@ -239,14 +244,15 @@ export namespace Critic {
     timeoutMs: number = VERIFIER_TIMEOUT_MS,
   ): Promise<GateResult> {
     if (!enabled() || !isGated(toolName, gated)) return { allow: true }
+    let timer: ReturnType<typeof setTimeout> | undefined
     try {
       // async IIFE so a synchronous throw in verify() rejects the promise (and is
       // caught below) rather than escaping the Promise.race.
       const verifyPromise = (async () => verifier.verify(toolName, args))()
       const timeout = new Promise<Verdict>((resolve) => {
-        const t = setTimeout(() => resolve({ ok: true, reason: "__timeout__" }), timeoutMs)
+        timer = setTimeout(() => resolve({ ok: true, reason: "__timeout__" }), timeoutMs)
         // don't keep the event loop alive for this guard timer
-        ;(t as any)?.unref?.()
+        ;(timer as any)?.unref?.()
       })
       const v = await Promise.race([verifyPromise, timeout])
       if (v.ok) return { allow: true }
@@ -257,6 +263,10 @@ export namespace Critic {
     } catch {
       // Fail-open: observability/governance must never break core functionality.
       return { allow: true }
+    } finally {
+      // Clear the guard timer once the race settles (verify resolved first) so it
+      // doesn't linger until timeout.
+      if (timer) clearTimeout(timer)
     }
   }
 }
