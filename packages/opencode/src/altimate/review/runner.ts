@@ -481,14 +481,18 @@ export function createDispatcherRunner(opts: DispatcherRunnerOptions): ReviewRun
         })
         const data = (res.data ?? {}) as Record<string, any>
         const validationErrors = asArray(data.validation_errors)
-        // Undecidable when: call failed, no schema to resolve columns, or the
-        // engine returned validation errors. Never guess equivalent=true.
+        // Undecidable when: call failed, no schema to resolve columns, the engine
+        // returned validation errors, or the engine itself flagged the comparison
+        // as not decidable (altimate-core@0.5.1 `decidable` field — authoritative,
+        // catches semantic abstentions that carry no validation error). Never
+        // guess equivalent=true.
         const decided =
           res.success === true &&
           typeof data.equivalent === "boolean" &&
           !res.error &&
           !data.error &&
           validationErrors.length === 0 &&
+          data.decidable !== false &&
           !!schema
         if (!decided) return { decided: false }
         // The engine flags column-reorder etc. as `minor` but still sets

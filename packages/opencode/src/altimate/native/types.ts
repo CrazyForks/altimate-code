@@ -724,6 +724,8 @@ export interface SqlDiffParams {
   original: string
   modified: string
   context_lines?: number
+  /** Optional parsing-dialect hint forwarded to the equivalence engine. */
+  dialect?: string
 }
 
 export interface SqlDiffResult {
