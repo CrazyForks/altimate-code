@@ -1619,6 +1619,84 @@ describe("orchestrate", () => {
     expect(env.verdict).toBe("REQUEST_CHANGES")
   })
 
+  test("zero-target lineage does not mark the file PII-complete, so the regex twin survives", async () => {
+    // Regression guard: when `columnLineage` RESOLVES but yields no output targets
+    // (the parser couldn't derive columns — uncertainty, not "no new PII"), the
+    // diff-scoped lane must not flag the file as completed. Otherwise the file
+    // enters the PII-completed/classified sets and a deterministic regex twin could
+    // be suppressed for a column core never actually classified.
+    const files: ChangedFile[] = [{ path: "models/marts/dim_customers.sql", status: "modified", diff: "+    ssn\n" }]
+    const runner: ReviewRunner = {
+      ...fakeRunner({}),
+      async detectPii() {
+        return { columns: ["ssn"] }
+      },
+      async columnLineage() {
+        // Lineage resolves but derives zero output columns for every input.
+        return []
+      },
+      async classifyPii() {
+        return []
+      },
+    }
+    const env = await runReview({
+      changedFiles: files,
+      config: { ...DEFAULT_REVIEW_CONFIG, reviewers: ["dbt_patterns"] },
+      rubric: DEFAULT_RUBRIC,
+      mode: "gate",
+      runner,
+      getContent: content("select customer_id, ssn from customers", "select customer_id from customers"),
+    })
+    const pii = env.findings.filter((f) => f.category === "pii_exposure")
+    expect(
+      pii.some((f) => f.evidence?.tool === "dbt-patterns" && (f.evidence?.result as any)?.rule === "pii_into_mart"),
+    ).toBe(true)
+    expect(env.verdict).toBe("REQUEST_CHANGES")
+  })
+
+  test("core considered the matched column (muted as low-confidence) → the regex twin is suppressed", async () => {
+    // Inverse of the recall guards above: suppression must be COLUMN-aware, not
+    // merely "the classifier ran". Here core's `classify_pii` DID consider `ssn`
+    // but muted it (confidence below threshold → no diff-scoped finding). Because
+    // the column was considered, the coarse `pii_into_mart` regex twin for the
+    // same column is redundant and must be suppressed — otherwise the same column
+    // is double-reported. This exercises the token-gated suppression branch
+    // (`classifiedPiiColumnsByFile.has(token)`), distinct from the "never
+    // classified → twin survives" path.
+    const files: ChangedFile[] = [{ path: "models/marts/dim_customers.sql", status: "modified", diff: "+    ssn\n" }]
+    const runner: ReviewRunner = {
+      ...fakeRunner({}),
+      async detectPii() {
+        return { columns: ["ssn"] }
+      },
+      async columnLineage(sql) {
+        return sql.includes("ssn")
+          ? [
+              { source: "customers.customer_id", target: "customer_id" },
+              { source: "customers.ssn", target: "ssn" },
+            ]
+          : [{ source: "customers.customer_id", target: "customer_id" }]
+      },
+      async classifyPii() {
+        // Considered `ssn` but is not confident → muted, no diff-scoped finding,
+        // yet `ssn` still lands in the classified-columns set.
+        return [{ column: "ssn", classification: "SSN", confidence: 0.1 }]
+      },
+    }
+    const env = await runReview({
+      changedFiles: files,
+      config: { ...DEFAULT_REVIEW_CONFIG, reviewers: ["dbt_patterns"] },
+      rubric: DEFAULT_RUBRIC,
+      mode: "gate",
+      runner,
+      getContent: content("select customer_id, ssn from customers", "select customer_id from customers"),
+    })
+    const piiIntoMart = env.findings.filter(
+      (f) => f.evidence?.tool === "dbt-patterns" && (f.evidence?.result as any)?.rule === "pii_into_mart",
+    )
+    expect(piiIntoMart).toHaveLength(0)
+  })
+
   test("structural error severity blocks only for join_risk; other rules stay advisory", async () => {
     // SC003 group_by_change is `semantic_change`, not `join_risk`. Even at core
     // `severity: "error"` it must NOT be escalated to critical — only join-key

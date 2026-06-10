@@ -136,12 +136,14 @@ describe("DuckDB driver", () => {
   describe("connect retry with READ_ONLY", () => {
     test("retries with READ_ONLY when file DB is locked on initial connect", async () => {
       let connectAttempts = 0
+      const accessModes: Array<string | undefined> = []
       mock.module("duckdb", () => ({
         default: {
           Database: class {
             constructor(_path: string, optsOrCb: any, cb?: (err: Error | null) => void) {
               const opts = typeof optsOrCb === "function" ? undefined : optsOrCb
               const done = openCallback(optsOrCb, cb)
+              accessModes.push(opts?.access_mode)
               connectAttempts++
               if (connectAttempts === 1 && !opts?.access_mode) {
                 // First attempt fails with lock error
@@ -169,6 +171,10 @@ describe("DuckDB driver", () => {
       const connector = await connect({ type: "duckdb", path: "/tmp/test.duckdb" })
       await connector.connect()
       expect(connectAttempts).toBe(2) // First failed, second succeeded in READ_ONLY
+      // The retry must specifically request READ_ONLY — two attempts alone don't
+      // prove the lock was worked around correctly.
+      expect(accessModes[0]).toBeUndefined()
+      expect(accessModes[1]).toBe("READ_ONLY")
 
       await connector.close()
     })

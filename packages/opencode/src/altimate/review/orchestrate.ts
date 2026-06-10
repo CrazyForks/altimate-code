@@ -950,7 +950,12 @@ async function piiClassifyLane(
   let newCols: string[]
   try {
     const headCols = [...new Set((await runner.columnLineage(engineNewSql, dialect)).map((e) => e.target).filter(Boolean))]
-    if (!headCols.length) return { ...empty, completed: true }
+    // Zero head targets means lineage could NOT resolve this model's output
+    // columns — the classifier considered nothing, so this is uncertainty, not a
+    // confident "no new PII". Returning `completed: false` keeps the deterministic
+    // regex fallback alive (vs. the `!newCols.length` case below, where lineage
+    // DID resolve columns but none are newly introduced — that is genuinely done).
+    if (!headCols.length) return empty
     const baseCols = ctx.engineOldSql
       ? new Set((await runner.columnLineage(ctx.engineOldSql, dialect)).map((e) => e.target.toLowerCase()))
       : undefined
