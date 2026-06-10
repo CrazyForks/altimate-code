@@ -29,6 +29,10 @@ export const ServeCommand = cmd({
     // serve mode. Subscribe the shared trace consumer to the in-process
     // event stream so serve sessions produce the same trace files as the
     // terminal entrypoints.
+    //
+    // `directory` is the SDK workspace/routing context, NOT the trace output
+    // location — trace files always go to the configured tracing dir
+    // (`tracing.dir`, default ~/.local/share/altimate-code/traces/).
     const traceSub = subscribeTraceConsumer({ directory: process.cwd() })
 
     // Finalize traces on shutdown. `serve` blocks forever on the promise below

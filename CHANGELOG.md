@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.6] - 2026-06-08
+
+### Added
+
+- **Session traces now work in headless `serve` mode — your VS Code "Altimate Code" chat sessions show up in `/traces` just like terminal sessions.** Sessions driven over `altimate serve` (the server behind the VS Code chat panel) had no TUI worker observing the event stream, so trace files were never written and `/traces` was always empty after a chat. The per-session tracing logic is now a shared `TraceConsumer` wired into both the TUI worker and `serve`, so IDE chat sessions produce the same incremental `ses_<id>.json` files — full multi-turn waterfall, recorded prompt, tool-call log, cost, and timing. `serve` now registers `SIGINT`/`SIGTERM`/`beforeExit` handlers that drain and finalize in-flight traces on shutdown (so a serve trace ends as `completed`, not `running`, and the process exits with signal-conventional codes), finalizes a session as soon as it is deleted, and finalizes all open sessions concurrently so a busy server isn't cut off mid-write by a container shutdown grace period. (#886)
+
 ## [0.8.5] - 2026-06-06
 
 ### Fixed
