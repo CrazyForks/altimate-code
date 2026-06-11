@@ -1,9 +1,9 @@
 import { readFile } from "fs/promises"
 import path from "path"
-import { existsSync } from "fs"
 import { parseTree, findNodeAtLocation } from "jsonc-parser"
 import { resolveConfigPath, addMcpToConfig } from "../mcp/config"
 import { Filesystem } from "../util/filesystem"
+import { Glob } from "../util/glob"
 import { Log } from "../util/log"
 import type { Config } from "../config/config"
 
@@ -13,25 +13,61 @@ const log = Log.create({ service: "datamate-transport" })
 export const DATAMATE_KEY = "datamate"
 // altimate_change end
 
-/** IDE config sources where the extension may write a "datamate" MCP entry. */
-const IDE_MCP_SOURCES = [
-  // VS Code (1.99+: "servers", older: "mcpServers")
-  { file: ".vscode/mcp.json", keys: ["servers", "mcpServers"] },
-  // Cursor
-  { file: ".cursor/mcp.json", keys: ["mcpServers", "servers"] },
-  // GitHub Copilot
-  { file: ".github/copilot/mcp.json", keys: ["mcpServers", "servers"] },
-]
+/**
+ * Top-level keys that MCP config files use to map server name → entry.
+ * VS Code 1.99+ uses "servers"; older VS Code and Cursor use "mcpServers".
+ * We try both so the scan works regardless of which IDE wrote the file.
+ */
+const MCP_SERVERS_KEYS = ["servers", "mcpServers"] as const
+
+/** Glob patterns to exclude from mcp.json scans (large, irrelevant trees). */
+const MCP_SCAN_EXCLUDE = ["/node_modules/", "/.git/", "/dist/", "/build/", "/.pnpm/"]
 
 export type DatamateTransport =
   | { type: "remote"; url: string }
   | { type: "local"; command: string[] }
 
 /**
- * Scan across all IDE MCP config files in projectRootDir and return the
- * transport type for the "datamate" server entry.
+ * Parse a single mcp.json file and return the servers map, trying each of the
+ * known top-level key names in order.
+ */
+function extractServersMap(
+  parsed: Record<string, unknown>,
+): Record<string, Record<string, unknown>> {
+  for (const key of MCP_SERVERS_KEYS) {
+    const candidate = parsed[key]
+    if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
+      return candidate as Record<string, Record<string, unknown>>
+    }
+  }
+  return {}
+}
+
+/**
+ * Find all mcp.json files under projectRootDir (excluding noise directories)
+ * and return the paths sorted for deterministic ordering.
+ */
+async function findAllMcpJsonFiles(projectRootDir: string): Promise<string[]> {
+  try {
+    const paths = await Glob.scan("**/mcp.json", {
+      cwd: projectRootDir,
+      absolute: true,
+      dot: true,
+    })
+    return paths
+      .filter((p) => !MCP_SCAN_EXCLUDE.some((ex) => p.includes(ex)))
+      .sort()
+  } catch {
+    log.warn("findAllMcpJsonFiles: glob scan failed", { cwd: projectRootDir })
+    return []
+  }
+}
+
+/**
+ * Scan all mcp.json files under projectRootDir and return the transport type
+ * for the first "datamate" server entry found.
  *
- * Returns null if no IDE config has a "datamate" entry — the caller should
+ * Returns null if no mcp.json contains a "datamate" entry — the caller should
  * fall back to the cloud config.
  *
  * Reuses the exact command from the IDE config so altimate-code spawns the
@@ -40,28 +76,19 @@ export type DatamateTransport =
 export async function readDatamateTransportFromIde(
   projectRootDir: string,
 ): Promise<DatamateTransport | null> {
-  for (const source of IDE_MCP_SOURCES) {
-    const mcpJsonPath = path.join(projectRootDir, source.file)
-    if (!existsSync(mcpJsonPath)) continue
+  const mcpJsonPaths = await findAllMcpJsonFiles(projectRootDir)
 
+  for (const mcpJsonPath of mcpJsonPaths) {
+    const relPath = path.relative(projectRootDir, mcpJsonPath)
     try {
       const text = await readFile(mcpJsonPath, "utf-8")
       const parsed = JSON.parse(text) as Record<string, unknown>
-
-      let serversMap: Record<string, Record<string, unknown>> = {}
-      for (const key of source.keys) {
-        const candidate = parsed[key]
-        if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
-          serversMap = candidate as Record<string, Record<string, unknown>>
-          break
-        }
-      }
-
+      const serversMap = extractServersMap(parsed)
       const entry = serversMap[DATAMATE_KEY]
       if (!entry) continue
 
       log.info("readDatamateTransportFromIde: found entry", {
-        source: source.file,
+        source: relPath,
         type: entry["type"] ?? "(no type)",
       })
 
@@ -69,8 +96,7 @@ export async function readDatamateTransportFromIde(
         return { type: "remote", url: entry["url"] }
       }
 
-      // stdio entry — extract command + args so we reuse the same process
-      // the extension already manages, rather than spawning a second one.
+      // stdio entry — reuse the exact command + args the extension registered
       const cmd = typeof entry["command"] === "string" ? entry["command"] : undefined
       const args = Array.isArray(entry["args"]) ? (entry["args"] as string[]) : []
       if (cmd) {
@@ -80,8 +106,7 @@ export async function readDatamateTransportFromIde(
       // Entry exists but has no usable command — treat as local marker
       return { type: "local", command: [DATAMATE_KEY, "start-stdio"] }
     } catch {
-      log.warn("readDatamateTransportFromIde: failed to parse", { source: source.file })
-      // File missing or unparseable — try next source
+      log.warn("readDatamateTransportFromIde: failed to parse", { source: relPath })
     }
   }
 
@@ -90,10 +115,11 @@ export async function readDatamateTransportFromIde(
 }
 
 /**
- * Sync the "datamate" entry (and other remote MCP entries) from IDE MCP config
- * files to altimate-code.json. Uses `updatedAt` as the change signal for the
- * datamate entry (covers both stdio and HTTP transport), and URL comparison for
- * all other remote entries.
+ * Sync the "datamate" entry (and other remote MCP entries) from the first
+ * mcp.json that contains a "datamate" key to altimate-code.json.
+ *
+ * Uses `updatedAt` as the change signal for the datamate entry (covers both
+ * stdio and HTTP transport), and URL comparison for all other remote entries.
  *
  * Fire-and-forget friendly: errors are logged but never thrown.
  * Returns the list of MCP server names whose config was updated on disk.
@@ -103,39 +129,34 @@ export async function syncDatamateUrlFromVscodeMcp(cwd: string): Promise<string[
   try {
     log.info("syncDatamateUrlFromVscodeMcp: start", { cwd })
 
-    // Try each IDE source in priority order; use the first one that exists.
+    // Find the first mcp.json that contains a "datamate" entry.
+    const mcpJsonPaths = await findAllMcpJsonFiles(cwd)
     let mcpJsonPath: string | undefined
-    let ideSource: (typeof IDE_MCP_SOURCES)[number] | undefined
-    for (const source of IDE_MCP_SOURCES) {
-      const candidate = path.join(cwd, source.file)
-      if (existsSync(candidate)) {
-        mcpJsonPath = candidate
-        ideSource = source
-        break
-      }
-    }
-
-    if (!mcpJsonPath || !ideSource) {
-      log.info("syncDatamateUrlFromVscodeMcp: no IDE MCP config found, skipping sync")
-      return updated
-    }
-
-    const text = await readFile(mcpJsonPath, "utf-8")
-    let parsed: Record<string, unknown>
-    try {
-      parsed = JSON.parse(text) as Record<string, unknown>
-    } catch {
-      return updated
-    }
-
     let serversMap: Record<string, Record<string, unknown>> = {}
-    for (const key of ideSource.keys) {
-      const candidate = parsed[key]
-      if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
-        serversMap = candidate as Record<string, Record<string, unknown>>
-        break
+
+    for (const candidate of mcpJsonPaths) {
+      try {
+        const text = await readFile(candidate, "utf-8")
+        const parsed = JSON.parse(text) as Record<string, unknown>
+        const map = extractServersMap(parsed)
+        if (map[DATAMATE_KEY]) {
+          mcpJsonPath = candidate
+          serversMap = map
+          break
+        }
+      } catch {
+        // Unparseable — skip
       }
     }
+
+    if (!mcpJsonPath) {
+      log.info("syncDatamateUrlFromVscodeMcp: no mcp.json with datamate entry found, skipping sync")
+      return updated
+    }
+
+    log.info("syncDatamateUrlFromVscodeMcp: using config", {
+      source: path.relative(cwd, mcpJsonPath),
+    })
 
     // ── "datamate" entry: sync by updatedAt (works for stdio + HTTP) ────────
     const datamateVscode = serversMap[DATAMATE_KEY]
@@ -154,7 +175,6 @@ export async function syncDatamateUrlFromVscodeMcp(cwd: string): Promise<string[
           : undefined
 
         if (existingNode) {
-          // Extract current updatedAt + enabled from altimate-code.json
           let existingUpdatedAt: string | undefined
           let existingEnabled: boolean | undefined
           if (existingNode.type === "object" && existingNode.children) {
@@ -167,7 +187,7 @@ export async function syncDatamateUrlFromVscodeMcp(cwd: string): Promise<string[
           }
 
           if (vscodeUpdatedAt === existingUpdatedAt) {
-            log.info("syncDatamateUrlFromVscodeMcp: datamate entry already up to date, skipping", {
+            log.info("syncDatamateUrlFromVscodeMcp: datamate entry already up to date", {
               updatedAt: vscodeUpdatedAt,
             })
           } else {
@@ -178,13 +198,13 @@ export async function syncDatamateUrlFromVscodeMcp(cwd: string): Promise<string[
             if (datamateVscode["type"] === "stdio") {
               const env = datamateVscode["env"] as Record<string, string> | undefined
               const { ALTIMATE_EXTENSION_RPC: _rpc, ...restEnv } = env ?? {}
-              const cmd = typeof datamateVscode["command"] === "string" ? datamateVscode["command"] as string : DATAMATE_KEY
+              const cmd =
+                typeof datamateVscode["command"] === "string"
+                  ? (datamateVscode["command"] as string)
+                  : DATAMATE_KEY
               newEntry = {
                 type: "local",
-                command: [
-                  cmd,
-                  ...((datamateVscode["args"] as string[]) ?? []),
-                ],
+                command: [cmd, ...((datamateVscode["args"] as string[]) ?? [])],
                 ...(Object.keys(restEnv).length > 0 ? { environment: restEnv } : {}),
                 updatedAt: vscodeUpdatedAt,
               }
@@ -216,7 +236,7 @@ export async function syncDatamateUrlFromVscodeMcp(cwd: string): Promise<string[
     // ── All other remote MCP entries: existing URL-comparison logic ──────────
     const httpEntries: Array<{ key: string; url: string }> = []
     for (const [key, entry] of Object.entries(serversMap)) {
-      if (key === DATAMATE_KEY) continue // already handled above
+      if (key === DATAMATE_KEY) continue
       if (typeof entry["url"] === "string") {
         httpEntries.push({ key, url: entry["url"] })
       }
