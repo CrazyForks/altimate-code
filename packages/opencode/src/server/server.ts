@@ -31,7 +31,10 @@ import { PtyRoutes } from "./routes/pty"
 import { McpRoutes } from "./routes/mcp"
 // altimate_change start — reload-datamate endpoint
 import { MCP } from "../mcp"
-import { syncDatamateUrlFromVscodeMcp } from "../cli/cmd/serve"
+// Import sync + fresh-read helpers directly from the shared transport module.
+// Using datamate-transport.ts instead of serve.ts avoids a dep on a cmd handler.
+import { syncDatamateUrlFromVscodeMcp, readMcpEntryFromDisk } from "../altimate/datamate-transport"
+import { resolveConfigPath } from "../mcp/config"
 // altimate_change end
 import { FileRoutes } from "./routes/file"
 import { ConfigRoutes } from "./routes/config"
@@ -566,45 +569,55 @@ export namespace Server {
         },
       )
       // altimate_change start — POST /altimate/mcp/reload-datamate
-      // Updates the datamate MCP server URL from .vscode/mcp.json and reconnects the
-      // live MCP client so the new URL takes effect immediately without a server restart.
+      // Updates the datamate MCP server config from IDE MCP config files and reconnects
+      // the live MCP client so the new transport takes effect without a server restart.
+      //
+      // Bug-fix: the previous implementation called MCP.disconnect(name) + MCP.connect(name).
+      // MCP.disconnect calls persistMcpEnabled(name, false), which reads the stale in-memory
+      // Config singleton (not yet updated by syncDatamateUrlFromVscodeMcp) and writes
+      // { ...stale_entry, enabled: false } back to disk, overwriting the fresh config.
+      // MCP.connect then re-reads the same stale singleton and reconnects with the old transport.
+      //
+      // Fix: read the freshly-written entry directly from disk via readMcpEntryFromDisk
+      // (bypasses Config singleton), then call MCP.add(name, freshEntry) which takes a
+      // config directly and never calls persistMcpEnabled.
       .post("/altimate/mcp/reload-datamate", async (c) => {
         try {
           const directory = Instance.directory
-          // altimate_change start
-          log.info("reload-datamate: syncing URL from .vscode/mcp.json", { directory })
-          // altimate_change end
-          // Sync URL from .vscode/mcp.json → project config; returns updated server names.
+          log.info("reload-datamate: syncing IDE MCP config", { directory })
+
+          // Sync IDE MCP config → altimate-code.json; returns updated server names.
           const updatedNames = await syncDatamateUrlFromVscodeMcp(directory)
           const updated = updatedNames.length > 0
 
           if (updated) {
-            // altimate_change start
-            log.info("reload-datamate: URL updated, reconnecting MCP servers", { updatedNames })
-            // altimate_change end
-            // Reconnect each updated server that is currently live so the new URL takes effect.
+            log.info("reload-datamate: config updated, reconnecting MCP servers", { updatedNames })
+            // Reconnect each updated server using the freshly-written disk entry.
+            // Bypass Config.get() (stale singleton) by reading the file directly.
+            const configPath = await resolveConfigPath(directory)
             const currentStatus = await MCP.status()
             for (const name of updatedNames) {
-              if (currentStatus[name]?.status === "connected") {
-                // altimate_change start
-                log.info("reload-datamate: reconnecting", { name })
-                // altimate_change end
-                await MCP.disconnect(name)
-                await MCP.connect(name)
+              const freshEntry = await readMcpEntryFromDisk(name, configPath)
+              if (!freshEntry) {
+                log.warn("reload-datamate: fresh config entry not found on disk", { name, configPath })
+                continue
               }
+              log.info("reload-datamate: reconnecting with fresh config", {
+                name,
+                type: freshEntry.type,
+                wasConnected: currentStatus[name]?.status === "connected",
+              })
+              // MCP.add takes a config directly — no Config.get() call, no persistMcpEnabled.
+              await MCP.add(name, freshEntry)
             }
           } else {
-            // altimate_change start
-            log.info("reload-datamate: no URL changes detected")
-            // altimate_change end
+            log.info("reload-datamate: no config changes detected")
           }
 
           return c.json({ ok: true, updated })
         } catch (err) {
           const error = err instanceof Error ? err.message : String(err)
-          // altimate_change start
           log.error("reload-datamate: failed", { error })
-          // altimate_change end
           return c.json({ ok: false, error })
         }
       })

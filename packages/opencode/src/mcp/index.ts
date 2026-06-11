@@ -702,6 +702,7 @@ export namespace MCP {
   async function persistMcpEnabled(name: string, enabled: boolean): Promise<void> {
     try {
       const paths = await findAllConfigPaths(Instance.directory, Global.Path.config)
+      let found = false
       for (const p of paths) {
         const names = await listMcpInConfig(p)
         if (names.includes(name)) {
@@ -714,8 +715,16 @@ export namespace MCP {
               p,
             )
           log.info("persistMcpEnabled", { name, enabled, path: p })
+          found = true
           break
         }
+      }
+      if (!found) {
+        log.warn("persistMcpEnabled: entry not found in any config file — enabled flag not persisted", {
+          name,
+          enabled,
+          searchedPaths: paths,
+        })
       }
     } catch (err) {
       log.error("Failed to persist MCP enabled flag", { name, enabled, error: err })

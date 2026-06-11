@@ -2096,6 +2096,16 @@ export namespace SessionPrompt {
     if (/^anthropic[-_/]/.test(apiId)) return true
     return false
   }
+  //
+  // NOTE: `family` is a free-form, config-settable string on the model schema —
+  // a connection that declares `family: "claude-*"` on a non-Anthropic gateway
+  // will classify as Anthropic-like and SKIP the hoist, which reintroduces the
+  // #887 refusal on that backend. This is a routing-trust input, not an
+  // escalation vector (whoever sets the model config already controls the
+  // prompt), but operators adding gateway models should set `family` correctly.
+  //
+  // Exported for testing — the hoist/classification contract is exercised
+  // behaviorally in test/session/plan-layer-e2e.test.ts.
   // altimate_change end
 
   // altimate_change start — return the trusted reminder parts insertReminders just appended
@@ -2106,6 +2116,9 @@ export namespace SessionPrompt {
   // file content as synthetic text), so it is not safe to infer trust from `synthetic`
   // alone. See #888 review feedback.
   type InsertRemindersResult = { messages: MessageV2.WithParts[]; trustedReminderParts: MessageV2.TextPart[] }
+  // Exported for testing — the trust boundary (only self-injected reminders land
+  // in `trustedReminderParts`, never user/file/resource content) is verified
+  // behaviorally in test/session/plan-layer-e2e.test.ts.
   export async function insertReminders(input: {
     messages: MessageV2.WithParts[]
     agent: Agent.Info
