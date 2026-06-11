@@ -430,7 +430,16 @@ export const RunCommand = cmd({
       message = [extractedParts.join("\n\n"), message].filter(Boolean).join("\n\n")
     }
 
-    if (!process.stdin.isTTY) message += "\n" + (await Bun.stdin.text())
+    // Only read stdin when no positional message was provided. The original
+    // unconditional `!isTTY` guard matched a non-TTY parent process even when
+    // it inherited (but never closed) stdin — `Bun.stdin.text()` would then
+    // wait forever for an EOF that never arrives, producing a silent 0% CPU
+    // hang for any subprocess / CI / agent caller that passed a positional
+    // message. Positional-overrides-stdin matches conventional CLI semantics;
+    // pipe-only invocations without a positional arg still work as before.
+    if (!process.stdin.isTTY && message.trim().length === 0) {
+      message += "\n" + (await Bun.stdin.text())
+    }
 
     if (message.trim().length === 0 && !args.command) {
       UI.error("You must provide a message or a command")
