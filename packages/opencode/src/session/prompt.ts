@@ -2602,6 +2602,108 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     }
     const agentName = command.agent ?? input.agent ?? (await Agent.defaultAgent())
 
+    // altimate_change start — /mcps enable/disable: direct handler bypasses LLM
+    if (input.command === "mcps") {
+      const trimmed = input.arguments.trim()
+
+      if (!trimmed) {
+        // /mcps (no args): return actual runtime status directly
+        const userMsg = await createUserMessage({
+          sessionID: input.sessionID,
+          messageID: input.messageID,
+          parts: [{ type: "text", text: "/mcps" }],
+        })
+        const model = await lastModel(input.sessionID)
+        const statusMap = await MCP.status()
+        const rows = Object.entries(statusMap)
+          .map(([srv, s]) => {
+            const icon = s.status === "connected" ? "\u2713" : "\u25cb"
+            const label =
+              s.status === "failed"
+                ? icon + " " + s.status + " (" + (s as any).error + ")"
+                : icon + " " + s.status
+            return "| `" + srv + "` | " + label + " |"
+          })
+          .join("\n")
+        const responseText = rows
+          ? "MCP servers:\n\n| Server | Status |\n|---|---|\n" + rows
+          : "No MCP servers configured."
+
+        const now = Date.now()
+        const assistantMsg: MessageV2.Assistant = {
+          id: MessageID.ascending(), role: "assistant", sessionID: input.sessionID,
+          parentID: userMsg.info.id, modelID: model.modelID, providerID: model.providerID,
+          mode: "builder", agent: "builder",
+          path: { cwd: Instance.directory, root: Instance.worktree },
+          cost: 0, tokens: { total: 0, input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          finish: "stop", time: { created: now, completed: now },
+        }
+        await Session.updateMessage(assistantMsg)
+        const textPart: MessageV2.TextPart = {
+          id: PartID.ascending(), sessionID: input.sessionID, messageID: assistantMsg.id,
+          type: "text", text: responseText, time: { start: now, end: now },
+        }
+        await Session.updatePart(textPart)
+        Bus.publish(Command.Event.Executed, {
+          name: input.command, sessionID: input.sessionID,
+          arguments: input.arguments, messageID: assistantMsg.id,
+        })
+        return { info: assistantMsg, parts: [textPart] } as MessageV2.WithParts
+      }
+
+      const subMatch = trimmed.match(/^(enable|disable)\s+(\S+)/)
+      if (subMatch) {
+        const [, subCmd, name] = subMatch
+        const isEnable = subCmd === "enable"
+
+        const userMsg = await createUserMessage({
+          sessionID: input.sessionID,
+          messageID: input.messageID,
+          parts: [{ type: "text", text: `/mcps ${subCmd} ${name}` }],
+        })
+
+        const model = await lastModel(input.sessionID)
+        let responseText: string
+
+        if (isEnable) {
+          await MCP.connect(name)
+          const statusMap = await MCP.status()
+          const entry = statusMap[name]
+          if (entry?.status === "connected") {
+            responseText = `MCP server **${name}** enabled. Status: connected.`
+          } else {
+            responseText = `Attempted to enable MCP server **${name}**. Status: ${entry?.status ?? "unknown"}${(entry as any)?.error ? " — " + (entry as any).error : "."}.`
+          }
+        } else {
+          await MCP.disconnect(name)
+          responseText = `MCP server **${name}** disabled.`
+        }
+
+        const now = Date.now()
+        const assistantMsg: MessageV2.Assistant = {
+          id: MessageID.ascending(), role: "assistant", sessionID: input.sessionID,
+          parentID: userMsg.info.id, modelID: model.modelID, providerID: model.providerID,
+          mode: "builder", agent: "builder",
+          path: { cwd: Instance.directory, root: Instance.worktree },
+          cost: 0, tokens: { total: 0, input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          finish: "stop", time: { created: now, completed: now },
+        }
+        await Session.updateMessage(assistantMsg)
+        const textPart: MessageV2.TextPart = {
+          id: PartID.ascending(), sessionID: input.sessionID, messageID: assistantMsg.id,
+          type: "text", text: responseText, time: { start: now, end: now },
+        }
+        await Session.updatePart(textPart)
+        Bus.publish(Command.Event.Executed, {
+          name: input.command, sessionID: input.sessionID,
+          arguments: input.arguments, messageID: assistantMsg.id,
+        })
+        return { info: assistantMsg, parts: [textPart] } as MessageV2.WithParts
+      }
+    }
+    // altimate_change end
+
+
     const raw = input.arguments.match(argsRegex) ?? []
     const args = raw.map((arg) => arg.replace(quoteTrimRegex, ""))
 
