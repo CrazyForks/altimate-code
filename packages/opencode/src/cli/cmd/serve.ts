@@ -2,11 +2,11 @@ import { Server } from "../../server/server"
 import { cmd } from "./cmd"
 import { withNetworkOptions, resolveNetworkOptions } from "../network"
 import { Flag } from "../../flag/flag"
-import { Workspace } from "../../control-plane/workspace"
-import { Project } from "../../project/project"
-import { Installation } from "../../installation"
 // altimate_change start — trace: session tracing in headless serve
 import { subscribeTraceConsumer } from "../../altimate/observability/trace-consumer"
+// altimate_change end
+// altimate_change start — self-update on headless serve startup
+import { scheduleStartupUpgradeCheck } from "./serve-upgrade-check"
 // altimate_change end
 
 export const ServeCommand = cmd({
@@ -34,6 +34,17 @@ export const ServeCommand = cmd({
     // location — trace files always go to the configured tracing dir
     // (`tracing.dir`, default ~/.local/share/altimate-code/traces/).
     const traceSub = subscribeTraceConsumer({ directory: process.cwd() })
+
+    // altimate_change start — self-update on startup
+    // A headless `serve` is how the VS Code / Cursor extension runs
+    // altimate-code, and it is the ONLY long-running entrypoint that never
+    // checked for updates: auto-update was wired solely into the TUI bootstrap
+    // (cli/cmd/tui/thread.ts → worker.checkUpgrade → upgrade()). As a result the
+    // extension fleet froze at whatever version was installed at onboarding.
+    // Fire the missing trigger here; see serve-upgrade-check.ts for why it runs
+    // in (but never disposes) the process.cwd() instance.
+    scheduleStartupUpgradeCheck()
+    // altimate_change end
 
     // Finalize traces on shutdown. `serve` blocks forever on the promise below
     // and otherwise dies abruptly on signal, so without these handlers the
