@@ -19,6 +19,13 @@ export const ServeCommand = cmd({
       console.log("Warning: OPENCODE_SERVER_PASSWORD is not set; server is unsecured.")
     }
     const opts = await resolveNetworkOptions(args)
+    // altimate_change start — sync datamate URL from IDE MCP config on serve startup.
+    // When a VS Code/Cursor window restarts, the extension picks a new local port and
+    // rewrites its MCP config. Re-reading it here keeps altimate-code.json in sync
+    // without requiring any user action.
+    const { syncDatamateUrlFromVscodeMcp } = await import("../../altimate/datamate-transport")
+    await syncDatamateUrlFromVscodeMcp(process.cwd())
+    // altimate_change end
     const server = await Server.listen(opts)
     console.log(`altimate-code server listening on http://${server.hostname}:${server.port}`)
     // altimate_change end
