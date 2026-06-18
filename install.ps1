@@ -3,7 +3,7 @@
 #
 # Mirrors ./install (the bash installer for macOS/Linux): it downloads the
 # Bun-compiled standalone executable (altimate.exe) from GitHub releases and
-# drops it in %USERPROFILE%\.altimate\bin — it does NOT depend on npm/Node.
+# drops it in %USERPROFILE%\.altimate\bin - it does NOT depend on npm/Node.
 #
 # Usage:
 #   powershell -c "irm https://www.altimate.sh/install.ps1 | iex"
@@ -64,8 +64,8 @@ if ($Help) {
   exit 0
 }
 
-# A single P/Invoke type carries both native calls we need — the AVX2 CPU probe
-# (kernel32) and the PATH-change broadcast (user32) — so we Add-Type once instead
+# A single P/Invoke type carries both native calls we need - the AVX2 CPU probe
+# (kernel32) and the PATH-change broadcast (user32) - so we Add-Type once instead
 # of compiling a throwaway type per call site.
 function Initialize-Native {
   if (-not ("Win32.AltimateNative" -as [type])) {
@@ -75,6 +75,46 @@ function Initialize-Native {
 public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg, UIntPtr wParam, string lParam, uint fuFlags, uint uTimeout, out UIntPtr lpdwResult);
 "@
   }
+}
+
+# Verify a downloaded archive against the release's checksums.txt.
+# Hard-fails (throws) on a real mismatch. Soft-skips when checksums.txt can't be
+# fetched (older release, network blip) or has no entry for this file, so pinned
+# installs of pre-checksums releases keep working.
+function Test-Checksum {
+  param([string]$Path, [string]$Name, [string]$ChecksumsUrl)
+
+  $sums = $null
+  try {
+    $resp = Invoke-WebRequest -Uri $ChecksumsUrl -UseBasicParsing
+    # On Windows PowerShell 5.1, .Content is a Byte[] (not a String) whenever the
+    # response isn't a text-recognized content-type - and GitHub serves release
+    # assets as application/octet-stream. A raw Byte[] coerces to a "49 50 51 ..."
+    # decimal string when split, so verification would silently soft-skip on the
+    # default Windows shell. Decode the bytes explicitly to recover real text.
+    if ($resp.Content -is [byte[]]) {
+      $sums = [System.Text.Encoding]::UTF8.GetString($resp.Content)
+    } else {
+      $sums = $resp.Content
+    }
+  } catch {
+    Write-Muted "Skipping integrity check - checksums.txt not published for this release"
+    return
+  }
+
+  # checksums.txt is sha256sum format: "<hash>  <filename>" (one entry per line).
+  $line = ($sums -split "`n") | Where-Object { $_ -match "\s\*?$([regex]::Escape($Name))\s*$" } | Select-Object -First 1
+  if (-not $line) {
+    Write-Muted "Skipping integrity check - no checksum entry for $Name"
+    return
+  }
+
+  $expected = (($line -split '\s+')[0]).ToLower()
+  $actual = (Get-FileHash -Path $Path -Algorithm SHA256).Hash.ToLower()
+  if ($actual -ne $expected) {
+    throw "Checksum mismatch for $Name (expected $expected, got $actual)"
+  }
+  Write-Muted "Verified $Name (sha256)"
 }
 
 # ---------------------------------------------------------------------------
@@ -101,14 +141,14 @@ function Test-Avx2 {
     Initialize-Native
     return [bool][Win32.AltimateNative]::IsProcessorFeaturePresent(40)
   } catch {
-    # If detection fails, assume no AVX2 and fall back to the baseline build —
+    # If detection fails, assume no AVX2 and fall back to the baseline build -
     # the baseline binary runs everywhere, an AVX2 binary on a non-AVX2 CPU crashes.
     return $false
   }
 }
 
 # ---------------------------------------------------------------------------
-# Resolve version (once) — latest tag or a pinned release
+# Resolve version (once) - latest tag or a pinned release
 # ---------------------------------------------------------------------------
 if ([string]::IsNullOrWhiteSpace($Version)) {
   $useLatest = $true
@@ -170,11 +210,19 @@ function Install-Target {
   if ($Baseline) { $target = "$target-baseline" }
   $filename = "$App-$target.zip"
 
-  if ($useLatest) {
-    $url = "https://github.com/AltimateAI/altimate-code/releases/latest/download/$filename"
+  # Pin BOTH the archive and checksums.txt to the same resolved release. The
+  # mutable releases/latest/download URL would fetch the two assets in separate
+  # requests, so a release published mid-install could hand back an archive from
+  # one release and checksums from another -> a spurious hard-fail. We resolve
+  # the concrete tag up front ($specificVersion), so pin to it. Only fall back
+  # to the mutable latest/ URL when the version genuinely couldn't be resolved.
+  if ($useLatest -and -not $specificVersion) {
+    $base = "https://github.com/AltimateAI/altimate-code/releases/latest/download"
   } else {
-    $url = "https://github.com/AltimateAI/altimate-code/releases/download/v$specificVersion/$filename"
+    $base = "https://github.com/AltimateAI/altimate-code/releases/download/v$specificVersion"
   }
+  $url = "$base/$filename"
+  $checksumsUrl = "$base/checksums.txt"
 
   Write-Host ""
   Write-Host "Installing $App version: $specificVersion"
@@ -184,12 +232,6 @@ function Install-Target {
   $zipPath = Join-Path $tmpDir $filename
 
   try {
-    # NOTE: integrity verification (SHA256/signature) of the archive is
-    # intentionally deferred to match the bash installer's posture — both rely
-    # on HTTPS from github.com release assets. Releases do not currently publish
-    # a checksums file; adding one + verifying it in both installers is tracked
-    # as a follow-up. See PR #930 discussion.
-    #
     # Prefer curl.exe (ships with Windows 10 1803+) for a fast download with
     # --fail so HTTP errors don't write an error page to disk; fall back to
     # Invoke-WebRequest where curl.exe is unavailable.
@@ -201,6 +243,10 @@ function Install-Target {
       Invoke-WebRequest -Uri $url -OutFile $zipPath -UseBasicParsing
     }
 
+    # Integrity check: hard-fail on mismatch; skip (with notice) when the release
+    # predates checksums.txt or the fetch fails, so older pinned installs still work.
+    Test-Checksum -Path $zipPath -Name $filename -ChecksumsUrl $checksumsUrl
+
     Expand-Archive -Path $zipPath -DestinationPath $tmpDir -Force
     $extracted = Join-Path $tmpDir $BinaryName
     if (-not (Test-Path $extracted)) {
@@ -210,7 +256,7 @@ function Install-Target {
 
     # Windows locks a running .exe, so `altimate upgrade` (which re-runs this
     # installer) can't overwrite the binary that is currently executing. Windows
-    # *does* allow renaming a running exe — move the old one aside first, then
+    # *does* allow renaming a running exe - move the old one aside first, then
     # drop the new one in. Best-effort cleanup of the stale copy afterward.
     if (Test-Path $InstalledBinary) {
       $stale = "$InstalledBinary.old"
@@ -237,7 +283,7 @@ if (-not $needsBaseline) {
   & $InstalledBinary --version *> $null
   $code = $LASTEXITCODE
   if ($code -eq 3221225501 -or $code -eq 1073741795 -or $code -eq -1073741795) {
-    Write-Muted "CPU lacks AVX2 — reinstalling the baseline build"
+    Write-Muted "CPU lacks AVX2 - reinstalling the baseline build"
     Install-Target -Baseline:$true
   }
 }
