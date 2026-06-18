@@ -97,7 +97,9 @@ export const QuestionTool = Tool.define("question", {
 
     return {
       title: `Asked ${params.questions.length} question${params.questions.length > 1 ? "s" : ""}`,
+      // altimate_change start — emit mode-aware output (computed above) instead of the upstream fixed string
       output,
+      // altimate_change end
       metadata: {
         answers,
       },

@@ -54,7 +54,9 @@ import { VALID_ACCOUNT_RE } from "../altimate/plugin/snowflake"
 import { isValidDatabricksHost } from "../altimate/plugin/databricks"
 // altimate_change end
 
+// altimate_change start — raise SSE chunk-timeout watchdog 2min→5min (#844) for slow warehouse/LLM streams
 const DEFAULT_CHUNK_TIMEOUT = 300_000
+// altimate_change end
 
 export namespace Provider {
   const log = Log.create({ service: "provider" })
