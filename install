@@ -205,11 +205,26 @@ else
 
     if [ -z "$requested_version" ]; then
         url="https://github.com/AltimateAI/altimate-code/releases/latest/download/$filename"
-        specific_version=$(curl -s https://api.github.com/repos/AltimateAI/altimate-code/releases/latest | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
-
-        if [[ $? -ne 0 || -z "$specific_version" ]]; then
-            echo -e "${RED}Failed to fetch version information${NC}"
-            exit 1
+        # The download above resolves "latest" server-side, so this API call only
+        # feeds the version display and the already-installed short-circuit. A
+        # transient api.github.com blip or the unauthenticated rate limit
+        # (60/hr/IP) must NOT abort the install — retry a few times with --fail
+        # (so a 504 retries instead of parsing an error body), then proceed
+        # without the version string.
+        #
+        # --max-time 10 bounds a dead-air socket (curl's default has no transfer
+        # cap), and the trailing `|| true` is load-bearing: under `set -euo
+        # pipefail`, a failing `curl --fail` propagates through the pipeline and
+        # the assignment, so `set -e` would abort the script before the loop can
+        # retry or degrade. `|| true` lets the failure resolve to an empty string.
+        specific_version=""
+        for attempt in 1 2 3; do
+            specific_version=$(curl -fsSL --max-time 10 https://api.github.com/repos/AltimateAI/altimate-code/releases/latest 2>/dev/null | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p' || true)
+            [ -n "$specific_version" ] && break
+            [ "$attempt" -lt 3 ] && sleep "$attempt"
+        done
+        if [ -z "$specific_version" ]; then
+            echo -e "${MUTED}Could not resolve the latest version from GitHub (API unavailable) — installing the latest release anyway.${NC}"
         fi
     else
         # Strip leading 'v' if present
@@ -255,11 +270,14 @@ check_version() {
     if [ -n "$probe" ]; then
         installed_version=$("$probe" --version 2>/dev/null || echo "")
 
-        if [[ "$installed_version" != "$specific_version" ]]; then
-            print_message info "${MUTED}Installed version: ${NC}$installed_version."
-        else
+        # Only short-circuit on a real version match. When the latest version
+        # couldn't be resolved (API unavailable → specific_version empty), never
+        # treat an empty==empty as "already installed" — fall through and reinstall.
+        if [ -n "$specific_version" ] && [[ "$installed_version" == "$specific_version" ]]; then
             print_message info "${MUTED}Version ${NC}$specific_version${MUTED} already installed${NC}"
             exit 0
+        elif [ -n "$installed_version" ]; then
+            print_message info "${MUTED}Installed version: ${NC}$installed_version."
         fi
     fi
 }
@@ -410,7 +428,7 @@ verify_checksum() {
 }
 
 download_and_install() {
-    print_message info "\n${MUTED}Installing ${NC}altimate ${MUTED}version: ${NC}$specific_version"
+    print_message info "\n${MUTED}Installing ${NC}altimate ${MUTED}version: ${NC}${specific_version:-latest}"
     local tmp_dir="${TMPDIR:-/tmp}/altimate_install_$$"
     mkdir -p "$tmp_dir"
 

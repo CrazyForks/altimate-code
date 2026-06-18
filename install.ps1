@@ -152,16 +152,32 @@ function Test-Avx2 {
 # ---------------------------------------------------------------------------
 if ([string]::IsNullOrWhiteSpace($Version)) {
   $useLatest = $true
-  try {
-    $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/AltimateAI/altimate-code/releases/latest" -Headers @{ "User-Agent" = "altimate-install" }
-    $specificVersion = ($rel.tag_name -replace '^v', '')
-  } catch {
-    Write-Err "Failed to fetch version information"
-    exit 1
+  # The download below resolves "latest" server-side (releases/latest/download),
+  # so this API call only feeds the version-string display and the
+  # already-installed short-circuit. A transient api.github.com blip or the
+  # unauthenticated rate limit (60/hr/IP) must NOT abort the install - retry a
+  # few times, then proceed without the version string.
+  $specificVersion = ""
+  for ($attempt = 1; $attempt -le 3; $attempt++) {
+    try {
+      # -TimeoutSec 10 bounds a stuck socket: Invoke-RestMethod defaults to 100s
+      # on PS 5.1 and is effectively unbounded on PS 7+, so without it three
+      # back-to-back retries on dead air could freeze for minutes.
+      $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/AltimateAI/altimate-code/releases/latest" -Headers @{ "User-Agent" = "altimate-install" } -TimeoutSec 10
+      $specificVersion = ($rel.tag_name -replace '^v', '')
+      if (-not [string]::IsNullOrWhiteSpace($specificVersion)) { break }
+    } catch {}
+    if ($attempt -lt 3) { Start-Sleep -Seconds $attempt }
   }
   if ([string]::IsNullOrWhiteSpace($specificVersion)) {
-    Write-Err "Failed to fetch version information"
-    exit 1
+    Write-Muted "Could not resolve the latest version from GitHub (API unavailable) - installing the latest release anyway."
+    # Reset to $null (not ""): the already-installed short-circuit below compares
+    # $installedVersion -eq $specificVersion. If the version probe of a missing or
+    # corrupt binary also yields "", an "" -eq "" match would falsely report
+    # "already installed" and skip the reinstall. $null -eq "" is $false, so the
+    # comparison correctly falls through; the banner still shows "latest" because
+    # if ($specificVersion) treats $null as falsy.
+    $specificVersion = $null
   }
 } else {
   $useLatest = $false
@@ -225,7 +241,7 @@ function Install-Target {
   $checksumsUrl = "$base/checksums.txt"
 
   Write-Host ""
-  Write-Host "Installing $App version: $specificVersion"
+  Write-Host "Installing $App version: $(if ($specificVersion) { $specificVersion } else { 'latest' })"
 
   $tmpDir = Join-Path ([System.IO.Path]::GetTempPath()) "altimate_install_$PID"
   New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null
