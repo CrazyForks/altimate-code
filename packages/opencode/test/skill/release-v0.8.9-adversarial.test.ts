@@ -1,6 +1,7 @@
 /**
- * Adversarial tests for v0.8.8 — the 8 PRs since v0.8.7 and the pre-release
- * review fixes that ship in the same tag.
+ * Adversarial tests for v0.8.9 — covers the feature PRs that shipped in v0.8.8
+ * (#844/#937/#933/#893/#941/#930/#940/#929) and the v0.8.9 pre-release review
+ * fixes layered on top of them.
  *
  * Focus: hostile / malformed inputs against the FINAL shipping code, including
  * the Step-5 review fixes:

@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.9] - 2026-06-19
+
+### Fixed
+
+- **The non-interactive `run` guard no longer mis-handles a blank env var.** A blank/whitespace `ALTIMATE_NON_INTERACTIVE=` is now treated as unset, so it can't silently reintroduce the headless `run` hang that #937 fixed. (#937 follow-up)
+- **Session transcript boolean query flags accept the common falsey strings.** `thinking`, `toolDetails`, and `assistantMetadata` now treat `false`/`0`/`no`/`off` (case-insensitive) as false, not just the literal `"false"`. (#941 follow-up)
+- **Writing an MCP server entry refuses to clobber an unparseable config** (detected via `parse()` with an error sink, not the error-tolerant `parseTree()`), and `updatedAt` is preserved through config normalization so the datamate reconnect signal survives. (#893 follow-up)
+- **dbt error bubbling strips the full ANSI escape family** (cursor/erase sequences from progress spinners), not just SGR color codes. (#933 follow-up)
+
+### Changed
+
+- **The headless `serve` startup upgrade check is jittered** (base + random, ~1–6s) so a fleet restarting together doesn't stampede the unauthenticated GitHub releases API in the same instant. (#940 follow-up)
+
+### Internal
+
+- **Diverged upstream constants are wrapped in `altimate_change` markers** (`DEFAULT_CHUNK_TIMEOUT`, the question-tool `output` field) so they survive upstream merges. (#844, #937)
+- **Added a v0.8.9 adversarial test suite** covering the shipping code and the review fixes under hostile input (question-tool env matrix, MCP config parse-guard, startup-upgrade fail-safety + jitter).
+
+## [0.8.8] - 2026-06-19
+
+### Added
+
+- **Windows now has a one-line PowerShell installer.** `irm https://www.altimate.sh/install.ps1 | iex` downloads the standalone binary from GitHub releases (AVX2-aware, with a baseline fallback), adds it to your user `PATH`, and supports `-Version`, `-NoPathUpdate`, and `-ForceBaseline`. `altimate upgrade` uses the same path on Windows. (#930)
+- **IDE-aware datamate transport, MCP enabled-state persistence, and a `/mcps` command.** The active IDE's `mcp.json` datamate entry/URL is mirrored into `altimate-code.json` and reconnected when it changes; enabled/disabled state for MCP servers now persists to disk; `/mcps` lists and toggles servers; project `mcp.json` files are discovered recursively (project-scoped servers are discovered disabled, never auto-connected). (#893)
+- **Session transcript REST endpoint for the datamates extension.** `GET /session/:id/transcript` returns the full conversation as formatted Markdown, with `thinking`, `toolDetails`, and `assistantMetadata` query flags. (#941)
+
+### Changed
+
+- **Headless `serve` now checks for and applies updates on startup.** When `autoupdate` is unset (the default) and a supported install method is present, `serve` performs a one-shot, best-effort self-upgrade shortly after start. It never restarts the running process and can never crash `serve` (errors are swallowed). Opt out with `autoupdate: false` or `"notify"` in config, or `OPENCODE_DISABLE_AUTOUPDATE=1`. (#940)
+- **The per-chunk streaming watchdog timeout was raised from 2 minutes to 5 minutes** so slow warehouse/LLM streams are not aborted prematurely. (#844)
+
+### Fixed
+
+- **`dbt show`/`compile` failures now surface the real dbt error** instead of a generic "Could not parse", with inline SQL redacted from the message so secrets/PII don't leak into logs. (#933)
+- **The question tool no longer hangs in non-interactive contexts.** `altimate run` is detected as headless and returns "Unanswered" (letting the agent decide) rather than blocking forever; `ALTIMATE_AUTO_ANSWER=first|last|<label>` can pre-answer. (#937)
+- **Windows release archives are verified by checksum in both installers** before extraction, and latest-version resolution is more resilient to transient fetch failures. (#942, #946)
+
+### Internal
+
+- **`serve` logs the trace directory on startup** so operators can find session traces. (#929)
+- **Added a release-validation regression suite** covering the merged PRs. (#952)
+
 ## [0.8.7] - 2026-06-10
 
 ### Added
