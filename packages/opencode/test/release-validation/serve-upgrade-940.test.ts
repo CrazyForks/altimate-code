@@ -111,7 +111,7 @@ describe("PR #940 serve-upgrade-check behavior", () => {
       globalThis.setTimeout = originalSetTimeout
     })
 
-    test("returns synchronously, schedules at STARTUP_UPGRADE_DELAY_MS, and unrefs the timer", () => {
+    test("returns synchronously, schedules with jitter >= STARTUP_UPGRADE_DELAY_MS, and unrefs the timer", () => {
       const calls: Array<{ delay: number | undefined; cb: () => void }> = []
       let unrefCalled = false
 
@@ -130,7 +130,11 @@ describe("PR #940 serve-upgrade-check behavior", () => {
       // Non-blocking: returns void immediately, not a promise.
       expect(ret).toBeUndefined()
       expect(calls.length).toBe(1)
-      expect(calls[0].delay).toBe(STARTUP_UPGRADE_DELAY_MS)
+      // v0.8.8: the delay is jittered (base + random*base*5) to de-correlate a
+      // fleet-wide restart stampede. Assert it sits in the documented window
+      // [base, base*6) rather than an exact value.
+      expect(calls[0].delay).toBeGreaterThanOrEqual(STARTUP_UPGRADE_DELAY_MS)
+      expect(calls[0].delay).toBeLessThan(STARTUP_UPGRADE_DELAY_MS * 6)
       expect(unrefCalled).toBe(true)
     })
 

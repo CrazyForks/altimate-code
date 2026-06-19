@@ -246,9 +246,11 @@ describe("session transcript endpoint #941", () => {
     )
   })
 
-  // Gap 4: boolean flag coercion edge cases. Locks the CURRENT preprocess contract:
-  // only the literal "false" string yields false; "0"/"FALSE"/etc. coerce truthy.
-  test("boolean flag truthiness: thinking=0 and thinking=FALSE are currently truthy", async () => {
+  // Gap 4: boolean flag coercion edge cases. v0.8.8 broadened the preprocess so
+  // the common falsey strings ("false"/"0"/"no"/"off", case-insensitive) all map
+  // to false — not just the literal "false". So thinking=0 and thinking=FALSE now
+  // correctly suppress the reasoning section.
+  test("boolean flag falsiness: thinking=0 and thinking=FALSE suppress thinking", async () => {
     await using tmp = await tmpdir({ git: true })
     await withoutWatcher(() =>
       Instance.provide({
@@ -259,15 +261,19 @@ describe("session transcript endpoint #941", () => {
           await addAssistantMessageWithReasoning(session.id, userId, "inner thoughts")
           const app = Server.Default()
 
-          // CURRENT BEHAVIOR: preprocess only maps the exact string "false" -> false.
-          // z.coerce.boolean() turns any other non-empty string ("0","FALSE") -> true.
+          // thinking=0 / thinking=FALSE → false → no _Thinking:_ section.
           const zero = await app.request(`/session/${session.id}/transcript?thinking=0`)
           expect(zero.status).toBe(200)
-          expect(await zero.text()).toContain("_Thinking:_")
+          expect(await zero.text()).not.toContain("_Thinking:_")
 
           const upperFalse = await app.request(`/session/${session.id}/transcript?thinking=FALSE`)
           expect(upperFalse.status).toBe(200)
-          expect(await upperFalse.text()).toContain("_Thinking:_")
+          expect(await upperFalse.text()).not.toContain("_Thinking:_")
+
+          // Sanity: thinking=true still includes it.
+          const on = await app.request(`/session/${session.id}/transcript?thinking=true`)
+          expect(on.status).toBe(200)
+          expect(await on.text()).toContain("_Thinking:_")
 
           await Session.remove(session.id)
         },

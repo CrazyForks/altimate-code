@@ -38,6 +38,14 @@ export async function addMcpToConfig(name: string, mcpConfig: Config.Mcp, config
     text = await Filesystem.readText(configPath)
   }
 
+  // Guard: refuse to overwrite a config whose JSON/JSONC we cannot parse.
+  // jsonc-parser's modify() is error-tolerant and would best-effort clobber a
+  // recoverable file; the read helpers (removeMcpFromConfig/listMcpInConfig)
+  // already bail on a parse failure, so mirror that on the write path.
+  if (text.trim() && !parseTree(text)) {
+    throw new Error(`Refusing to write MCP config: ${configPath} is not valid JSON/JSONC`)
+  }
+
   const edits = modify(text, ["mcp", name], mcpConfig, {
     formattingOptions: { tabSize: 2, insertSpaces: true },
   })

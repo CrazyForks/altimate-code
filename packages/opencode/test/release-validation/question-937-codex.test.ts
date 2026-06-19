@@ -330,13 +330,16 @@ describe("release validation PR #937 question tool output contract", () => {
 })
 
 describe("release validation PR #937 source-level env plumbing", () => {
-  test("run command auto-sets ALTIMATE_NON_INTERACTIVE only for local run when unset", async () => {
+  test("run command auto-sets ALTIMATE_NON_INTERACTIVE for local run when unset or blank", async () => {
     const source = await Bun.file(new URL("../../src/cli/cmd/run.ts", import.meta.url)).text()
 
-    expect(source).toContain('if (!args.attach && process.env["ALTIMATE_NON_INTERACTIVE"] === undefined) {')
+    // v0.8.8: guard treats a blank/whitespace value as unset (.trim()) so a stray
+    // `export ALTIMATE_NON_INTERACTIVE=` does not silently reintroduce the run hang.
+    expect(source).toContain('if (!args.attach && !process.env["ALTIMATE_NON_INTERACTIVE"]?.trim()) {')
     expect(source).toContain('process.env["ALTIMATE_NON_INTERACTIVE"] = "1"')
     expect(source).toContain("Users can opt out by exporting ALTIMATE_NON_INTERACTIVE=0")
-    expect(source).not.toContain('process.env["ALTIMATE_NON_INTERACTIVE"] ||= "1"')
+    // The old strict `=== undefined` guard (blank value footgun) must be gone.
+    expect(source).not.toContain('process.env["ALTIMATE_NON_INTERACTIVE"] === undefined')
   })
 
   test("run command guards Bun.stdin.text() behind an existing non-TTY stdin", async () => {

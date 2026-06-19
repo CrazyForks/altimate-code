@@ -63,6 +63,11 @@ export async function runStartupUpgradeCheck(deps: StartupUpgradeDeps = defaultD
 
 /** Schedules {@link runStartupUpgradeCheck} after a short settle delay; non-blocking. */
 export function scheduleStartupUpgradeCheck(): void {
-  setTimeout(() => void runStartupUpgradeCheck(), STARTUP_UPGRADE_DELAY_MS).unref?.()
+  // Jitter the delay so a fleet of servers restarting in the same window (rolling
+  // deploy, node drain, mass IDE update) doesn't stampede the unauthenticated
+  // GitHub releases API (60 req/hr/IP) in the same instant. Spreads checks over
+  // ~1–6s; de-correlates the spike without changing single-host behavior.
+  const jitter = Math.floor(Math.random() * STARTUP_UPGRADE_DELAY_MS * 5)
+  setTimeout(() => void runStartupUpgradeCheck(), STARTUP_UPGRADE_DELAY_MS + jitter).unref?.()
 }
 // altimate_change end

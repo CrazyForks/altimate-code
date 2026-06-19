@@ -1444,12 +1444,17 @@ export namespace Config {
           if (entry.environment && typeof entry.environment === "object") transformed.environment = entry.environment
           if (typeof entry.timeout === "number") transformed.timeout = entry.timeout
           if (typeof entry.enabled === "boolean") transformed.enabled = entry.enabled
+          // Preserve updatedAt — the datamate sync change-signal field; the
+          // McpLocal/McpRemote schemas accept it and dropping it on normalize
+          // would discard the reconnect timestamp on this load path.
+          if (typeof entry.updatedAt === "string") transformed.updatedAt = entry.updatedAt
           servers[name] = transformed
         } else if (entry.url && typeof entry.url === "string") {
           const transformed: Record<string, any> = { type: "remote", url: entry.url }
           if (entry.headers && typeof entry.headers === "object") transformed.headers = entry.headers
           if (typeof entry.timeout === "number") transformed.timeout = entry.timeout
           if (typeof entry.enabled === "boolean") transformed.enabled = entry.enabled
+          if (typeof entry.updatedAt === "string") transformed.updatedAt = entry.updatedAt
           servers[name] = transformed
         }
       }

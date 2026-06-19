@@ -166,7 +166,10 @@ function looksLikeRowData(val: unknown): val is Record<string, unknown>[] {
 
 /** Strip ANSI escape codes from text. */
 function stripAnsi(text: string): string {
-  return text.replace(/\x1b\[[0-9;]*m/g, "")
+  // General CSI form: ESC [ <params> <intermediates> <final>. dbt output can
+  // carry more than SGR color codes (e.g. cursor-move/erase sequences from
+  // progress spinners), so match the whole CSI family, not just `...m`.
+  return text.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "")
 }
 
 /**

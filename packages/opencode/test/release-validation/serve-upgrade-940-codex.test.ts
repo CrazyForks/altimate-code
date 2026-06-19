@@ -140,7 +140,15 @@ describe("PR #940 serve startup upgrade trigger", () => {
       ;(globalThis as any).setTimeout = originalSetTimeout
     }
 
-    expect(calls).toEqual([{ delay: STARTUP_UPGRADE_DELAY_MS, unrefCalled: true, callbackType: "function" }])
+    // v0.8.8: the settle delay is jittered (base + random*base*5) so a fleet
+    // restarting together does not stampede the GitHub releases API at once.
+    // Exactly one timer is scheduled, unref'd, with a function callback, and its
+    // delay sits in the documented [base, base*6) window.
+    expect(calls.length).toBe(1)
+    expect(calls[0].unrefCalled).toBe(true)
+    expect(calls[0].callbackType).toBe("function")
+    expect(calls[0].delay).toBeGreaterThanOrEqual(STARTUP_UPGRADE_DELAY_MS)
+    expect(calls[0].delay).toBeLessThan(STARTUP_UPGRADE_DELAY_MS * 6)
     expect(STARTUP_UPGRADE_DELAY_MS).toBe(1000)
   })
 

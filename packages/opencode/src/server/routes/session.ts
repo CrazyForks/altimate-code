@@ -491,9 +491,9 @@ export const SessionRoutes = lazy(() =>
       validator(
         "query",
         z.object({
-          thinking: z.preprocess(v => v === "false" ? false : v, z.coerce.boolean()).optional().default(false).meta({ description: "Include reasoning/thinking parts" }),
-          toolDetails: z.preprocess(v => v === "false" ? false : v, z.coerce.boolean()).optional().default(false).meta({ description: "Include tool input/output details" }),
-          assistantMetadata: z.preprocess(v => v === "false" ? false : v, z.coerce.boolean()).optional().default(false).meta({ description: "Include assistant model/timing metadata" }),
+          thinking: z.preprocess(v => (/^(false|0|no|off)$/i.test(String(v)) ? false : v), z.coerce.boolean()).optional().default(false).meta({ description: "Include reasoning/thinking parts" }),
+          toolDetails: z.preprocess(v => (/^(false|0|no|off)$/i.test(String(v)) ? false : v), z.coerce.boolean()).optional().default(false).meta({ description: "Include tool input/output details" }),
+          assistantMetadata: z.preprocess(v => (/^(false|0|no|off)$/i.test(String(v)) ? false : v), z.coerce.boolean()).optional().default(false).meta({ description: "Include assistant model/timing metadata" }),
         }),
       ),
       async (c) => {

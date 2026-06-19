@@ -386,8 +386,10 @@ export const RunCommand = cmd({
     // strips ALTIMATE_NON_INTERACTIVE from mergedEnv to prevent that leak.
     //
     // Users can opt out by exporting ALTIMATE_NON_INTERACTIVE=0 before
-    // launching `run`.
-    if (!args.attach && process.env["ALTIMATE_NON_INTERACTIVE"] === undefined) {
+    // launching `run`. A blank/whitespace value is treated as unset — otherwise
+    // a stray `export ALTIMATE_NON_INTERACTIVE=` would silently reintroduce the
+    // exact headless hang this block exists to prevent.
+    if (!args.attach && !process.env["ALTIMATE_NON_INTERACTIVE"]?.trim()) {
       process.env["ALTIMATE_NON_INTERACTIVE"] = "1"
     }
     // altimate_change end
