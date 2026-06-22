@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.10] - 2026-06-22
+
+### Fixed
+
+- **The daily date no longer invalidates the cached system prompt across midnight.** The volatile "Today's date" line was the first entry in the cache-controlled system prefix, so a session left open across midnight within the cache TTL dropped its entire cached system prompt and paid to rebuild it. The date now rides the trailing user message — off the long-lived system-prefix cache and onto the rolling per-turn breakpoint that is rewritten every turn anyway — so the cached system bytes stay date-invariant and the agent still receives today's date each turn. (#950, fixes #949)
+
+### Internal
+
+- **The Windows installer Pester suite is deterministic on the updated `windows-latest` runner.** The harness now applies `PROCESSOR_*` overrides inside the child `pwsh` session instead of relying on Process-scope inheritance, which the new runner image re-initialized for the loader-managed `PROCESSOR_ARCHITECTURE` (it arrived blank → a spurious `Unsupported OS/Arch` failure). Test-only: the shipped `install.ps1` and the v0.8.9 binaries are unaffected — real users always have a populated `PROCESSOR_ARCHITECTURE`. (#959, fixes #958)
+- **Added a v0.8.10 adversarial + coverage suite** that closes the prior test gap on the date fix — it exercises the trailing-user-message path (date reaches the model, only the last user turn is tagged, no accumulation across turns, survives an all-ignored user turn) plus a static regression guard on the Windows installer harness. (#950, #959)
+
 ## [0.8.9] - 2026-06-19
 
 ### Fixed
