@@ -985,7 +985,10 @@ export namespace SessionPrompt {
       await Plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 
       // altimate_change start — upstream_fix: carry the date in the trailing user message
-      // so it stays out of the cache-controlled system prefix (see session/system.ts).
+      // so it stays out of the long-lived, cache-controlled system prefix (see
+      // session/system.ts). It lands on the rolling last-user-turn cacheControl breakpoint,
+      // which applyCaching() rewrites every turn regardless — so steady-state cache cost is
+      // unchanged; we only stop midnight from busting the expensive system-prefix cache.
       const lastUserForDate = msgs.findLast((m) => m.info.role === "user")
       if (lastUserForDate) {
         lastUserForDate.parts = [

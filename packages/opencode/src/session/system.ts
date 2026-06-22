@@ -79,7 +79,10 @@ export namespace SystemPrompt {
         // The date changes daily but environment() is the first entry in the system[]
         // array, which applyCaching() marks with cacheControl. A session crossing midnight
         // within the cache TTL would otherwise invalidate the whole system prefix. The date
-        // is appended to the trailing user message instead (see session/prompt.ts).
+        // is carried on the trailing user message instead (see session/prompt.ts) — i.e. off
+        // the long-lived system-prefix cache and onto the rolling last-user-turn breakpoint,
+        // which applyCaching() rewrites every turn regardless. Net: the expensive system
+        // cache stays date-invariant; the cheap per-turn breakpoint is unaffected.
         // altimate_change end
         `</env>`,
         `<directories>`,
